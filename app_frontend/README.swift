@@ -18,6 +18,46 @@ swift main.swift            # or: swiftc -O main.swift -o annie-api && ./annie-a
 Open **http://127.0.0.1:8000** — the backend serves the front end directly,
 so there's nothing else to start and no CORS setup needed.
 
+## Run the SwiftUI app (Mac)
+
+With the backend running (above), in a second terminal:
+
+```bash
+cd app_frontend
+swift run AnnieApp
+```
+
+The header chip reads "Live · backend connected" when it reaches the backend and
+"Demo data · backend offline" otherwise. `ANNIE_API_URL=http://host:8000 swift run
+AnnieApp` points it at a different backend.
+
+## Run it on an iPhone
+
+The same `Sources/AnnieApp` code builds for iOS through `Annie.xcodeproj`.
+The phone talks to the backend on your Mac over Wi-Fi, so both must be on the
+same network.
+
+1. Start the backend on the Mac (`cd backend && swift main.swift`). It listens
+   on all interfaces. Find the Mac's address with `ipconfig getifaddr en0`.
+2. `open Annie.xcodeproj`, then pick your iPhone (plugged in, Developer Mode on
+   under Settings > Privacy & Security) as the run destination.
+3. Signing: select the *Annie* target > Signing & Capabilities > choose your
+   Team (a free Apple ID works). If the bundle ID is taken, change it. To keep
+   this out of git, put `DEVELOPMENT_TEAM = <id>` and
+   `PRODUCT_BUNDLE_IDENTIFIER = com.you.annie` in `app_frontend/Local.xcconfig`
+   (gitignored).
+4. Press Run. Allow the "local network" prompt. Open the **Profile** tab, enter
+   the Mac's address (e.g. `192.168.1.20:8000`) under **Server**, and tap
+   Connect. The address is remembered on the phone.
+
+Free-account builds expire after 7 days and must be re-run from Xcode. Without
+a device, choose an iPhone simulator instead; it reaches the backend at the
+default `127.0.0.1:8000`.
+
+The backend speaks plain HTTP, so the app's Info.plist (`iOS/Info.plist`) allows
+local-network HTTP only. Anyone on the same Wi-Fi can reach the backend; use a
+network you trust.
+
 ## What's where
 
 - `frontend/annie-companion-app.html` — the whole UI (reminders, routine,

@@ -39,6 +39,16 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
 - Reason: Parallel owners need independent services while the app needs evidence and two-way communication to demonstrate Annie's workflow.
 - Consequences: The robot transport and execution receipts remain open integration work. Full frames remain on the trusted local body/brain network. Rich payloads still require authentication, validation, and explicit release/retention rules; changing the contract does not connect adapters automatically.
 
+## DEC-005: Native iPhone build of the SwiftUI companion app
+
+- Date: 2026-09-19.
+- Status: Adopted following explicit user choice; revisable.
+- Context: The SwiftUI companion in `app_frontend/` was macOS-only and talks to the Swift mock backend in `app_frontend/backend/`, not the FastAPI `app_backend/`. The user wanted it usable on an iPhone.
+- Decision: Build the same `app_frontend/Sources/AnnieApp` code for iOS through a hand-written `Annie.xcodeproj`, alongside the SwiftPM Mac target. The phone reaches the backend over the home Wi-Fi at an address entered in the Profile tab and stored on the device. Signing team and bundle ID stay in a gitignored `Local.xcconfig`.
+- Alternatives: A phone-friendly web page served by the backend (no signing, works on Android, but a second UI to keep in sync); both.
+- Reason: One codebase for Mac and iPhone; no machine-specific IPs or account settings in tracked files.
+- Consequences: The backend is plain HTTP with no authentication, so `iOS/Info.plist` allows local-network HTTP and anyone on the same network can reach it. Free-account installs expire after 7 days. Verified by an iOS simulator build and run against the live backend; not yet verified on a physical iPhone. This app does not use the `app_backend/` contract; unifying the two is open work.
+
 ## Future entries
 
 Use the next `DEC-NNN` ID. Include date, status, context, decision, alternatives,

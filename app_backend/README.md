@@ -67,6 +67,11 @@ resident data automatically. See [setup and evidence format](../docs/SUBCONSCIOU
 | `POST /demo/seed` | Synthetic home map, idle robot, safe bed observation |
 | `POST /demo/scenario` | `{"scenario":"fall"}`; safe_bed/fall/help/okay/timeout |
 | `WS /live` | Initial `{type:"snapshot",data:status}`, then channel envelopes |
+| `POST /api/messages` | `{"author_id":"zach","text":"…"}` → 202 `{run_id,status:"dispatched"}`; never blocks on robot_backend |
+| `GET /api/runs/{run_id}` | Run status plus its ordered event list; 404 if unknown |
+| `GET /api/thread` | The family message thread, oldest first |
+| `WS /ws/family` | Initial `{type:"snapshot",data:{thread,runs}}`, then `message`/`run_status`/`run_event` envelopes |
+| `POST /internal/events` | Called by robot_backend only; `X-Internal-Secret` header required, not the family token |
 
 When a token is configured, send `{"token":"…"}` as the first WebSocket message
 within five seconds; otherwise the initial snapshot arrives immediately. Clients
@@ -87,6 +92,48 @@ an actual trusted crop exists; the demo never fabricates photographs.
 **Stop is only a queued software request. It is not a hardware emergency stop.**
 No command response means execution succeeded. Acknowledging an event records
 family receipt; it does not resolve physical safety or cancel its check-in.
+
+## Family message relay
+
+`POST /api/messages` accepts a free-text message from one of a hardcoded
+three-person household (`jeanine`, `zach`, `ellis`; no signup, no JWT) and
+returns instantly with a run ID; the actual navigate/speak/listen/recall/speak
+sequence is dispatched to `robot_backend` in a background task. This state is
+entirely in-memory (no SQLite) and does not survive a restart — a deliberate,
+separate carve-out from the rest of this service (see DEC-006). The interface
+this dispatch call and `POST /internal/events` implement is documented in
+[contract/family_messages.md](../contract/family_messages.md).
+
+Environment variables:
+
+- `ROBOT_BACKEND_URL`: the GX10's LAN address, e.g. `http://192.168.1.42:8001`.
+  Never `localhost` — the two services run on different machines. Change this
+  one value (not code) when the network changes.
+- `ANNIE_ROBOT_DISPATCH_TIMEOUT_S`: per-attempt timeout, default 3s. Dispatch
+  makes exactly one attempt plus one retry; if both fail, the run is marked
+  `unreachable` and `POST /api/messages` has already returned regardless.
+- `ANNIE_INTERNAL_SECRET`: shared secret `robot_backend` must send as
+  `X-Internal-Secret` on `POST /internal/events`. Required — an unconfigured
+  secret rejects every request, it never falls open.
+- `ANNIE_FAMILY_MOCK_ROBOT`: `true` replaces the real dispatch with a canned
+  in-process event sequence (with delays), so the iOS app and family thread
+  can be demoed with no GX10 and no dog.
+
+For the phone/robot LAN demo, run `uvicorn` with `--host 0.0.0.0` (not
+`127.0.0.1`) and add the Mac's LAN address to `ANNIE_ALLOWED_HOSTS` — both the
+iPhone and `robot_backend`'s calls to `/internal/events` need it there, or
+`TrustedHostMiddleware` rejects them before they reach the handler.
+
+Two scripts help verify this without waiting on the actual robot:
+
+```sh
+# Prints PASS/FAIL for reaching ROBOT_BACKEND_URL in about five seconds.
+.venv/bin/python app_backend/scripts/check_robot_backend.py
+
+# Posts a message and prints each run event as it arrives (works great with
+# ANNIE_FAMILY_MOCK_ROBOT=true and no GX10 at all).
+.venv/bin/python app_backend/scripts/demo_family_message.py --text "How are you feeling today?"
+```
 
 ## Rules and memory
 

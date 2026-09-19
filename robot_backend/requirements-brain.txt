@@ -1,0 +1,3 @@
+# Shared FastAPI/httpx/Pydantic runtime; keep one resolution for both services.
+-r ../app_backend/requirements.lock
+Pillow==11.3.0

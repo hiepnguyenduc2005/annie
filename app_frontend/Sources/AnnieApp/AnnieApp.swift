@@ -14,6 +14,7 @@ import AppKit
 @main
 struct AnnieApp: App {
     @StateObject private var state = AppState()
+    @StateObject private var profiles = ProfileState()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -27,12 +28,19 @@ struct AnnieApp: App {
 
     var body: some Scene {
         WindowGroup("Annie") {
-            ContentView()
-                .environmentObject(state)
-                .task { await state.load() }
-                .onChange(of: scenePhase) { phase in
-                    if phase == .active { Task { await state.reconnectIfOffline() } }
+            Group {
+                if profiles.isRegistered {
+                    ContentView()
+                        .task { await state.load() }
+                } else {
+                    RegistrationView()
                 }
+            }
+            .environmentObject(state)
+            .environmentObject(profiles)
+            .onChange(of: scenePhase) { phase in
+                if phase == .active { Task { await state.reconnectIfOffline() } }
+            }
         }
     }
 }

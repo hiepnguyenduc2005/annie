@@ -21,6 +21,11 @@ as work progresses and record a reason for blocked work.
   - Blockers: operator has no physical controller; independent stop/recovery, moving-stop and link-loss behavior, physical map alignment, and enforced boundary are unverified. A stop acknowledgment at rest and an offline driver fix do not satisfy these checks.
   - Done when: a nearby operator can reliably stop the robot and one deliberately slow, bounded physical route completes with measured pose and execution evidence.
 
+- [ ] TASK-008: Persist profiles server-side (MongoDB was proposed) so the app and dog profiles, their kinds, and which was created first survive across devices.
+  - Requirement or context: REQ-012, DEC-008. The SwiftUI registration screens already exist and store profiles on the device.
+  - Done when: registration writes to the shared backend; the create-first rules are decided and tested; the app reads profiles back after reinstall.
+  - Dependency or blocker: the backend owner's requirements for profile storage and API shape, and which service owns it. No MongoDB is installed locally; the swift mock backend has no MongoDB driver.
+
 ## Done
 
 - [x] TASK-001: Recorded SDK launch evidence and platform/asset blockers; direct MuJoCo and trained Go1-surrogate motion run locally. Full DimOS integration remains separate.

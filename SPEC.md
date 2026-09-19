@@ -28,6 +28,7 @@ not a medical diagnosis or a replacement for emergency response.
 | REQ-011 | Rendered image and synthetic audio inference use interchangeable compute services. | Preserve capture identity and timestamps, validate model outputs, report failures, and enforce the configured shared cloud budget. |
 | REQ-009 | Optional Subconscious advisory team. | Bounded text-only agents run only when configured and opted in; no robot, alert, or messaging authority; provider failure is tested with mocks. |
 | REQ-010 | Asynchronous family message relay to the resident, with live progress. | Posting a message returns a run ID immediately without waiting on the robot; an unreachable robot and normal progress both surface as run events, never a blocked request or a 500; connected family clients see live thread and run updates over WebSocket. |
+| REQ-012 | SwiftUI app registers an app user and a dog user profile and records which was created first. | An app user registering creates both profiles, linked; a dog user can register alone; blank, over-50-character, and repeat registrations are rejected. Profiles are stored on the device only; server-side storage, cross-device pairing, and who may create whom remain open (DEC-008). |
 
 The rule uses known floor/chair locations. Unlike the source's literal
 `location != bed`, unknown location requires more evidence. Confidence

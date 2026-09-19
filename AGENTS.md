@@ -27,6 +27,10 @@
 
 ## Engineering and collaboration
 
+- Prefer existing open-source implementations, simulators, datasets, and suitable public internet assets over rebuilding them. Search and reuse them proactively when they improve the task.
+- Routine dependency installation, public asset downloads, reversible development, and local experiments within the requested scope do not need repeated permission. Make progress without asking the user to approve ordinary implementation choices.
+- Keep source URLs, revisions, and available license/attribution information with imported assets so the separate compliance team can review provenance. Do not block routine implementation on speculative compliance questions; report concrete constraints when they affect delivery.
+
 - Prefer the smallest complete user workflow. Keep transport, perception, policy, persistence, and presentation separate where their failure modes differ.
 - Define typed contracts at boundaries. Validate external input; use stable IDs, explicit units and timestamps, bounded timeouts, and idempotent handling of retried events.
 - Preserve backward compatibility when teammates depend on a contract. Change the producer, consumer, examples, and checks together; document breaking changes.

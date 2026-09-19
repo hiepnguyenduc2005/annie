@@ -85,6 +85,11 @@ class Command(StrictModel):
     cmd: Literal['stop', 'resume', 'look', 'goto']
     waypoint: str | None = Field(default=None, max_length=100)
 
+class CommandReceipt(StrictModel):
+    status: Literal['accepted', 'executing', 'completed', 'failed']
+    source: Literal['simulation']
+    detail: str | None = Field(default=None, max_length=500)
+
 class Ack(StrictModel):
     by: Literal['family']
 

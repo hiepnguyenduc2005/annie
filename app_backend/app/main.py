@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .models import Ack, Command, Ingest, Say, Scenario
+from .models import Ack, Command, CommandReceipt, Ingest, Say, Scenario
 from .service import Service, now_ms
 from .subconscious_provider import DEFAULT_MODEL, SubconsciousAPIError, SubconsciousInputError, run_team
 
@@ -176,6 +176,15 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms):
         elif body.waypoint is not None:
             raise HTTPException(422, 'waypoint is only valid with goto')
         return app.state.service.queue_command(body.model_dump())
+
+    @router.post('/commands/{command_id}/receipt')
+    async def command_receipt(command_id: UUID, body: CommandReceipt):
+        try:
+            return app.state.service.command_receipt(str(command_id), body.status, body.source, body.detail)
+        except KeyError:
+            raise HTTPException(404, 'Unknown command') from None
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @router.post('/query')
     async def query(body: Say):

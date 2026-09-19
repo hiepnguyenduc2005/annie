@@ -80,6 +80,22 @@ class Service:
         self.emit('command', item)
         return item
 
+    def command_receipt(self, command_id, status, source, detail=None):
+        # Simulator bridge only reports what actually ran; the queue records it.
+        item = next((entry for entry in self.commands if entry['command_id'] == command_id), None)
+        if item is None:
+            raise KeyError(command_id)
+        allowed = {'queued': {'accepted', 'executing', 'failed'},
+                   'accepted': {'executing', 'completed', 'failed'},
+                   'executing': {'completed', 'failed'},
+                   'completed': {'completed'}, 'failed': {'failed'}}[item['status']]
+        if status not in allowed:
+            raise ValueError(f'command status {item["status"]} cannot transition to {status}')
+        if item['status'] != status:
+            item.update(status=status, source=source, detail=detail, updated_at=self.clock())
+            self.emit('command', item)
+        return item
+
     def ingest(self, channel, data):
         model = CHANNEL_MODELS[channel].model_validate(data)
         payload = model.model_dump(mode='json')

@@ -387,3 +387,95 @@ footer {
     gap: 5px;
   }
 }
+.scene-bar {
+  padding: 17px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.scene-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.scene-title-row .eyebrow {
+  margin: 0;
+}
+.scene-picker {
+  display: flex;
+  gap: 8px;
+}
+.scene-picker select {
+  flex: 1;
+  min-width: 0;
+}
+select,
+input[type="number"] {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #384b3d;
+  border-radius: 7px;
+  background: #233028;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+select:focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 3px;
+}
+.factory-fields {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.factory-fields label {
+  color: var(--muted);
+  font-size: 10px;
+}
+.factory-fields select,
+.factory-fields input {
+  margin-top: 5px;
+}
+.factory-panel button {
+  width: 100%;
+}
+.ground-truth {
+  font:
+    10px/1.8 ui-monospace,
+    SFMono-Regular,
+    monospace;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow: auto;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.camera-buttons {
+  flex-wrap: wrap;
+}
+.speed-label {
+  display: block;
+  margin-top: 18px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.speed-label select {
+  margin-top: 6px;
+}
+footer a {
+  color: var(--muted);
+  white-space: nowrap;
+}

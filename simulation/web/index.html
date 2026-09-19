@@ -22,10 +22,10 @@
     <main>
       <section class="intro">
         <div>
-          <p class="eyebrow">LIVE PHYSICS WORKBENCH</p>
-          <h1>A place to try things.</h1>
+          <p class="eyebrow">LIVE SCENE FACTORY</p>
+          <h1>A home for every scenario.</h1>
           <p>
-            Explore the robot, inspect the scene, and watch each physics step.
+            Generate repeatable homes, explore each scene, and test the robot.
           </p>
         </div>
         <a
@@ -38,6 +38,23 @@
       </section>
       <div class="workspace">
         <section class="viewport-panel" aria-label="Live simulation viewport">
+          <div class="scene-bar">
+            <div class="scene-title-row">
+              <span class="eyebrow">SCENE LIBRARY</span
+              ><span id="scene-count" class="badge">Loading catalog</span>
+            </div>
+            <div class="scene-picker">
+              <button id="previous-scene" aria-label="Previous scene">←</button
+              ><label class="visually-hidden" for="scene-select"
+                >Choose scene</label
+              ><select id="scene-select">
+                <option value="">Original Go2 model</option></select
+              ><button id="next-scene" aria-label="Next scene">→</button>
+            </div>
+            <p id="scene-description" class="hint">
+              Choose a generated home to inspect its layout and scenario.
+            </p>
+          </div>
           <div class="viewport-top">
             <span><i class="live-dot"></i> MUJOCO RENDER</span
             ><span id="render-rate">Waiting for frames</span>
@@ -63,6 +80,38 @@
           </div>
         </section>
         <aside>
+          <section class="panel factory-panel">
+            <p class="eyebrow">BULK GENERATION</p>
+            <h2>Make a batch</h2>
+            <form id="factory-form">
+              <div class="factory-fields">
+                <label for="factory-count"
+                  >Scenes<select id="factory-count">
+                    <option>6</option>
+                    <option>12</option>
+                    <option selected>24</option>
+                    <option>48</option>
+                    <option>96</option>
+                  </select></label
+                ><label for="factory-seed"
+                  >Seed<input
+                    id="factory-seed"
+                    type="number"
+                    min="0"
+                    max="2147483647"
+                    value="2026"
+                    required
+                /></label>
+              </div>
+              <button class="primary" id="generate" type="submit">
+                Generate scenes
+              </button>
+            </form>
+            <p class="hint">
+              Bed-rest, floor, seated, standing, occluded, and empty rooms. A
+              seed reproduces the batch.
+            </p>
+          </section>
           <section class="panel">
             <p class="eyebrow">RIGHT NOW</p>
             <div class="state-heading">
@@ -86,18 +135,50 @@
                 <dt>Physics timestep</dt>
                 <dd id="timestep">—</dd>
               </div>
+              <div>
+                <dt>Active wall time</dt>
+                <dd id="wall-time">—</dd>
+              </div>
+              <div>
+                <dt>Measured playback</dt>
+                <dd id="achieved-speed">—</dd>
+              </div>
+              <div>
+                <dt>Simulated time of day</dt>
+                <dd id="day-time">09:00:00</dd>
+              </div>
             </dl>
+            <label class="speed-label" for="speed"
+              >Playback speed<select id="speed">
+                <option value="0.25">0.25× · slow motion</option>
+                <option value="0.5">0.5× · half speed</option>
+                <option value="1" selected>1× · real time</option>
+                <option value="2">2× · accelerated</option>
+              </select></label
+            >
+            <p id="phase" class="hint">No routine schedule loaded.</p>
           </section>
           <section class="panel">
             <p class="eyebrow">LOOK AROUND</p>
             <h2>Camera</h2>
             <div class="camera-buttons">
-              <button data-camera="front">Front</button
+              <button data-camera="room">Room</button
+              ><button data-camera="front">Front</button
               ><button data-camera="side">Side</button
               ><button data-camera="top">Top</button>
             </div>
             <p class="hint">
               These controls move the viewer camera, not the robot.
+            </p>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">SCENARIO LABELS</p>
+            <h2>Simulation ground truth</h2>
+            <pre id="ground-truth" class="ground-truth">
+No scenario loaded.</pre
+            >
+            <p class="hint">
+              These are generated labels, not vision-model predictions.
             </p>
           </section>
           <section class="panel">
@@ -130,7 +211,7 @@
             </div>
             <div>
               <span class="pending">○</span
-              ><span>Home scene &amp; perception — next</span>
+              ><span>Image-based perception — next</span>
             </div>
           </section>
         </aside>
@@ -140,6 +221,9 @@
         ><span
           >Physics and joint control do not establish autonomous walking or fall
           recognition.</span
+        >
+        <a href="https://polyhaven.com/" target="_blank" rel="noopener"
+          >Powered by Poly Haven</a
         >
       </footer>
     </main>

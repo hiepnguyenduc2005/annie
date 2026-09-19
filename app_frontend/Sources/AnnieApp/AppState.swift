@@ -10,6 +10,17 @@
 import AVFoundation
 import SwiftUI
 
+/// Which half of the household the app is showing. One build, two audiences:
+/// Jeanine at home, and family checking in from away.
+enum Audience: String, CaseIterable, Identifiable {
+    case resident
+    case family
+
+    var id: String { rawValue }
+    var label: String { self == .resident ? "Grandma" : "Family" }
+    var icon: String { self == .resident ? "house.fill" : "person.2.fill" }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var live = false
@@ -18,10 +29,23 @@ final class AppState: ObservableObject {
     @Published var answer: String?
     @Published var asking = false
 
+    @Published var audience: Audience = .family
+
+    // Family view
+    @Published var thread: [ThreadMessage] = []
+    @Published var runs: [String: FamilyRun] = [:]
+    @Published var sending = false
+    @Published var sendError: String?
+
+    /// Who this phone belongs to. The household is fixed, so this is a picker,
+    /// not a login.
+    @Published var authorID = "zach"
+
     @Published private(set) var serverURL = AppConfiguration.apiBaseURL
 
     private var api = AnnieAPI()
     private var pollTask: Task<Void, Never>?
+    private var runPollTask: Task<Void, Never>?
     private let synthesizer = AVSpeechSynthesizer()
 
     // MARK: Lifecycle
@@ -29,10 +53,11 @@ final class AppState: ObservableObject {
     /// Point the app at a different backend (the Profile tab's server field)
     /// and reconnect. Returns false, changing nothing, if the text isn't a
     /// usable address.
-    func setServer(_ text: String) async -> Bool {
+    func setServer(_ text: String, token: String? = nil) async -> Bool {
         guard let url = AppConfiguration.saveAPIBaseURL(text) else { return false }
+        if let token { AppConfiguration.saveAPIToken(token) }
         serverURL = url
-        api = AnnieAPI(baseURL: url)
+        api = AnnieAPI(baseURL: url, token: AppConfiguration.apiToken)
         await load()
         return true
     }
@@ -48,8 +73,10 @@ final class AppState: ObservableObject {
         do {
             reminders = try await api.reminders()
             memory = try await api.memory()
+            thread = (try? await api.thread()) ?? []
             live = true
             startPolling()
+            await refreshRuns()
         } catch {
             live = false
             reminders = Self.demoReminders
@@ -119,6 +146,66 @@ final class AppState: ObservableObject {
         } catch {
             answer = Self.demoAnswer(question, reminders: reminders)
             live = false
+        }
+    }
+
+    // MARK: Family messages
+
+    /// Hand the message to the backend and start watching the run it created.
+    /// This returns as soon as the backend accepts it — the dog's errand takes
+    /// a minute or more, and the UI must never sit blocked on it.
+    func send(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !sending else { return }
+        sending = true
+        sendError = nil
+        defer { sending = false }
+
+        guard live else {
+            sendError = "Not connected to Annie. Set the server address in Profile."
+            return
+        }
+        do {
+            _ = try await api.sendMessage(authorID: authorID, text: trimmed)
+            thread = (try? await api.thread()) ?? thread
+            await refreshRuns()
+            watchActiveRun()
+        } catch {
+            sendError = "Couldn't send that. Check the server address in Profile."
+            live = false
+        }
+    }
+
+    var activeRun: FamilyRun? {
+        guard let latest = thread.last else { return nil }
+        return runs[latest.run_id]
+    }
+
+    func run(for message: ThreadMessage) -> FamilyRun? { runs[message.run_id] }
+
+    private func refreshRuns() async {
+        // Only the most recent handful matter on screen; older ones stay in
+        // whatever state they were last seen in.
+        for message in thread.suffix(5) {
+            if let run = try? await api.run(id: message.run_id) {
+                runs[run.run_id] = run
+            }
+        }
+    }
+
+    /// Poll the newest run until it reaches a terminal state, so the beats
+    /// appear as the robot reports them.
+    private func watchActiveRun() {
+        runPollTask?.cancel()
+        guard let runID = thread.last?.run_id else { return }
+        runPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                guard let run = try? await self.api.run(id: runID) else { return }
+                self.runs[runID] = run
+                if run.finished { return }
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
         }
     }
 

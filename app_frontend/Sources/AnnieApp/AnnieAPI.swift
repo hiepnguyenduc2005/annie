@@ -14,9 +14,11 @@ enum APIError: Error {
 
 struct AnnieAPI {
     var baseURL: URL
+    var token: String
 
-    init(baseURL: URL = AppConfiguration.apiBaseURL) {
+    init(baseURL: URL = AppConfiguration.apiBaseURL, token: String = AppConfiguration.apiToken) {
         self.baseURL = baseURL
+        self.token = token
     }
 
     private func url(_ path: String) -> URL {
@@ -27,6 +29,11 @@ struct AnnieAPI {
         // Bounded, so an unreachable LAN host falls back to demo data in seconds, not a minute.
         var request = URLRequest(url: url(path), timeoutInterval: 5)
         request.httpMethod = method
+        // app_backend accepts non-loopback clients only with a token, so a
+        // phone on the LAN needs this even though the simulator works without.
+        if !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = body
@@ -66,5 +73,23 @@ struct AnnieAPI {
 
     func ask(_ question: String) async throws -> String {
         try JSONDecoder().decode(AskResponse.self, from: try await send("api/ask", method: "POST", body: AskRequest(question: question))).answer
+    }
+
+    // MARK: Family messages
+    //
+    // Sending returns as soon as the backend has the message; the robot's
+    // 60-90 second errand is reported afterwards through the run.
+
+    func sendMessage(authorID: String, text: String) async throws -> DispatchAck {
+        let body = NewMessage(author_id: authorID, text: text)
+        return try JSONDecoder().decode(DispatchAck.self, from: try await send("api/messages", method: "POST", body: body))
+    }
+
+    func thread() async throws -> [ThreadMessage] {
+        try JSONDecoder().decode([ThreadMessage].self, from: try await send("api/thread", method: "GET"))
+    }
+
+    func run(id: String) async throws -> FamilyRun {
+        try JSONDecoder().decode(FamilyRun.self, from: try await send("api/runs/\(id)", method: "GET"))
     }
 }

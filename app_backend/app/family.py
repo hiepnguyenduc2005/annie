@@ -45,6 +45,45 @@ class InternalEventIn(StrictModel):
 
 DEFAULT_RECALL = 'Your phone was on the living room couch, by the left cushion.'
 
+# Who a given beat belongs to, for clients rendering the run as a conversation.
+SPEAKER = {'speaking': 'annie', 'heard': 'resident'}
+
+
+def summarize(kind, payload):
+    """One display line per event.
+
+    Clients render whatever this returns rather than reaching into `payload`,
+    whose keys vary by kind and come from robot_backend, so an unexpected
+    payload degrades to a readable line instead of breaking the UI.
+    """
+    payload = payload or {}
+
+    def text(key, fallback):
+        value = payload.get(key)
+        return value if isinstance(value, str) and value.strip() else fallback
+
+    if kind == 'speaking':
+        return text('text', 'Annie said something.')
+    if kind == 'heard':
+        return text('transcript', 'Annie heard a reply.')
+    if kind == 'recalled':
+        return text('note', 'Annie recalled something.')
+    if kind == 'navigating':
+        return text('detail', 'On the way' + (f' to the {payload["waypoint"]}' if isinstance(payload.get('waypoint'), str) else '') + '.')
+    if kind == 'arrived':
+        return text('detail', 'Arrived.')
+    if kind == 'listening':
+        return 'Listening for a reply…'
+    if kind == 'recalling':
+        return 'Checking what Annie remembers…'
+    if kind == 'completed':
+        return text('detail', 'Finished.')
+    if kind == 'failed':
+        return text('error', 'Annie could not finish this one.')
+    if kind == 'unreachable':
+        return 'Could not reach Annie at home. Nothing was delivered.'
+    return kind
+
 
 def build_mock_sequence(text, author_name, recall=DEFAULT_RECALL):
     # Stand-in cadence for demoing without the GX10; real hardware timing is
@@ -55,8 +94,8 @@ def build_mock_sequence(text, author_name, recall=DEFAULT_RECALL):
     return [
         (2.0, 'navigating', {'waypoint': 'living-room', 'detail': 'Looking for Jeanine.'}),
         (3.0, 'arrived', {'waypoint': 'living-room', 'detail': 'Found Jeanine in the living room.'}),
-        (3.0, 'speaking', {'text': f'Jeanine, it\'s Annie. {author_name} asked me to find you. '
-                                   f'{author_name} says: "{text}"'}),
+        (3.0, 'speaking', {'text': f'Jeanine, it\'s Annie. {author_name} asked me to pass this along: '
+                                   f'"{text}"'}),
         (3.0, 'listening', {}),
         (2.5, 'heard', {'transcript': 'Oh dear, I forgot where I put it.'}),
         (2.0, 'recalling', {'query': 'where was the phone last seen'}),
@@ -148,7 +187,9 @@ class FamilyService:
             return
         run['status'] = 'unreachable'
         run['updated_at'] = self.clock()
-        event = {'event_id': str(uuid4()), 'run_id': run_id, 'kind': 'unreachable', 'payload': {'error': error}, 'at': run['updated_at']}
+        payload = {'error': error}
+        event = {'event_id': str(uuid4()), 'run_id': run_id, 'kind': 'unreachable', 'payload': payload,
+                 'at': run['updated_at'], 'summary': summarize('unreachable', payload), 'speaker': 'system'}
         run['events'].append(event)
         self.emit('run_event', event)
         self.emit('run_status', {'run_id': run_id, 'status': run['status']})
@@ -167,7 +208,8 @@ class FamilyService:
             raise KeyError(run_id)
         if run['status'] in RUN_TERMINAL:
             raise ValueError(f'run {run_id} is already {run["status"]}')
-        event = {'event_id': str(uuid4()), 'run_id': run_id, 'kind': kind, 'payload': payload, 'at': at}
+        event = {'event_id': str(uuid4()), 'run_id': run_id, 'kind': kind, 'payload': payload, 'at': at,
+                 'summary': summarize(kind, payload), 'speaker': SPEAKER.get(kind, 'system')}
         run['events'].append(event)
         run['updated_at'] = self.clock()
         run['status'] = kind if kind in ('completed', 'failed') else 'running'

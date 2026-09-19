@@ -21,6 +21,27 @@ import Foundation
 enum AppConfiguration {
     static let defaultAPIBaseURL = URL(string: "http://127.0.0.1:8000")!
     private static let savedURLKey = "annieAPIBaseURL"
+    private static let savedTokenKey = "annieAPIToken"
+
+    /// Bearer token for the backend, when one is configured there. Empty means
+    /// none, which the backend only accepts from loopback clients — so a phone
+    /// on the LAN needs this set. Kept in UserDefaults alongside the address:
+    /// this is a demo credential for a local network, not a secret store.
+    static var apiToken: String {
+        if let fromEnvironment = ProcessInfo.processInfo.environment["ANNIE_API_TOKEN"], !fromEnvironment.isEmpty {
+            return fromEnvironment
+        }
+        return UserDefaults.standard.string(forKey: savedTokenKey) ?? ""
+    }
+
+    static func saveAPIToken(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: savedTokenKey)
+        } else {
+            UserDefaults.standard.set(trimmed, forKey: savedTokenKey)
+        }
+    }
 
     /// Set when `ANNIE_API_URL` is present and valid; it beats the saved address.
     static var environmentOverride: URL? {

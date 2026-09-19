@@ -1,53 +1,95 @@
 # Annie
 
-This is the repository scaffold for Annie. The documentation structure is
-product- and stack-agnostic; requirements and implementation details can be
-filled in as work takes shape.
+Annie connects an elderly resident at home with family through a robot dog.
+The first workflow is a possible-incident check-in, two-way communication,
+and scene memory with cited evidence.
 
-## Project guide
+## Architecture
+
+```text
+Family app <-> App API + SQLite <-> Robot service <-> DimOS / Go2 / local vision
+                    |                    |
+             Optional advisory      Voice and approved
+                agent team          notification adapters
+```
+
+- `app_backend/`: working local API, event policy for the demo, memory, commands,
+  and optional Subconscious advisory team.
+- `robot_backend/`: independent robot-side service; currently health plus
+  package scaffolding for hardware, vision, voice, communication, and privacy.
+- `frontend/`: phone-friendly web interface served at `/app/`.
+- `shared/` and `contract/`: protocol references and exported typed schemas.
+- `simulation/`: SDK exploration, scenario specification, and physics checks.
+
+The app and robot services remain independently runnable. The proposed robot
+WebSocket transport, hardware control, local VLM, voice execution, Linq, and
+Elastic adapters are not connected yet. The current app workflow uses synthetic
+inputs and an in-process bus; queued commands do not prove execution.
+
+## Run the local software demo
+
+From the repository root:
+
+```sh
+uv venv .venv --python 3.12
+uv pip install --python .venv/bin/python -r app_backend/requirements.lock
+.venv/bin/uvicorn app_backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
+```
+
+Open [the local app](http://127.0.0.1:8000/app/). The backend starts empty; use
+**Start simulated home** to load clearly labeled synthetic observations.
+The app service health endpoint is `/health`; authenticated OpenAPI is
+`/openapi.json`. See [app backend details](app_backend/README.md).
+
+For root `.env` settings append `--env-file .env`. Use [.env.example](.env.example)
+as a reference without replacing existing keys. Phone/LAN access requires an
+API token and the intended host in `ANNIE_ALLOWED_HOSTS`.
+[Subconscious setup](docs/SUBCONSCIOUS.md) documents the opt-in text advisory team;
+no paid calls or notifications run automatically.
+
+The separate [robot backend](robot_backend/README.md) runs on port 8001 during
+local development. Its feature packages are scaffolds, not working integrations.
+
+## Contract and data boundary
+
+The team explicitly expanded the initial status-only proposal on 2026-09-19.
+The app-facing contract may carry status, map positions, captions, events,
+released evidence crops, transcripts needed for check-ins, and two-way commands.
+Consumers still validate exact schemas; this is not permission for arbitrary
+unbounded payloads or secrets. The legacy `RobotSignal` remains a status-only
+reference; the richer v0.1 models are in [contract/](contract/README.md).
+
+Full resident frames remain on the trusted local robot/compute network. Cloud
+voice, memory, notifications, or advisory requests have explicit configuration
+and data-egress paths. Crops/captions can contain PII. This is **local-first**,
+not fully air-gapped, and the current demo uses synthetic data only.
+
+## Documentation
 
 | File | Purpose |
 | --- | --- |
-| [SPEC.md](SPEC.md) | Intended product behavior, scope, acceptance criteria, and unresolved requirements. |
-| [AGENTS.md](AGENTS.md) | Shared instructions for coding agents working in this repository. |
-| [CLAUDE.md](CLAUDE.md) | Relative symlink to `AGENTS.md`; edit the target file. |
-| [docs/TODO.md](docs/TODO.md) | Prioritized, actionable work and completion conditions. |
-| [docs/BRAINSTORM.md](docs/BRAINSTORM.md) | Uncommitted ideas, alternatives, and experiments. |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Consequential decisions and their rationale. |
-| [docs/hackmit-2026/NOTES.md](docs/hackmit-2026/NOTES.md) | Team notes, demo direction, ownership, hardware, and source history. |
-| [docs/hackmit-2026/SPONSORS.md](docs/hackmit-2026/SPONSORS.md) | All supplied sponsor resources, credits, links, and unresolved details. |
-| [backend/README.md](backend/README.md) | Setup and local development for the existing backend starter. |
+| [SPEC.md](SPEC.md) | Current product scope and acceptance criteria. |
+| [contract/README.md](contract/README.md) | API, channel, event, and privacy semantics. |
+| [simulation/SPEC.md](simulation/SPEC.md) | Full SDK/simulation proposal and scenario matrix. |
+| [docs/TODO.md](docs/TODO.md) | Current work and integration gates. |
+| [docs/BRAINSTORM.md](docs/BRAINSTORM.md) | Ideas and alternatives. |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Choices and rationale. |
+| [docs/hackmit-2026/NOTES.md](docs/hackmit-2026/NOTES.md) | All supplied team planning notes and sources. |
+| [docs/hackmit-2026/SPONSORS.md](docs/hackmit-2026/SPONSORS.md) | Sponsor resources, links, codes, and uncertainties. |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Development workflow and skills. |
+| [AGENTS.md](AGENTS.md) | Shared agent instructions; `CLAUDE.md` is a relative symlink. |
 
-## Development
+## Verification
 
-The repository includes a Python 3.10+ FastAPI starter in `backend/`. It exposes
-a welcome response at `/` and a health response at `/health`. Follow the
-[backend setup and run instructions](backend/README.md) to develop it locally.
+```sh
+PYTHONPATH=app_backend .venv/bin/python -m pytest app_backend/tests -q
+.venv/bin/python contract/export_schemas.py --check
+node --check frontend/app.js
+```
 
-Automated test and lint commands are not configured yet. Document those commands
-alongside the relevant component when they are added.
+Tests use mocked services and synthetic data. Dependencies are pinned in
+`app_backend/requirements.lock`; review updates deliberately. SDK/physics tests
+have separate prerequisites and do not establish VLM or hardware performance.
 
-## Working flow
-
-1. Explore possibilities in `docs/BRAINSTORM.md` when useful.
-2. Define the chosen behavior and how to verify it in `SPEC.md`.
-3. Record consequential choices and tradeoffs in `docs/DECISIONS.md`.
-4. Break the agreed scope into small tasks in `docs/TODO.md`.
-5. Implement and verify a complete user workflow; update affected documentation.
-
-Ideas are proposals. Tasks track delivery. The specification defines intended
-behavior. Keep each fact in its primary document and link to it elsewhere.
-
-## Shared agent instructions
-
-`AGENTS.md` is the canonical file. `CLAUDE.md` points to it using a relative
-symlink, created from the repository root with `ln -s AGENTS.md CLAUDE.md`.
-The link already exists; edit `AGENTS.md` directly.
-
-[Codex discovers AGENTS.md automatically](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
-[Claude Code supports the symlink](https://code.claude.com/docs/en/memory#share-one-file-with-other-coding-tools).
-For a team using Windows without symlink support, use a regular `CLAUDE.md`
-containing `@AGENTS.md` instead, so there is still only one copy of the rules.
-
-Add architecture, deployment, or feature-specific documents when those topics
-have enough substance to need their own files.
+Keep ideas in the brainstorm, chosen behavior in the spec, work in TODO, and
+rationale in decisions. Push coherent verified milestones frequently.

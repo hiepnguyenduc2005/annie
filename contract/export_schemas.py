@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app_backend'))
 from app.models import CHANNEL_MODELS, Event
 
 path = Path(__file__).with_name('schemas.json')

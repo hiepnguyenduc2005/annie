@@ -1,3 +1,5 @@
+__pycache__/
+*.py[cod]
 .DS_Store
 .env
 .env.*
@@ -14,3 +16,4 @@ output/
 logs/
 node_modules/
 .cache/
+.playwright-cli/

@@ -19,7 +19,7 @@
 
 ## Verification and handoff
 
-- Use the commands documented in `README.md` and the relevant component README. The current backend setup is in `backend/README.md`; automated test and lint commands are not configured yet.
+- Use the commands documented in `README.md` and component READMEs. From the root, run `PYTHONPATH=app_backend .venv/bin/python -m pytest app_backend/tests -q`, `.venv/bin/python contract/export_schemas.py --check`, and `node --check frontend/app.js` for the software demo. SDK/simulator checks have separate prerequisites.
 - Verify changed behavior against its acceptance criteria, including relevant failure cases. Use checks appropriate to the change.
 - Report what changed, what was verified, and any remaining blockers. Never claim an unrun check passed.
 - Mark a task complete only when its stated completion condition is satisfied.

@@ -6,6 +6,13 @@ Working contract for the staged demo, based on the team's
 `/openapi.json` describes the implemented REST API. This contract distinguishes
 the runnable local mock from target hardware and service integrations.
 
+The user expanded the earlier status-only boundary on 2026-09-19. Typed maps,
+observer poses, captions, event evidence, approved crops, relevant transcripts,
+and two-way commands may cross the robot-to-app boundary. The legacy
+`shared/messages.py` status envelope is an optional compatibility format, not
+the limit of this contract. Full frame transport remains local as specified
+below; authenticated access and bounded payload validation still apply.
+
 ## Conventions
 
 - JSON; schema version `0.1`; integer Unix milliseconds; UUID frame/event IDs.
@@ -71,6 +78,12 @@ optional providers a clear 503. Reconnect clients refetch state and events;
 the WebSocket itself is not a durable queue. A `resync` envelope means refetch
 status/map/events/commands. Overlap the last millisecond when using `since`
 and deduplicate by ID, or refetch all events; timestamps are not unique cursors.
+
+The implemented WebSocket update types are `dog.status`, `dog.map`,
+`brain.perception`, `voice.heard`, `event`, `command`, and `checkin` (pending
+state or null), plus `resync`. The logical `brain.event`, `dog.cmd`, and
+`voice.say` channels above describe adapter destinations; app clients consume
+the implemented `event` and `command` envelopes.
 
 ## Incident state machine
 

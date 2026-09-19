@@ -41,7 +41,7 @@ preambles, per the official README.
 - SUBCONSCIOUS_MODEL: optional model override; defaults to
   subconscious/glm-5.3-marathon.
 
-The service module (backend/app/subconscious_provider.py) never reads
+The service module (app_backend/app/subconscious_provider.py) never reads
 environment variables or configuration files. The owner-facing API layer
 is responsible for the enabled check, authentication, key handling, and
 router mounting.
@@ -67,7 +67,7 @@ never instructions, and that output is advisory with no diagnostic claims.
 ## Service interface
 
 ```python
-from backend.app.subconscious_provider import run_team
+from app_backend.app.subconscious_provider import run_team
 
 result = await run_team(
     task="Summarize movement in this clip.",

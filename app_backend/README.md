@@ -1,5 +1,10 @@
 # Annie local demo backend
 
+The approved robot-to-app boundary now includes typed maps, captions, observer
+poses, event evidence, released crops, transcripts, and two-way commands. See
+[contract v0.1](../contract/README.md). The older status-only envelope is a
+compatibility option; full frames remain on the trusted local compute network.
+
 Python 3.10+, FastAPI, and SQLite. Run one worker: the event bus and check-in
 state are in process. This is a local demonstration, not a medical device or a
 working robot integration. No calls reach hardware, cloud vision, or speech.
@@ -10,11 +15,11 @@ From the repository root:
 
 ```sh
 uv venv .venv --python 3.12
-uv pip install --python .venv/bin/python -r backend/requirements.lock
-.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
+uv pip install --python .venv/bin/python -r app_backend/requirements.lock
+.venv/bin/uvicorn app_backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
-Open http://127.0.0.1:8000/app/ for the dashboard when the root `app/` directory
+Open http://127.0.0.1:8000/app/ for the dashboard when the root `frontend/` directory
 is present. `/` preserves the welcome response; `/health` returns `{"status":"ok"}`.
 The server starts empty. `POST /demo/seed` explicitly loads synthetic data.
 
@@ -119,7 +124,7 @@ this core. Optional provider modules are not automatically invoked.
 From the repository root:
 
 ```sh
-PYTHONPATH=backend .venv/bin/python -m pytest backend/tests -q
+PYTHONPATH=app_backend .venv/bin/python -m pytest app_backend/tests -q
 .venv/bin/python contract/export_schemas.py --check
 ```
 

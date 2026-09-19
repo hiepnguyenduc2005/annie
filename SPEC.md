@@ -1,73 +1,65 @@
 # Annie specification
 
-Status: Draft. Product scope is not yet defined.
+Status: Working HackMIT demo scope, 2026-09-19. Requirements describe targets,
+not completed hardware or service integrations. The [team brief](docs/hackmit-2026/NOTES.md)
+retains earlier ideas and source notes.
 
-This file describes intended product behavior. `TBD` means unresolved, not
-permission to invent a requirement. Exploratory alternatives belong in
-[BRAINSTORM.md](docs/BRAINSTORM.md); implementation tasks belong in
-[TODO.md](docs/TODO.md).
+## Product and first workflow
 
-## Product definition
+Annie connects one elderly resident at home with family through a robot dog.
+A possible incident prompts a check-in, followed by a family alert if help is
+requested or reassurance does not arrive. A relative can acknowledge the alert
+and send a message through the dog. This is a staged assistance prototype,
+not a medical diagnosis or a replacement for emergency response.
 
-| Question | Current answer |
-| --- | --- |
-| Who is the primary user? | TBD |
-| What problem does Annie solve? | TBD |
-| How does that user handle the problem today? | TBD |
-| What outcome should Annie make possible? | TBD |
-| What platform will the first release use? | TBD |
+## Version 0 requirements
 
-## First complete user workflow
+| ID | Behavior | Acceptance check |
+| --- | --- | --- |
+| REQ-001 | One-floor map, status, and three waypoints. | App displays map ID and robot observation position; physical patrol verified separately. |
+| REQ-002 | Validated timestamped perception with evidence IDs. | Invalid, stale, duplicate, unknown, timed-out, or low-confidence input cannot create an incident; bed is exempt. |
+| REQ-003 | Sustained non-bed lying initiates a check-in. | Two distinct fresh floor/chair observations start one eight-second check-in; continuing ticks do not flood alerts. |
+| REQ-004 | Help or timeout escalates to family attention. | Confident correlated reassurance closes the check-in; ambiguous speech does not; help or timeout escalates once. |
+| REQ-005 | Two-way communication. | Dog events reach app; family messages enter identified voice commands; queue acceptance is distinct from playback/delivery. |
+| REQ-006 | Evidence-backed scene memory. | Query cites frame ID, capture time, and observer pose; no evidence gives an explicitly unanswerable response. |
+| REQ-007 | Full frames remain local. | Raw frames do not enter the app stream, cloud memory, cloud agents, or routine logs. Released derivatives have explicit egress policies. |
+| REQ-008 | Reproducible software demo. | Fresh checkout exercises bed, incident, reassurance, timeout, acknowledgement, message, and query without keys, hardware, or outbound notifications. |
+| REQ-009 | Optional Subconscious advisory team. | Bounded text-only agents run only when configured and opted in; no robot, alert, or messaging authority; provider failure is tested with mocks. |
 
-Describe one useful journey from start to finish before expanding the scope.
+The rule uses known floor/chair locations. Unlike the source's literal
+`location != bed`, unknown location requires more evidence. Confidence
+thresholds are demo settings, not clinical performance. `fall_confirmed` is
+retained as a wire name for escalation confirmed, never a proven medical fall.
 
-- Starting situation and prerequisites: TBD.
-- User actions: TBD.
-- Annie's observable responses: TBD.
-- Successful outcome: TBD.
-- Failure cases and recovery: TBD.
+## Scope boundaries
 
-## Version 0 scope
+Target integrations: Go2 with DimOS/MuJoCo, GX10-local image-capable Nemotron,
+Deepgram, ElevenLabs, Linq, and Elastic. Track each as simulated/disconnected
+until verified. Initial delivery is a phone-friendly web app and local backend;
+React Native remains an option after the end-to-end workflow works.
 
-### Included
+Stretch: time-based spoken reminders and routine drift. Deferred: two floors,
+multiple profiles, hospital dashboard, air-quality sensing, Arduino, robot arm,
+fine-tuning, social matching, and Ansys without a specific engineering need.
 
-TBD. List only requirements chosen for the first release.
+## Evidence, data, and privacy
 
-### Explicitly excluded
+A robot pose is not a person's measured location. Preserve map ID, frame ID,
+capture timestamp, and uncertainty. DimOS offers useful navigation and memory
+components, but their fusion for Annie remains an integration task; captions
+with coordinates do not establish persistent identity or a full 4D graph.
 
-TBD. Record intentional boundaries so the first release stays focused.
+Full frames stay on the trusted local body/brain network. Cloud audio/text,
+Elastic captions, Linq notifications, released crops, and Subconscious evidence
+can contain personal information. This is local-first, not fully air-gapped.
+A cloud vision fallback is a separate policy decision and disabled by default.
+Use synthetic data for the current demo; define retention and crop release
+before collecting actual resident observations. Never put media or secrets in Git.
 
-## Requirements and acceptance criteria
+## Interfaces and open integration questions
 
-No product requirements have been established yet. Give each requirement a
-stable ID, such as `REQ-001`, and include:
-
-- The user need and expected behavior.
-- Preconditions, inputs, and observable results.
-- Relevant error and edge cases.
-- A concrete acceptance check, for example: given a starting state, when the
-  user performs an action, then a specified result is observable.
-
-## Data and integrations
-
-TBD: required data, its source, storage and retention needs, access rules, and
-any external services. Do not assume an integration is required.
-
-## Constraints and success measures
-
-TBD: meaningful usability, accessibility, privacy, performance, cost, and
-reliability constraints, plus how to judge whether the first release is useful.
-Use measurable targets where they affect implementation.
-
-## Open questions
-
-1. Who is the first user, and what is their most important problem?
-2. What is the smallest complete workflow that delivers a useful outcome?
-3. What constraints must guide the platform and technology choices?
-
-## Technical direction
-
-Product architecture is not specified yet. The existing starter implementation
-is described in [README.md](README.md). Record major choices and reasons in
-[DECISIONS.md](docs/DECISIONS.md). Add a separate architecture document when
-there is a design that needs its own explanation.
+[The contract](contract/README.md) defines component interfaces. Resolve the
+actual hardware/SDK/model versions, frame-to-pose synchronization, crop and
+retention policy, named owner for brain integration, and notification/playback
+acknowledgements before physical signoff. Measure demo latency and false alerts
+on stated scenarios instead of inventing performance figures.

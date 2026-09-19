@@ -6,7 +6,7 @@ import json
 import httpx
 import pytest
 
-from backend.app.subconscious_provider import (
+from app.subconscious_provider import (
     DEFAULT_MODEL,
     ENDPOINT,
     SubconsciousAPIError,

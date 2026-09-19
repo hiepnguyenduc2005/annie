@@ -12,9 +12,35 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
 - Reason: Each document has one purpose, and both agent entry points use the same maintained instructions.
 - Tradeoff: Symlink support is needed in each checkout. For Windows contributors without it, replace the link with a regular `CLAUDE.md` containing `@AGENTS.md`.
 
+## DEC-002: Contract-first local demo
+
+- Date: 2026-09-19.
+- Status: Adopted for the initial software milestone.
+- Context: The team needs parallel app, backend, brain, and body work before hardware and sponsor APIs are provisioned.
+- Decision: Keep the existing FastAPI backend; use typed schemas, SQLite, an in-process event bus, and a phone-friendly web app for deterministic local scenarios. Preserve Redis and service adapters as explicit integration work.
+- Reason: The contract and check-in behavior can be tested without keys or a robot, while teammates build against stable payloads.
+- Consequences: One server worker; pending check-ins and queued commands are transient. The local demo does not prove physical patrol, perception accuracy, speech playback, or notification delivery.
+
+## DEC-003: Local-first observations and optional advisory agents
+
+- Date: 2026-09-19.
+- Status: Adopted implementation boundary.
+- Context: Notes request local PII preprocessing, cloud speech/memory/messaging, and optional Subconscious multi-agent support.
+- Decision: Keep full frames on the local robot/compute network. Optional cloud adapters have explicit egress and configuration. Subconscious receives only explicitly supplied bounded text evidence and cannot control the robot, decide emergency escalation, or send notifications.
+- Reason: Cloud services are incompatible with an end-to-end air-gap claim; uncertainty and action authority need clear boundaries.
+- Consequences: Crops, captions, and transcripts still need a data policy. The initial Subconscious path is tested with mock HTTP, not paid live calls. The deterministic incident policy operates independently.
+
+## DEC-004: Separate services with a richer app contract
+
+- Date: 2026-09-19.
+- Status: Adopted following explicit user clarification.
+- Context: Teammates introduced independent `app_backend/` and `robot_backend/` services with an initial fixed-status-only external envelope. The user explicitly allowed the broader maps, captions, evidence, and communication contract.
+- Decision: Retain the two-service layout and move the working demo API into `app_backend/`. Permit typed maps, observer poses, captions, events, approved crops, check-in transcripts, and commands across the app boundary. Keep the old `RobotSignal` for compatibility, not as the entire protocol.
+- Reason: Parallel owners need independent services while the app needs evidence and two-way communication to demonstrate Annie's workflow.
+- Consequences: The robot transport and execution receipts remain open integration work. Full frames remain on the trusted local body/brain network. Rich payloads still require authentication, validation, and explicit release/retention rules; changing the contract does not connect adapters automatically.
+
 ## Future entries
 
 Use the next `DEC-NNN` ID. Include date, status, context, decision, alternatives,
 and consequences. If a decision changes, add a new entry and mark the older one
-superseded with a link. No product or technology decisions have been recorded in
-this log yet; describe the existing starter implementation in the README.
+superseded with a link. Link implementation details instead of duplicating them.

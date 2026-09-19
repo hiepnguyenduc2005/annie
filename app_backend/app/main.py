@@ -264,7 +264,7 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms):
         finally:
             service.subscribers.discard(queue)
 
-    static = Path(__file__).resolve().parents[2] / 'app'
+    static = Path(__file__).resolve().parents[2] / 'frontend'
     if static.is_dir():
         app.mount('/app', StaticFiles(directory=static, html=True), name='app')
     return app

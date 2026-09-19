@@ -47,6 +47,8 @@ class DogMap(Versioned):
     rooms: list[Room] = Field(default_factory=list, max_length=100)
 
 class Perception(Versioned):
+    source: Literal['mock', 'simulation_ground_truth', 'simulation_vlm', 'hardware_vlm'] = 'mock'
+    model: str | None = Field(default=None, max_length=200)
     ts: Timestamp
     frame_id: UUID
     person: bool

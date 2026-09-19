@@ -61,6 +61,19 @@
         "title": "Location",
         "type": "string"
       },
+      "model": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model"
+      },
       "person": {
         "title": "Person",
         "type": "boolean"
@@ -82,6 +95,17 @@
         "const": "0.1",
         "default": "0.1",
         "title": "Schema Version",
+        "type": "string"
+      },
+      "source": {
+        "default": "mock",
+        "enum": [
+          "mock",
+          "simulation_ground_truth",
+          "simulation_vlm",
+          "hardware_vlm"
+        ],
+        "title": "Source",
         "type": "string"
       },
       "ts": {

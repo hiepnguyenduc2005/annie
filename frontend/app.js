@@ -58,22 +58,44 @@ function renderStatus() {
   if (!status) return;
   const dog = status.dog,
     obs = status.perception;
-  text("mode", status.mode === "demo" ? "SYNTHETIC DEMO" : "LIVE INPUT MODE");
+  const simulated = !!dog?.pose?.map_id?.startsWith("sim-");
+  text(
+    "mode",
+    simulated
+      ? "SIMULATION"
+      : status.mode === "demo"
+        ? "SYNTHETIC DEMO"
+        : "LIVE INPUT MODE",
+  );
   text("robot-state", dog ? `Annie is ${dog.state}` : "No robot observations");
   text(
     "robot-detail",
     dog
-      ? `${dog.battery_pct}% battery · ${dog.waypoint || "No waypoint set"} · reported ${when(dog.ts)}`
+      ? `${dog.battery_pct}% battery${simulated ? " (synthetic, not measured)" : ""} · ${dog.waypoint || "No waypoint set"} · reported ${when(dog.ts)}${simulated ? " · simulated telemetry" : ""}`
       : "Robot adapter not connected",
   );
   text(
     "observation-title",
     obs ? `${obs.posture} · ${obs.location}` : "Nothing observed yet",
   );
+  const sources = {
+    mock: "synthetic mock",
+    simulation_ground_truth: "simulation ground truth",
+    simulation_vlm: "simulated camera + VLM",
+    hardware_vlm: "hardware camera + VLM",
+  };
   text(
     "observation-detail",
     obs
-      ? `${Math.round(obs.confidence * 100)}% reported confidence · ${when(obs.ts)}`
+      ? [
+          obs.caption,
+          `${Math.round(obs.confidence * 100)}% reported confidence`,
+          obs.source ? sources[obs.source] ?? obs.source : null,
+          obs.model ? `model ${obs.model}` : null,
+          when(obs.ts),
+        ]
+          .filter(Boolean)
+          .join(" · ")
       : "Evidence will appear here",
   );
   document.querySelectorAll("[data-scenario],#seed").forEach((b) => {
@@ -107,12 +129,33 @@ function renderMap() {
   const box = $("map");
   box.replaceChildren();
   const rooms = map.rooms || [];
-  const maxX = Math.max(8, ...rooms.map((r) => r.x + r.width)),
-    maxY = Math.max(4, ...rooms.map((r) => r.y + r.height));
+  const pose = state.status?.dog?.pose;
+  const xs = [];
+  const ys = [];
+  for (const room of rooms) {
+    xs.push(room.x, room.x + room.width);
+    ys.push(room.y, room.y + room.height);
+  }
+  for (const point of map.waypoints || []) {
+    xs.push(point.x);
+    ys.push(point.y);
+  }
+  if (pose && pose.map_id === map.map_id) {
+    xs.push(pose.x);
+    ys.push(pose.y);
+  }
+  if (!xs.length) {
+    xs.push(0, 8);
+    ys.push(0, 4);
+  }
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
   const svg = svgEl("svg", {
-    viewBox: `-.3 -.3 ${maxX + 0.6} ${maxY + 0.6}`,
+    viewBox: `${minX - 0.3} ${minY - 0.3} ${maxX - minX + 0.6} ${maxY - minY + 0.6}`,
     role: "img",
-    "aria-label": "Synthetic home layout and robot observation position",
+    "aria-label": "Home layout and robot position",
   });
   for (const room of rooms) {
     svg.append(
@@ -145,7 +188,6 @@ function renderMap() {
       svgEl("circle", { cx: point.x, cy: point.y, r: 0.075, fill: "#a1b294" }),
     );
   }
-  const pose = state.status?.dog?.pose;
   if (pose && pose.map_id === map.map_id) {
     svg.append(
       svgEl("circle", {
@@ -219,11 +261,15 @@ async function refresh() {
   renderStatus();
   renderEvents();
   const last = commands.at(-1);
-  if (last)
+  if (last) {
+    const ran = last.status && last.status !== "queued";
     text(
       "command-result",
-      `Queued: ${last.text || last.cmd}. No execution receipt. ID ${last.command_id.slice(0, 8)}.`,
+      ran
+        ? `${last.cmd} ${last.status} via ${last.source ?? "bridge"}${last.detail ? `: ${last.detail}` : ""}. ID ${last.command_id.slice(0, 8)}.`
+        : `Queued: ${last.text || last.cmd}. ID ${last.command_id.slice(0, 8)}.`,
     );
+  }
 }
 async function action(button, fn) {
   button.disabled = true;
@@ -316,7 +362,7 @@ for (const b of document.querySelectorAll("[data-command]"))
     action(b, async () => {
       await api("/commands", { cmd: b.dataset.command });
       await refresh();
-      notice("Command queued. No robot execution adapter is connected.");
+      notice("Command submitted to the robot bridge.");
     }),
   );
 $("say-form").addEventListener("submit", (e) => {

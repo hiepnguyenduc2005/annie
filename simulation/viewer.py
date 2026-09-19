@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import base64
 import io
 import json
 import math
@@ -13,6 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+from uuid import UUID, uuid4
 
 WEB = Path(__file__).resolve().parent / "web"
 PRESETS = {"front": (180, -20, 1.6), "side": (90, -20, 1.6), "top": (90, -89, 1.8)}
@@ -29,8 +32,24 @@ def validate_control(value, scene_ids=()):
         "scene",
         "generate",
         "speed",
+        "mission",
     }:
         raise ValueError("action must be play, pause, reset, step, camera, or hold")
+    if value["action"] == "mission":
+        if not set(value) <= {"action", "cmd", "waypoint", "command_id"} or value.get(
+            "cmd"
+        ) not in {"goto", "patrol", "stop", "resume", "look"}:
+            raise ValueError("invalid mission")
+        if value["cmd"] == "goto" and value.get("waypoint") not in {
+            "home",
+            "living-room",
+            "bedroom",
+            "hallway",
+        }:
+            raise ValueError("unknown waypoint")
+        if "command_id" in value:
+            UUID(value["command_id"])
+        return value
     if value["action"] == "speed":
         if (
             set(value) != {"action", "value"}
@@ -121,6 +140,10 @@ class Shared:
         self.commands = queue.Queue(maxsize=100)
         self.state = {"ready": False, "render_error": None, "physics_error": None}
         self.frame = None
+        self.observation = None
+        self.robot_frame = None
+        self.speech = {}
+        self.speech_lock = threading.Lock()
 
 
 def handler_for(shared, port):
@@ -165,6 +188,36 @@ def handler_for(shared, port):
                 with shared.lock:
                     state = dict(shared.state)
                 self.reply(200, state)
+            elif path == "/brain-state":
+                try:
+                    status_file = Path(".data/simulation/bridge-status.json")
+                    if status_file.stat().st_size > 32000:
+                        raise ValueError()
+                    self.reply(200, json.loads(status_file.read_text()))
+                except (OSError, ValueError):
+                    self.reply(503, {"last_error": "Brain bridge not connected"})
+            elif path.startswith("/speech/") and path.endswith(".wav"):
+                key = path.rsplit("/", 1)[-1][:-4]
+                with shared.lock:
+                    clip = shared.speech.get(key)
+                if clip:
+                    try:
+                        self.reply(200, Path(clip["file_path"]).read_bytes(), "audio/wav")
+                    except OSError:
+                        self.reply(404, {"error": "clip unavailable"})
+                else:
+                    self.reply(404, {"error": "unknown clip"})
+            elif path == "/observation":
+                with shared.lock:
+                    observation = shared.observation
+                self.reply(
+                    200 if observation else 503,
+                    observation or {"error": "robot camera unavailable"},
+                )
+            elif path == "/robot-frame.jpg":
+                with shared.lock:
+                    frame = shared.robot_frame
+                self.reply(200 if frame else 503, frame or b"", "image/jpeg")
             elif path == "/scenes":
                 self.reply(200, shared.catalog.public())
             elif path == "/favicon.ico":
@@ -199,7 +252,11 @@ def handler_for(shared, port):
         def do_POST(self):
             if not self.allowed(write=True):
                 return
-            if urlsplit(self.path).path != "/control":
+            path = urlsplit(self.path).path
+            if path in {"/say", "/speech/played", "/transcribe"}:
+                self.speech_request(path)
+                return
+            if path != "/control":
                 self.reply(404, {"error": "not found"})
                 return
             try:
@@ -231,6 +288,77 @@ def handler_for(shared, port):
             with shared.lock:
                 state = dict(shared.state)
             self.reply(202, {"queued": True, "state": state})
+
+        def speech_request(self, path):
+            try:
+                limit = 5600000 if path == "/transcribe" else 10000
+                length = int(self.headers.get("Content-Length", "0"))
+                if self.headers.get("Transfer-Encoding") or not 0 < length <= limit or self.headers.get_content_type() != "application/json":
+                    raise ValueError()
+                self.connection.settimeout(5)
+                value = json.loads(self.rfile.read(length))
+                if not isinstance(value, dict):
+                    raise TypeError()
+                if path == "/transcribe":
+                    import os
+                    import urllib.error
+                    import urllib.request
+                    headers = {"Content-Type": "application/json"}
+                    token = os.getenv("ANNIE_BRAIN_TOKEN", os.getenv("ANNIE_API_TOKEN", ""))
+                    if token:
+                        headers["Authorization"] = "Bearer " + token
+                    req = urllib.request.Request("http://127.0.0.1:8002/transcribe", data=json.dumps(value).encode(), headers=headers)
+                    try:
+                        with urllib.request.urlopen(req, timeout=35) as response:
+                            payload = response.read(64001)
+                            if len(payload) > 64000:
+                                raise ValueError()
+                            self.reply(200, json.loads(payload))
+                    except urllib.error.HTTPError as exc:
+                        self.reply(exc.code, {"error": "Audio inference request failed"})
+                    except (urllib.error.URLError, TimeoutError):
+                        self.reply(503, {"error": "Audio brain unavailable"})
+                    return
+                if path == "/speech/played":
+                    if set(value) != {"command_id"}:
+                        raise ValueError()
+                    cid = str(UUID(value["command_id"]))
+                    with shared.lock:
+                        if cid not in shared.speech:
+                            raise ValueError()
+                        shared.speech[cid]["status"] = "played"
+                    self.reply(200, {"command_id": cid, "status": "played"})
+                    return
+                if not set(value) <= {"text", "command_id"}:
+                    raise ValueError()
+                text = value.get("text")
+                if not isinstance(text, str) or not text.strip() or len(text) > 2000:
+                    raise ValueError()
+                cid = str(UUID(value["command_id"])) if "command_id" in value else str(uuid4())
+                if not shared.speech_lock.acquire(blocking=False):
+                    self.reply(429, {"error": "Speech synthesis is busy"})
+                    return
+                try:
+                    with shared.lock:
+                        clip = shared.speech.get(cid)
+                    if clip is None:
+                        try:
+                            from simulation.speech import SpeechAdapter
+                        except ModuleNotFoundError:
+                            from speech import SpeechAdapter
+                        clip = asyncio.run(SpeechAdapter().speak(text, cid))
+                        clip.update(text=text, url=f"/speech/{cid}.wav")
+                        with shared.lock:
+                            shared.speech[cid] = clip
+                            while len(shared.speech) > 10:
+                                shared.speech.pop(next(iter(shared.speech)))
+                    self.reply(202, {k: v for k, v in clip.items() if k != "file_path"})
+                finally:
+                    shared.speech_lock.release()
+            except (ValueError, TypeError, OSError, KeyError):
+                self.reply(422, {"error": "Invalid speech request"})
+            except Exception:  # noqa: BLE001 - never expose speech subprocess details
+                self.reply(503, {"error": "Speech synthesis unavailable"})
 
     return Handler
 
@@ -307,10 +435,18 @@ class SceneCatalog:
 class MujocoSession:
     """A model, renderer and controls, all created and used on the main thread."""
 
-    def __init__(self, path, scene=None):
+    def __init__(self, path, scene=None, locomotion=False):
         import mujoco
 
         self.mj = mujoco
+        self.locomotion_enabled = locomotion
+        self.controller = self.navigator = None
+        if locomotion:
+            try:
+                from simulation.locomotion import prepare_locomotion_model
+            except ModuleNotFoundError:
+                from locomotion import prepare_locomotion_model
+            path = prepare_locomotion_model(path)
         self.path, self.scene = path, scene
         self.model = model = mujoco.MjModel.from_xml_path(str(path.resolve()))
         if not math.isfinite(float(model.opt.timestep)) or model.opt.timestep <= 0:
@@ -349,6 +485,15 @@ class MujocoSession:
             if self.hold_supported
             else None
         )
+        if locomotion:
+            try:
+                from simulation.locomotion import LocomotionController
+                from simulation.navigation import Navigator
+            except ModuleNotFoundError:
+                from locomotion import LocomotionController
+                from navigation import Navigator
+            self.controller = LocomotionController(model, self.data)
+            self.navigator = Navigator(model, self.data, scene)
         self.controls()
         if scene and scene.get("overview"):
             self.set_camera({"preset": "room"})
@@ -364,13 +509,20 @@ class MujocoSession:
             self.mj.mj_resetData(self.model, self.data)
         self.mj.mj_forward(self.model, self.data)
         self.physics_error = physics_fault(self.data, self.mj)
+        self.map_id = "sim-" + str(uuid4())
+        if self.controller:
+            self.controller.reset()
+        if self.navigator:
+            self.navigator = type(self.navigator)(self.model, self.data, self.scene)
         self.running, self.steps, self.accumulator = False, 0, 0.0
         self.active_wall_time = self.dropped_wall_seconds = 0.0
         self.paced_sim_time = self.speed_wall_baseline = self.speed_sim_baseline = 0.0
 
     def controls(self):
         model, data = self.model, self.data
-        if self.position_servos:
+        if self.controller:
+            self.controller.apply(*self.navigator.velocity())
+        elif self.position_servos:
             data.ctrl[:] = self.nominal_ctrl
         elif self.hold and self.hold_supported:
             torque = (
@@ -429,7 +581,8 @@ class MujocoSession:
             self.accumulator = max(0.0, self.accumulator - self.model.opt.timestep)
             duration = self.scene.get("scenario_duration_s") if self.scene else None
             if (
-                isinstance(duration, (int, float))
+                not self.controller
+                and isinstance(duration, (int, float))
                 and duration > 0
                 and self.data.time >= duration
             ):
@@ -473,6 +626,34 @@ class MujocoSession:
         self.render_error = None
         return output.getvalue()
 
+    def observation(self):
+        from PIL import Image
+
+        if not self.controller:
+            return None, None
+        self.renderer.update_scene(
+            self.data, camera="robot_front", scene_option=self.visual_options
+        )
+        output = io.BytesIO()
+        Image.fromarray(self.renderer.render()).save(output, format="JPEG", quality=85)
+        jpeg = output.getvalue()
+        w, x, y, z = self.data.qpos[3:7]
+        pose = {
+            "x": float(self.data.qpos[0]),
+            "y": float(self.data.qpos[1]),
+            "yaw": math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)),
+            "map_id": self.map_id,
+        }
+        return jpeg, {
+            "frame_id": str(uuid4()),
+            "ts": int(time.time() * 1000),
+            "pose": pose,
+            "source": "simulation_render",
+            "jpeg_b64": base64.b64encode(jpeg).decode(),
+            "simulation_time": float(self.data.time),
+            "camera_id": "robot_front",
+        }
+
     def state(self):
         model, data = self.model, self.data
         simulation_time = finite_number(data.time)
@@ -494,6 +675,9 @@ class MujocoSession:
                 ):
                     current_phase = phase.get("label", phase.get("name"))
         return {
+            "map_id": self.map_id,
+            "locomotion": self.controller.state() if self.controller else None,
+            "navigation": self.navigator.snapshot() if self.navigator else None,
             "simulation_time": simulation_time,
             "scene_elapsed": simulation_time,
             "active_wall_time": self.active_wall_time,
@@ -514,13 +698,15 @@ class MujocoSession:
             "qpos_base": [finite_number(v) for v in data.qpos[:7]],
             "nu": model.nu,
             "source": "direct_mujoco",
-            "control_mode": "keyframe joint position targets; no gait controller"
+            "control_mode": "Trained DimOS Go1 walking policy (Go1 simulation surrogate)"
+            if self.controller
+            else "keyframe joint position targets; no gait controller"
             if self.position_servos
             else "PD joint hold (kp=40, kd=2); no gait controller"
             if self.hold
             else "passive physics (zero motor torque); no gait controller",
             "hold_enabled": self.hold,
-            "hold_supported": self.hold_supported,
+            "hold_supported": self.hold_supported and not self.controller,
             "physics_error": self.physics_error,
             "render_error": self.render_error,
             "frame_width": 640,
@@ -537,6 +723,7 @@ def run(args):
     session = MujocoSession(
         catalog.paths[first_id] if first_id else args.model,
         catalog.entries.get(first_id),
+        args.locomotion,
     )
     shared = Shared()
     shared.catalog = catalog
@@ -547,7 +734,7 @@ def run(args):
         f"MuJoCo {session.mj.__version__}: http://{args.host}:{args.port} (paused)",
         flush=True,
     )
-    previous, next_frame = time.monotonic(), 0.0
+    previous, next_frame, next_observation = time.monotonic(), 0.0, 0.0
     scene_error = catalog_error = None
     catalog_generation = None
     try:
@@ -599,6 +786,7 @@ def run(args):
                         candidate = MujocoSession(
                             candidate_catalog.paths[scene_id],
                             candidate_catalog.entries[scene_id],
+                            args.locomotion,
                         )
                         if candidate.physics_error:
                             raise ValueError("scene has invalid initial physics")
@@ -619,6 +807,7 @@ def run(args):
                         with shared.lock:
                             shared.catalog = catalog
                             shared.frame = frame
+                            shared.observation = shared.robot_frame = None
                             shared.state = {
                                 **session.state(),
                                 "ready": True,
@@ -635,6 +824,16 @@ def run(args):
                 elif action in {"play", "pause"}:
                     session.running = action == "play" and session.physics_error is None
                     session.accumulator = 0.0
+                elif action == "mission":
+                    if session.navigator:
+                        session.navigator.command(
+                            command["cmd"],
+                            command.get("waypoint"),
+                            command.get("command_id"),
+                        )
+                        session.running = session.physics_error is None
+                    else:
+                        scene_error = "Restart viewer with --locomotion to run missions"
                 elif action == "speed":
                     session.set_speed(command["value"])
                 elif action == "hold":
@@ -655,9 +854,31 @@ def run(args):
                 except Exception as exc:  # noqa: BLE001
                     session.render_error = f"{type(exc).__name__}: rendering failed"
                     session.running = False
+            if (
+                now >= next_observation
+                and session.controller
+                and session.physics_error is None
+            ):
+                next_observation = now + 0.5
+                try:
+                    robot_frame, observation = session.observation()
+                    with shared.lock:
+                        shared.robot_frame, shared.observation = (
+                            robot_frame,
+                            observation,
+                        )
+                except Exception as exc:  # noqa: BLE001 - expose rendering failure
+                    session.render_error = f"{type(exc).__name__}: robot camera failed"
             with shared.lock:
+                session_state = session.state()
+                clips = [{k: v for k, v in item.items() if k != "file_path"} for item in shared.speech.values()]
+                session_state["speech"] = clips
+                if session_state["navigation"]:
+                    session_state["navigation"]["commands"] = session_state["navigation"]["commands"] + [
+                        {"command_id": c["command_id"], "status": "completed" if c["status"] == "played" else "executing",
+                         "detail": "Browser reported playback finished" if c["status"] == "played" else "Audio synthesized; awaiting browser playback"} for c in clips]
                 shared.state = {
-                    **session.state(),
+                    **session_state,
                     "ready": shared.frame is not None,
                     "scene_count": len(catalog.entries),
                     "scene_loading": None,
@@ -677,6 +898,11 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument(
+        "--locomotion",
+        action="store_true",
+        help="Use matched Go1 model and trained walking policy",
+    )
     parser.add_argument(
         "--host", choices=["127.0.0.1", "localhost"], default="127.0.0.1"
     )

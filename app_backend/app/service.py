@@ -48,7 +48,8 @@ class Service:
     def status(self):
         return {'dog': self.dog, 'perception': self.perception, 'mode': self.mode,
                 'pending_checkin': self.pending,
-                'integrations': {'robot': 'not_connected', 'redis': 'not_implemented',
+                'integrations': {'robot': ('simulation_connected' if self.clock() - self.dog['ts'] < 3000 else 'simulation_stale')
+                                 if self.dog and self.dog['pose']['map_id'].startswith('sim-') else 'not_connected', 'redis': 'not_implemented',
                                  'memory': 'local_sqlite', 'voice': 'queued_only', 'vision': 'ingest_only'}}
 
     def events(self, since=0):

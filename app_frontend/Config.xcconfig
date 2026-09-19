@@ -1,0 +1,9 @@
+// Shared build defaults for Annie.xcodeproj (the iPhone app).
+// Per-machine signing goes in Local.xcconfig, which is gitignored:
+//
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.annie
+//
+// (Or just pick a Team under Signing & Capabilities in Xcode.)
+PRODUCT_BUNDLE_IDENTIFIER = app.annie.companion
+#include? "Local.xcconfig"

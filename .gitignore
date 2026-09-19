@@ -18,3 +18,9 @@ node_modules/
 .cache/
 .playwright-cli/
 MUJOCO_LOG.TXT
+
+# Annie Swift app: per-machine signing config and build output
+app_frontend/Local.xcconfig
+app_frontend/.build/
+app_frontend/Annie.xcodeproj/xcuserdata/
+app_frontend/Annie.xcodeproj/project.xcworkspace/xcuserdata/

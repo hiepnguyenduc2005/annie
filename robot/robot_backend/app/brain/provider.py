@@ -216,7 +216,7 @@ async def infer_image(config: VisionConfig, jpeg_b64: str, *, transport=None) ->
                                          trust_env=False, transport=transport) as client:
                 async with client.stream('POST', config.endpoint, headers=headers, json=payload) as response:
                     if response.status_code != 200:
-                        raise ProviderError('Vision provider request failed')
+                        raise ProviderError(f'Vision provider request failed (HTTP {response.status_code})')
                     data = bytearray()
                     async for chunk in response.aiter_bytes():
                         data.extend(chunk)

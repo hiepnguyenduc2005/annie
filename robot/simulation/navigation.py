@@ -43,6 +43,10 @@ class Navigator:
             # Residents block the footprint even though the person scan mesh is
             # visual-only (contype 0): the body mission must never overlap them.
             resident = name.startswith(("env_person_", "env_resident"))
+            if resident and model.body_mocapid[model.geom_bodyid[i]] >= 0:
+                # Animated actor protection is evaluated each physics tick by
+                # the viewer; freezing its initial bounds makes a false map.
+                continue
             if not resident and not (model.geom_contype[i] or model.geom_conaffinity[i]):
                 continue
             # Use conservative transformed bounds for static obstacle shapes.
@@ -89,6 +93,9 @@ class Navigator:
             ("bedroom", (-0.55, 0.6)),
             ("hallway", (1.0, -1.25)),
         ]
+        if self.scene.get('waypoints'):
+            candidates = [('home', self.home)] + [(p['id'], (p['x'], p['y']))
+                for p in self.scene['waypoints'] if p.get('floor', 0) == 0 and p['id'] != 'home']
         for name, target in candidates:
             point = self.nearest_free(target)
             if point is not None:

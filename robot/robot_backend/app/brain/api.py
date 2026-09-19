@@ -35,7 +35,8 @@ def create_app(config: VisionConfig | None = None, *, token: str | None = None, 
 
     @app.middleware('http')
     async def boundary(request: Request, call_next):
-        body_limit = 5_340_000 if request.url.path == '/transcribe' else MAX_BODY_BYTES
+        body_limit = (5_340_000 if request.url.path == '/transcribe' else
+                      MAX_BODY_BYTES + 24000 if request.url.path == '/plan' else MAX_BODY_BYTES)
         origin = request.headers.get('origin')
         if origin is not None:
             try:
@@ -121,6 +122,8 @@ def create_app(config: VisionConfig | None = None, *, token: str | None = None, 
 
     from .audio import build_audio_router
     app.include_router(build_audio_router(audio_config or config, transport=transport), dependencies=[Depends(authorize)])
+    from .planner import build_planner_router
+    app.include_router(build_planner_router(config, transport=transport, lock=lock), dependencies=[Depends(authorize)])
     return app
 
 

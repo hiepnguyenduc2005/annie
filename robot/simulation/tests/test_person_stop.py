@@ -64,7 +64,8 @@ def test_interlock_zeros_controller_without_waiting_for_inference():
     guard = PersonSafety(clock=lambda: 10, start=False)
     guard.reset('sim-one')
     body = SimpleNamespace(model=None, data=None, controller=Controller(),
-                           navigator=Navigator(), person_safety=guard)
+                           navigator=Navigator(), person_safety=guard,
+                           resident=None, resident_guard={'blocked':False})
     MujocoSession.controls(body)
     assert body.controller.velocity == (0, 0, 0)
     assert body.navigator.state == 'failed'

@@ -23,10 +23,10 @@
     <main>
       <section class="intro">
         <div>
-          <p class="eyebrow">LIVE SCENE FACTORY</p>
-          <h1>A home for every scenario.</h1>
+          <p class="eyebrow">ANNIE · LIVE HOME DEMO</p>
+          <h1>Welcome to grandma’s house.</h1>
           <p>
-            Generate repeatable homes, explore each scene, and test the robot.
+            Follow her day, see through Annie’s camera, and test a complete check-in.
           </p>
         </div>
         <a
@@ -71,6 +71,7 @@
             >
           </div>
           <div class="transport">
+            <button id="open-house">Enter full house</button>
             <button id="play" class="primary" disabled>Play simulation</button>
             <button id="step" disabled>Step once</button>
             <button id="reset" disabled>Reset</button>
@@ -100,6 +101,29 @@
           </div>
         </section>
         <aside>
+          <section class="panel" id="daily-life-panel">
+            <p class="eyebrow">GRANDMA’S DAY</p>
+            <h2 id="resident-activity">Resident routine</h2>
+            <p id="resident-detail" class="hint">Choose the full house or daily-life scene to follow the resident.</p>
+            <div class="mission-buttons">
+              <button data-resident="routine">Start routine</button>
+              <button data-resident="fall">Stage a fall</button>
+              <button data-resident="recover">Recover</button>
+            </div>
+            <p class="hint">Authored actor animation. The brain receives camera pixels, not this activity label.</p>
+            <p id="stairs-capability" class="hint"></p>
+            <p class="eyebrow">ANNIE’S AI BRAIN</p>
+            <form id="intelligence-form">
+              <label for="intelligence-goal">Give Annie a goal</label>
+              <textarea id="intelligence-goal" maxlength="500" rows="3">Explore the ground floor and check on the resident. Describe what you see, stay clear of people, and choose your next action from camera evidence.</textarea>
+              <button type="submit" class="primary">Start AI / resume</button>
+              <button id="intelligence-stop" type="button">Pause AI</button>
+            </form>
+            <p id="autonomy-status" class="hint">Waiting for the model planner.</p>
+            <p id="agent-reason" class="hint"></p>
+            <p id="agent-context" class="hint"></p>
+            <p class="hint">Camera + goal + observation memory + execution feedback → model-selected action. Movement remains subject to the local stop interlocks.</p>
+          </section>
           <section class="panel factory-panel">
             <p class="eyebrow">BULK GENERATION</p>
             <h2>Make a batch</h2>
@@ -276,6 +300,7 @@
             <div id="say-audio-wrap" hidden>
               <p id="say-meta" class="hint"></p>
               <p id="say-clip-text" class="hint"></p>
+              <p id="say-native" class="hint" hidden></p>
               <audio id="say-audio" controls preload="none"></audio>
               <button id="say-play" class="primary" type="button" hidden>
                 ▶ Hear Annie
@@ -324,6 +349,20 @@
               proxy. Maximum 4 MB. Do not upload real personal recordings.
             </p>
           </section>
+          <section class="panel" id="resident-reply-panel">
+            <p class="eyebrow">CHECK-IN DEMO</p>
+            <h2>Replay a resident reply</h2>
+            <p id="reply-window" class="hint" role="status">Waiting for a check-in.</p>
+            <div class="camera-buttons">
+              <button data-reply="okay" disabled>Replay “okay”</button>
+              <button data-reply="help" disabled>Replay “help me”</button>
+              <button data-reply="not-okay" disabled>Replay “not okay”</button>
+              <button data-reply="ambiguous" disabled>Replay “maybe”</button>
+            </div>
+            <p id="resident-reply-result" class="hint" role="status"></p>
+            <p class="hint">Synthetic WAV input at its recorded sample rate → local Whisper → incident policy.
+              These controls do not capture a microphone or send an expected transcript.</p>
+          </section>
           <section class="panel">
             <p class="eyebrow">LOOK AROUND</p>
             <h2>Camera</h2>
@@ -332,6 +371,9 @@
               ><button data-camera="front">Front</button
               ><button data-camera="side">Side</button
               ><button data-camera="top">Top</button>
+              <button data-camera="downstairs">Downstairs</button>
+              <button data-camera="upstairs">Upstairs</button>
+              <button data-camera="whole-house">Whole house</button>
             </div>
             <p class="hint">
               These controls move the viewer camera, not the robot.
@@ -377,7 +419,7 @@ No scenario loaded.</pre
             </div>
             <div>
               <span class="pending">○</span
-              ><span>Image-based perception — next</span>
+              ><span>Camera inference + native speech + family receipts</span>
             </div>
           </section>
         </aside>

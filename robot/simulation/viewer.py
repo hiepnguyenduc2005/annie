@@ -18,6 +18,11 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from uuid import UUID, uuid4
 
+try:
+    from robot.simulation.native_audio import NativeAudioError, NativeAudioPlayer
+except ModuleNotFoundError:  # direct execution from the simulation directory
+    from native_audio import NativeAudioError, NativeAudioPlayer
+
 WEB = Path(__file__).resolve().parent / "web"
 if __package__ in (None, ''):
     sys.path.insert(0, str(WEB.parent.parent.parent))
@@ -36,6 +41,9 @@ def validate_control(value, scene_ids=()):
         "generate",
         "speed",
         "mission",
+        "resident",
+        "autonomy",
+        "intelligence",
     }:
         raise ValueError("action must be play, pause, reset, step, camera, or hold")
     if value["action"] == "mission":
@@ -48,6 +56,7 @@ def validate_control(value, scene_ids=()):
             "living-room",
             "bedroom",
             "hallway",
+            "kitchen", "study", "garden-room",
         }:
             raise ValueError("unknown waypoint")
         if value['cmd'] != 'goto' and 'waypoint' in value:
@@ -60,6 +69,18 @@ def validate_control(value, scene_ids=()):
             raise ValueError('heading is only valid for turn')
         if "command_id" in value:
             UUID(value["command_id"])
+        return value
+    if value["action"] == "resident":
+        if set(value) != {"action", "cmd"} or value.get("cmd") not in {"routine", "fall", "recover"}:
+            raise ValueError("resident requires routine, fall or recover")
+        return value
+    if value["action"] == "autonomy":
+        if set(value) != {"action", "mode"} or value.get("mode") not in {"patrol", "watch", "paused", "find_resident"}:
+            raise ValueError("invalid autonomy mode")
+        return value
+    if value['action']=='intelligence':
+        if set(value)!={'action','enabled','goal'} or type(value['enabled']) is not bool or not isinstance(value['goal'],str) or not 1<=len(value['goal'].strip())<=500:
+            raise ValueError('intelligence requires enabled and a goal up to 500 characters')
         return value
     if value["action"] == "speed":
         if (
@@ -98,6 +119,7 @@ def validate_control(value, scene_ids=()):
         if set(value) != {"action", "preset"} or value["preset"] not in {
             *PRESETS,
             "room",
+            "downstairs", "upstairs", "whole-house",
         }:
             raise ValueError("preset must be front, side, or top")
     else:
@@ -109,7 +131,7 @@ def validate_control(value, scene_ids=()):
         for name, bounds in {
             "azimuth": (-360, 360),
             "elevation": (-90, 90),
-            "distance": (0.4, 10),
+            "distance": (0.4, 40),
         }.items():
             if name in value:
                 number = value[name]
@@ -157,6 +179,77 @@ class Shared:
         self.speech_lock = threading.Lock()
         self.stt_lock = threading.Lock()
         self.stt = None
+        self.native_player = None
+        self.resident_reply = None
+
+
+def playback_callback_for(shared, command_id):
+    """Record native playback process states; never human audibility."""
+
+    def on_state(payload):
+        state = payload.get("state")
+        with shared.lock:
+            entry = shared.speech.get(command_id)
+            if entry is None:
+                return
+            wall = payload.get("wall")
+            entry["playback_updated_wall"] = wall
+            if state == "playing":
+                entry["status"] = "playing"
+                entry["playback_started_wall"] = wall
+            elif state == "played":
+                entry["status"] = "played"
+                entry["played"] = True
+                entry["playback_ended_wall"] = wall
+                # Reached only after the afplay process exited 0.
+                entry["playback_detail"] = "playback_process_completed"
+            elif state == "failed":
+                entry["status"] = "failed"
+                entry["playback_ended_wall"] = wall
+                entry["playback_detail"] = "playback_process_failed"
+                entry["playback_error"] = str(
+                    payload.get("error") or "unknown playback failure"
+                )
+
+    return on_state
+
+
+def speech_receipts(clips, native):
+    """Map speech clip statuses to navigation command receipts."""
+
+    receipts = []
+    for clip in clips:
+        if clip["status"] == "played":
+            receipts.append(
+                {
+                    "command_id": clip["command_id"],
+                    "status": "completed",
+                    "detail": "playback_process_completed"
+                    if native
+                    else "Browser reported playback finished",
+                }
+            )
+        elif clip["status"] == "failed":
+            receipts.append(
+                {
+                    "command_id": clip["command_id"],
+                    "status": "failed",
+                    "detail": clip.get("playback_error")
+                    if native
+                    else "Playback failed",
+                }
+            )
+        else:
+            receipts.append(
+                {
+                    "command_id": clip["command_id"],
+                    "status": "executing",
+                    "detail": "Audio synthesized; awaiting native playback"
+                    if native
+                    else "Audio synthesized; awaiting browser playback",
+                }
+            )
+    return receipts
 
 
 def handler_for(shared, port):
@@ -200,7 +293,24 @@ def handler_for(shared, port):
             if path == "/state":
                 with shared.lock:
                     state = dict(shared.state)
+                state['audio_output'] = 'native' if shared.native_player else 'browser'
                 self.reply(200, state)
+            elif path == '/checkin-state':
+                try:
+                    import os
+                    import httpx
+                    token = os.getenv('ANNIE_API_TOKEN')
+                    headers = {'Authorization': 'Bearer ' + token} if token else {}
+                    with httpx.Client(base_url='http://127.0.0.1:8000', headers=headers,
+                                      timeout=2, trust_env=False) as app:
+                        response = app.get('/status')
+                        response.raise_for_status()
+                        pending = response.json().get('pending_checkin')
+                    with shared.lock:
+                        last_reply = shared.resident_reply
+                    self.reply(200, {'pending_checkin': pending, 'last_reply': last_reply})
+                except Exception:
+                    self.reply(503, {'error': 'Check-in API unavailable'})
             elif path == "/brain-state":
                 try:
                     status_file = Path(".data/simulation/bridge-status.json")
@@ -266,7 +376,7 @@ def handler_for(shared, port):
             if not self.allowed(write=True):
                 return
             path = urlsplit(self.path).path
-            if path in {"/say", "/speech/played", "/transcribe", "/transcribe-local"}:
+            if path in {"/say", "/speech/played", "/transcribe", "/transcribe-local", "/resident-reply"}:
                 self.speech_request(path)
                 return
             if path != "/control":
@@ -312,6 +422,27 @@ def handler_for(shared, port):
                 value = json.loads(self.rfile.read(length))
                 if not isinstance(value, dict):
                     raise TypeError()
+                if path == '/resident-reply':
+                    from robot.simulation.resident_reply import KINDS, ReplyError, replay
+                    import httpx
+                    import os
+                    if set(value) != {'fixture', 'event_id'} or value['fixture'] not in KINDS:
+                        raise ValueError()
+                    event_id = str(UUID(value['event_id']))
+                    token = os.getenv('ANNIE_API_TOKEN')
+                    headers = {'Authorization': 'Bearer ' + token} if token else {}
+                    try:
+                        with httpx.Client(base_url='http://127.0.0.1:8000', headers=headers,
+                                          timeout=5, trust_env=False) as app, \
+                                httpx.Client(base_url=f'http://127.0.0.1:{port}', timeout=15,
+                                             trust_env=False) as viewer:
+                            result = replay(value['fixture'], event_id=event_id, app=app, viewer=viewer)
+                        with shared.lock:
+                            shared.resident_reply = result
+                        self.reply(200, result)
+                    except ReplyError as exc:
+                        self.reply(409, {'error': str(exc)})
+                    return
                 if path == '/transcribe-local':
                     if set(value) != {'audio_b64', 'format', 'source', 'utterance_id'} or value['format'] != 'wav' or value['source'] != 'simulation_audio':
                         raise ValueError()
@@ -359,10 +490,17 @@ def handler_for(shared, port):
                         raise ValueError()
                     cid = str(UUID(value["command_id"]))
                     with shared.lock:
-                        if cid not in shared.speech:
+                        clip = shared.speech.get(cid)
+                        if clip is None:
                             raise ValueError()
-                        shared.speech[cid]["status"] = "played"
-                        shared.speech[cid]["played"] = True
+                        if clip.get("playback") == "native":
+                            self.reply(
+                                409,
+                                {"error": "This clip plays on the native output; browser receipts are not accepted"},
+                            )
+                            return
+                        clip["status"] = "played"
+                        clip["played"] = True
                     self.reply(200, {"command_id": cid, "status": "played"})
                     return
                 if not set(value) <= {"text", "command_id"}:
@@ -384,10 +522,35 @@ def handler_for(shared, port):
                             from speech import SpeechAdapter
                         clip = asyncio.run(SpeechAdapter().speak(text, cid))
                         clip.update(text=text, url=f"/speech/{cid}.wav")
+                        native_mode = shared.native_player is not None
+                        if native_mode:
+                            clip["playback"] = "native"
+                            clip["output"] = "macos_default_output"
                         with shared.lock:
                             shared.speech[cid] = clip
                             while len(shared.speech) > 10:
                                 shared.speech.pop(next(iter(shared.speech)))
+                        if native_mode:
+                            # Single enqueue per clip, on first synthesis only.
+                            try:
+                                shared.native_player.enqueue(
+                                    {
+                                        "file_path": str(Path(clip["file_path"]).resolve()),
+                                        "duration_s": clip["duration_s"],
+                                    },
+                                    on_state_callback=playback_callback_for(
+                                        shared, cid
+                                    ),
+                                )
+                            except NativeAudioError as exc:
+                                with shared.lock:
+                                    entry = shared.speech.get(cid)
+                                    if entry is not None:
+                                        entry["status"] = "failed"
+                                        entry["playback_detail"] = (
+                                            "playback_process_failed"
+                                        )
+                                        entry["playback_error"] = str(exc)
                     self.reply(202, {k: v for k, v in clip.items() if k != "file_path"})
                 finally:
                     shared.speech_lock.release()
@@ -436,6 +599,7 @@ class SceneCatalog:
                     "overview",
                     "timeline",
                     "scenario_duration_s",
+                    "rooms", "floors", "stairs", "waypoints", "daily_life",
                 )
                 if key in item
             }
@@ -477,6 +641,11 @@ class MujocoSession:
         self.mj = mujoco
         self.locomotion_enabled = locomotion
         self.controller = self.navigator = None
+        self.resident = None
+        self.resident_guard = {'blocked': False, 'source': 'authored_simulator_proximity'}
+        self.autonomy_mode, self.autonomy_revision = 'paused', 0
+        self.intelligence_enabled, self.intelligence_revision = False, 0
+        self.intelligence_goal = 'Explore the ground floor and check on the resident. Describe what you see, stay clear of people, and choose your next action from camera evidence.'
         self.person_safety = person_safety
         if locomotion:
             try:
@@ -496,6 +665,10 @@ class MujocoSession:
         self.visual_options.geomgroup[3] = (
             0  # Hide Go2 collision proxies; keep visual meshes.
         )
+        self.observation_options = mujoco.MjvOption()
+        self.observation_options.geomgroup[3] = 0
+        if scene and scene.get('floors'):
+            self.visual_options.geomgroup[4] = 0
         self.camera.azimuth, self.camera.elevation, self.camera.distance = PRESETS[
             "side"
         ]
@@ -516,6 +689,10 @@ class MujocoSession:
             )
         )
         self.reset()
+        if scene and scene.get('daily_life'):
+            from robot.simulation.daily_life import ResidentRoutine
+            self.resident = ResidentRoutine(model, self.data, scene)
+            mujoco.mj_forward(model, self.data)
         self.nominal_ctrl = self.data.ctrl.copy()
         self.targets = (
             self.data.qpos[model.jnt_qposadr[joints]].copy()
@@ -551,6 +728,13 @@ class MujocoSession:
             self.person_safety.reset(self.map_id)
         if self.controller:
             self.controller.reset()
+        if self.resident:
+            self.resident.reset()
+            self.mj.mj_forward(self.model,self.data)
+        self.autonomy_mode = 'paused'
+        self.autonomy_revision += 1
+        self.intelligence_enabled = False
+        self.intelligence_revision += 1
         if self.navigator:
             self.navigator = type(self.navigator)(self.model, self.data, self.scene)
         self.running, self.steps, self.accumulator = False, 0, 0.0
@@ -561,9 +745,13 @@ class MujocoSession:
         model, data = self.model, self.data
         if self.controller:
             safety = self.person_safety.snapshot() if self.person_safety else None
-            if safety and safety['blocked']:
+            if self.resident:
+                positions=self.data.mocap_pos
+                near = min(math.hypot(p[0]-data.qpos[0],p[1]-data.qpos[1]) for p in positions if p[2]<2) if len(positions) else math.inf
+                self.resident_guard = {'blocked':near<.85, 'distance_m':near, 'source':'authored_simulator_proximity'}
+            if (safety and safety['blocked']) or self.resident_guard['blocked']:
                 if self.navigator.state in ('moving', 'scanning', 'turning'):
-                    self.navigator.fail(safety['reason'])
+                    self.navigator.fail(safety['reason'] if safety and safety['blocked'] else 'Animated resident proximity guard')
                 self.controller.apply(0, 0, 0)
             else:
                 self.controller.apply(*self.navigator.velocity())
@@ -588,6 +776,8 @@ class MujocoSession:
         if self.physics_error:
             return
         try:
+            if self.resident:
+                self.resident.update(float(self.data.time))
             self.controls()
             self.mj.mj_step(self.model, self.data)
             self.steps += 1
@@ -638,7 +828,7 @@ class MujocoSession:
             self.paced_sim_time += max(0.0, float(self.data.time) - before)
 
     def set_camera(self, command):
-        if command.get("preset") == "room":
+        if command.get("preset") in {"room", "downstairs", "upstairs", "whole-house"}:
             if not self.scene or not self.scene.get("overview"):
                 return
             overview = self.scene["overview"]
@@ -646,6 +836,10 @@ class MujocoSession:
             for name in ("azimuth", "elevation", "distance"):
                 setattr(self.camera, name, overview[name])
             self.track_robot = False
+            preset = command.get('preset')
+            if self.scene.get('floors'):
+                self.visual_options.geomgroup[4] = int(preset in ('upstairs', 'whole-house'))
+                self.camera.lookat[2] = 3.5 if preset == 'upstairs' else 1.2
         elif "preset" in command:
             self.camera.azimuth, self.camera.elevation, self.camera.distance = PRESETS[
                 command["preset"]
@@ -677,7 +871,7 @@ class MujocoSession:
         if not self.controller:
             return None, None
         self.renderer.update_scene(
-            self.data, camera="robot_front", scene_option=self.visual_options
+            self.data, camera="robot_front", scene_option=self.observation_options
         )
         output = io.BytesIO()
         Image.fromarray(self.renderer.render()).save(output, format="JPEG", quality=85)
@@ -724,6 +918,13 @@ class MujocoSession:
             "locomotion": self.controller.state() if self.controller else None,
             "navigation": self.navigator.snapshot() if self.navigator else None,
             "person_safety": self.person_safety.snapshot() if self.person_safety else {'enabled': False},
+            "resident": self.resident.state() if self.resident else None,
+            "resident_guard": self.resident_guard,
+            "autonomy_mode": self.autonomy_mode,
+            "autonomy_revision": self.autonomy_revision,
+            "intelligence_enabled": self.intelligence_enabled,
+            "intelligence_goal": self.intelligence_goal,
+            "intelligence_revision": self.intelligence_revision,
             "simulation_time": simulation_time,
             "scene_elapsed": simulation_time,
             "active_wall_time": self.active_wall_time,
@@ -777,6 +978,9 @@ def run(args):
         guard,
     )
     shared = Shared()
+    if args.native_audio:
+        shared.native_player = NativeAudioPlayer()
+        shared.native_player.start()
     def warm_question():
         from robot.simulation.speech import SpeechAdapter, CHECKIN_PROMPT
         try:
@@ -833,6 +1037,8 @@ def run(args):
                                 count=command["count"],
                                 seed=command["seed"],
                             )
+                            from robot.simulation.house import write_house
+                            write_house(args.factory_assets,output)
                             candidate_catalog = SceneCatalog(output / "manifest.json")
                             scene_id = next(iter(candidate_catalog.entries))
                             generation = {
@@ -884,6 +1090,28 @@ def run(args):
                 elif action in {"play", "pause"}:
                     session.running = action == "play" and session.physics_error is None
                     session.accumulator = 0.0
+                elif action == 'resident':
+                    if session.resident:
+                        session.resident.trigger(command['cmd'])
+                        session.running = session.physics_error is None
+                elif action == 'autonomy':
+                    session.autonomy_mode = command['mode']
+                    session.autonomy_revision += 1
+                    if command['mode'] in ('paused','watch') and session.navigator:
+                        session.navigator.command('stop')
+                    elif guard:
+                        guard.explicit_restart()
+                    session.running = session.physics_error is None
+                elif action == 'intelligence':
+                    session.intelligence_enabled = command['enabled']
+                    session.intelligence_goal = command['goal'].strip()
+                    session.intelligence_revision += 1
+                    session.autonomy_mode='paused'
+                    if not command['enabled'] and session.navigator:
+                        session.navigator.command('stop')
+                    elif guard:
+                        guard.explicit_restart()
+                    session.running=session.physics_error is None
                 elif action == "mission":
                     if session.navigator:
                         if guard and command['cmd'] not in ('stop',):
@@ -944,8 +1172,7 @@ def run(args):
                 session_state["speech"] = clips
                 if session_state["navigation"]:
                     session_state["navigation"]["commands"] = session_state["navigation"]["commands"] + [
-                        {"command_id": c["command_id"], "status": "completed" if c["status"] == "played" else "executing",
-                         "detail": "Browser reported playback finished" if c["status"] == "played" else "Audio synthesized; awaiting browser playback"} for c in clips]
+                        *speech_receipts(clips, shared.native_player is not None)]
                 shared.state = {
                     **session_state,
                     "ready": shared.frame is not None,
@@ -961,6 +1188,8 @@ def run(args):
     finally:
         server.shutdown()
         server.server_close()
+        if shared.native_player is not None:
+            shared.native_player.stop()
         if guard:
             guard.close()
         session.close()
@@ -975,6 +1204,12 @@ def main():
         "--locomotion",
         action="store_true",
         help="Use matched Go1 model and trained walking policy",
+    )
+    parser.add_argument(
+        "--native-audio",
+        action="store_true",
+        help="Play speech via the native audio player on the macOS default output; "
+        "browser playback stays the default when this flag is absent (no fallback)",
     )
     parser.add_argument(
         "--host", choices=["127.0.0.1", "localhost"], default="127.0.0.1"

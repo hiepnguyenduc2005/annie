@@ -60,15 +60,15 @@ function renderMission(currentState) {
       : "Missions unavailable: locomotion controller not loaded.";
     return;
   }
-  if (nav?.active_command?.status === "failed" || nav?.active_command?.status === "blocked") {
-    $("mission-status").textContent = `Mission ${nav.active_command.status}: ${nav.active_command.detail ?? "command not completed"} · ${position} · ${loco.label ?? "Go1 locomotion surrogate"}`;
-    return;
-  }
   const base = currentState.qpos_base ?? [];
   const position =
     base.length >= 2
       ? `Base at x ${Number(base[0]).toFixed(2)} m, y ${Number(base[1]).toFixed(2)} m`
       : "Base position unavailable";
+  if (nav?.active_command?.status === "failed" || nav?.active_command?.status === "blocked") {
+    $("mission-status").textContent = `Mission ${nav.active_command.status}: ${nav.active_command.detail ?? "command not completed"} · ${position} · ${loco.label ?? "Go1 locomotion surrogate"}`;
+    return;
+  }
   const detail = nav?.active_command?.detail
     ? `${nav.active_command.status}: ${nav.active_command.detail}`
     : nav?.state
@@ -82,10 +82,7 @@ function renderMission(currentState) {
 function currentYaw() {
   const quat = current?.qpos_base;
   if (Array.isArray(quat) && quat.length >= 7) {
-    const x = quat[3];
-    const y = quat[4];
-    const z = quat[5];
-    const w = quat[6];
+    const [w, x, y, z] = quat.slice(3, 7);
     const yaw = Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z));
     if (Number.isFinite(yaw)) return yaw;
   }
@@ -195,6 +192,15 @@ async function pollState() {
       wasConnected = true;
     }
     renderMission(current);
+    $('demo-voice').closest('label').hidden = current.audio_output === 'native';
+    const resident = current.resident;
+    $('resident-activity').textContent = resident?.activity || 'Resident routine';
+    $('resident-detail').textContent = resident
+      ? `${resident.phase || resident.posture || ''} · ${resident.source || 'authored actor animation'} · ${Number(current.simulation_time).toFixed(1)} s`
+      : 'Select an animated daily-life scene. Fixed-pose test scenes remain available.';
+    document.querySelectorAll('[data-resident]').forEach(button => { button.disabled = !resident || busy; });
+    $('stairs-capability').textContent = current.current_scene?.stairs
+      ? 'Two physical floors · 18 household steps · upstairs walking unavailable with the current policy.' : '';
     $("connection").textContent = "Local simulator connected";
     $("connection-dot").className = "online";
     $("run-state").textContent = current.physics_error
@@ -231,7 +237,7 @@ async function pollState() {
       $("speed").value = String(current.requested_speed ?? 1);
     $("phase").textContent = current.current_phase
       ? `Scheduled phase: ${current.current_phase}`
-      : "No routine schedule loaded.";
+      : current.resident ? `Routine: ${current.resident.activity} · ${Math.round(current.resident.cycle_duration_s)} s demo day` : "Fixed-pose test scene.";
     if (current.dropped_wall_seconds > 0.1)
       notice(
         `Rendering cannot keep up: ${current.dropped_wall_seconds.toFixed(2)} s of wall time skipped. Measured speed shows actual progress.`,
@@ -323,6 +329,22 @@ for (const button of document.querySelectorAll("[data-camera]")) {
     control({ action: "camera", preset: button.dataset.camera }),
   );
 }
+document.querySelectorAll('[data-resident]').forEach(button => {
+  button.addEventListener('click', () => control({action:'resident',cmd:button.dataset.resident}));
+});
+$('intelligence-form').addEventListener('submit', event => {
+  event.preventDefault();
+  control({action:'intelligence',enabled:true,goal:$('intelligence-goal').value});
+});
+$('intelligence-stop').addEventListener('click',()=>control({action:'intelligence',enabled:false,goal:$('intelligence-goal').value}));
+$('open-house').addEventListener('click', async () => {
+  if (!catalog.scenes.some(scene => scene.id === 'grandmas-house')) {
+    notice('Full house is being loaded into the scene catalog.');
+    return;
+  }
+  await control({action:'scene',id:'grandmas-house'});
+  await control({action:'play'});
+});
 document.addEventListener("keydown", (event) => {
   if (
     event.code === "Space" &&
@@ -444,6 +466,14 @@ async function pollBrain() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok)
       throw new Error(data.last_error || "Brain bridge not connected");
+    const agent = data.agent;
+    $('autonomy-status').textContent = agent
+      ? `${current?.intelligence_enabled ? (agent.thinking ? 'Thinking…' : agent.action?.action || 'Ready') : 'Paused'} · ${agent.model || 'vision-language model'}${agent.latency_ms ? ' · '+Math.round(agent.latency_ms)+' ms' : ''}`
+      : 'Waiting for the model planner.';
+    $('agent-reason').textContent = agent ? `${agent.action?.reason || ''} · ${agent.execution || ''}` : '';
+    $('agent-context').textContent = agent?.context
+      ? `${agent.context.memories_included} cited memories · ~${agent.context.estimated_text_tokens} context text tokens · ${agent.usage?.prompt_tokens ?? '—'} actual input tokens including image · ${agent.context.output_token_limit} output-token cap`
+      : '';
     const mode =
       data.last_provider?.mode === "local"
         ? "LOCAL MODEL"
@@ -720,9 +750,49 @@ $("transcribe-form").addEventListener("submit", async (event) => {
   }
 });
 
+let replyBusy = false;
+let replyEventId = null;
+async function pollCheckin() {
+  try {
+    const response = await fetch('/checkin-state', {cache: 'no-store'});
+    if (!response.ok) throw new Error('Check-in API unavailable');
+    const data = await response.json();
+    const pending = data.pending_checkin;
+    const open = pending?.phase === 'awaiting_reply' && Date.now() < pending.deadline_at;
+    replyEventId = open ? pending.event_id : null;
+    $('reply-window').textContent = open
+      ? `Reply window: ${Math.max(0, (pending.deadline_at - Date.now()) / 1000).toFixed(1)} s remaining`
+      : pending ? 'Waiting for question playback to finish.' : 'No active check-in.';
+    document.querySelectorAll('[data-reply]').forEach(button => { button.disabled = !open || replyBusy; });
+  } catch (error) {
+    replyEventId = null;
+    $('reply-window').textContent = error.message;
+    document.querySelectorAll('[data-reply]').forEach(button => { button.disabled = true; });
+  }
+}
+document.querySelectorAll('[data-reply]').forEach(button => {
+  button.addEventListener('click', async () => {
+    if (replyBusy || !replyEventId) return;
+    replyBusy = true;
+    document.querySelectorAll('[data-reply]').forEach(item => { item.disabled = true; });
+    $('resident-reply-result').textContent = 'Replaying WAV and recognizing locally…';
+    try {
+      const data = await postJSON('/resident-reply', {fixture: button.dataset.reply, event_id: replyEventId});
+      const decision = data.decision;
+      $('resident-reply-result').textContent = `Whisper heard: ${data.recognition.text || '(no speech)'} · ${Math.round(data.recognition.latency_ms)} ms · ${decision.intent || decision.reason} · ${decision.applied ? 'applied to this check-in' : 'not applied'}`;
+    } catch (error) {
+      $('resident-reply-result').textContent = `Reply failed: ${error.message}`;
+    } finally {
+      replyBusy = false;
+      pollCheckin();
+    }
+  });
+});
+
 async function voiceLoop() {
   await pollQueuedClips();
   pollBrain();
+  pollCheckin();
   setTimeout(voiceLoop, 500);
 }
 voiceLoop();

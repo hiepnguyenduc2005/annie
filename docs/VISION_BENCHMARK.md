@@ -1,6 +1,6 @@
 # Local Vision Latency Benchmark
 
-`simulation/vision_benchmark.py` measures real end-to-end vision latency on
+`robot/simulation/vision_benchmark.py` measures real end-to-end vision latency on
 the local Ollama OpenAI endpoint (`qwen3-vl:2b-instruct`). It fetches a live
 frame from the simulation viewer (`GET /observation`: 640x480 JPEG with
 `frame_id`/`ts`), downsamples it with Pillow, calls
@@ -38,7 +38,7 @@ scene load or re-point the camera before claiming classification accuracy.
 
 ## Usage
 
-    .venv/bin/python simulation/vision_benchmark.py --sizes 320 256 \
+    .venv/bin/python robot/simulation/vision_benchmark.py --sizes 320 256 \
         --out output/vision/benchmark_results.json
 
 The script touches only `output/vision/` and makes no paid or external calls.

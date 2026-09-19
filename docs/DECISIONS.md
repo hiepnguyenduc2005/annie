@@ -54,3 +54,10 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
 Use the next `DEC-NNN` ID. Include date, status, context, decision, alternatives,
 and consequences. If a decision changes, add a new entry and mark the older one
 superseded with a link. Link implementation details instead of duplicating them.
+
+
+## DEC-005 — Isolate the simulator workspace under robot (2026-09-19)
+
+- Context: The user explicitly requested that all simulator-related code, including its frontend, app backend, robot backend, and contract, live under `robot/`.
+- Decision: Move the working simulator/demo stack to `robot/{simulation,frontend,app_backend,robot_backend,contract}` and use qualified `robot.*` Python imports. Keep the existing top-level team health scaffolds and Swift app independent. This supersedes DEC-003's placement of the demo in the top-level app backend.
+- Consequences: Run commands from the repository root using the new paths. Local URLs remain port 8766 for the simulator and port 8000 for the family demo. Root `.env`, ignored caches, datasets, and runtime databases retain their locations. The relocated demo has one incident engine; no second policy engine was added.

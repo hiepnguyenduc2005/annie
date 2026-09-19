@@ -7,7 +7,7 @@ download, cached under `.cache/models/whisper/` (gitignored).
 
 ## Scope and ownership
 
-- Owns: `simulation/local_stt.py`, `simulation/tests/test_local_stt.py`, this doc.
+- Owns: `robot/simulation/local_stt.py`, `robot/simulation/tests/test_local_stt.py`, this doc.
 - Does not touch: backend API, models, service, viewer, or UI. Root wires
   the adapter into the runtime.
 
@@ -22,7 +22,7 @@ download, cached under `.cache/models/whisper/` (gitignored).
 Python adapter:
 
 ```python
-from simulation.local_stt import LocalSTTAdapter
+from robot.simulation.local_stt import LocalSTTAdapter
 
 adapter = LocalSTTAdapter()          # tiny.en, CPU, int8, .cache/models/whisper
 result = adapter.transcribe(path_or_bytes, utterance_id=stable_id)
@@ -37,7 +37,7 @@ unchanged on the result.
 
 ## Audio bounds
 
-Same envelope as `robot_backend/app/brain/audio.py` so a clip valid there is
+Same envelope as `robot/robot_backend/app/brain/audio.py` so a clip valid there is
 valid here: 16-bit PCM WAV, mono or stereo, 8,000-48,000 Hz, 1 frame to 20 s,
 4,000,000 decoded bytes max. The simulation speech clips (22.05 kHz mono) fit.
 Rejected audio raises `LocalSTTError` with a bounded message.
@@ -71,11 +71,11 @@ captured in `.data/simulation/speech/stt_benchmark.json` (gitignored;
 
 ## Tests
 
-`simulation/tests/test_local_stt.py` always mocks the model (no network in
+`robot/simulation/tests/test_local_stt.py` always mocks the model (no network in
 routine tests). Run with:
 
 ```bash
-.cache/dimos/.venv/bin/python -m pytest simulation/tests/test_local_stt.py -q
+.cache/dimos/.venv/bin/python -m pytest robot/simulation/tests/test_local_stt.py -q
 ```
 
 The benchmark above was a separate, one-off real-model run, not part of the

@@ -24,6 +24,8 @@ not a medical diagnosis or a replacement for emergency response.
 | REQ-006 | Evidence-backed scene memory. | Query cites frame ID, capture time, and observer pose; no evidence gives an explicitly unanswerable response. |
 | REQ-007 | Full frames remain local. | Raw frames do not enter the app stream, cloud memory, cloud agents, or routine logs. Released derivatives have explicit egress policies. |
 | REQ-008 | Reproducible software demo. | Fresh checkout exercises bed, incident, reassurance, timeout, acknowledgement, message, and query without keys, hardware, or outbound notifications. |
+| REQ-010 | The simulated dog executes waypoint, patrol, stop/resume and look missions. | Trained-policy joint actuation moves the matched Go1 surrogate; measured poses and command receipts reach the app. |
+| REQ-011 | Rendered image and synthetic audio inference use interchangeable compute services. | Preserve capture identity and timestamps, validate model outputs, report failures, and enforce the configured shared cloud budget. |
 | REQ-009 | Optional Subconscious advisory team. | Bounded text-only agents run only when configured and opted in; no robot, alert, or messaging authority; provider failure is tested with mocks. |
 
 The rule uses known floor/chair locations. Unlike the source's literal
@@ -52,14 +54,32 @@ with coordinates do not establish persistent identity or a full 4D graph.
 Full frames stay on the trusted local body/brain network. Cloud audio/text,
 Elastic captions, Linq notifications, released crops, and Subconscious evidence
 can contain personal information. This is local-first, not fully air-gapped.
-A cloud vision fallback is a separate policy decision and disabled by default.
+The user authorized cloud inference for synthetic simulator frames on 2026-09-19, within a total $20 external inference budget. It is explicitly configured; real resident/hardware frames remain local. No automatic provider fallback is permitted.
 Use synthetic data for the current demo; define retention and crop release
 before collecting actual resident observations. Never put media or secrets in Git.
 
 ## Interfaces and open integration questions
 
-[The contract](contract/README.md) defines component interfaces. Resolve the
+[The contract](robot/contract/README.md) defines component interfaces. Resolve the
 actual hardware/SDK/model versions, frame-to-pose synchronization, crop and
 retention policy, named owner for brain integration, and notification/playback
 acknowledgements before physical signoff. Measure demo latency and false alerts
 on stated scenarios instead of inventing performance figures.
+
+## Detailed acceptance and codebase quality targets
+
+[Acceptance target 1](docs/ACCEPTANCE.md) specifies component tests, exact
+incident behavior, measurable performance targets, fault/restart recovery,
+end-to-end scripts, and separate software/simulation/audio/notification/hardware
+gates. [The architecture contract](docs/ARCHITECTURE.md) assigns owners and module
+boundaries; [the run template](docs/ACCEPTANCE_RUN_TEMPLATE.md) records evidence.
+
+These are target requirements, not assertions that the current implementation
+passes. They intentionally strengthen the v0 demo: start the resident response
+window after verified question playback, distinguish communication failure from
+silence, persist active incidents/effects across restart, preserve the complete
+evidence pair, and require affirmative recovery before re-arming an episode.
+Where older prose describes current behavior differently, acceptance target 1
+defines the intended next behavior. Existing strict wire contracts remain in
+force until producers, consumers, schemas, and tests migrate together. See the
+acceptance document's inspection baseline for the known implementation gaps.

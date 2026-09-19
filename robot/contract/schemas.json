@@ -1,0 +1,578 @@
+{
+  "brain.perception": {
+    "$defs": {
+      "Pose": {
+        "additionalProperties": false,
+        "properties": {
+          "map_id": {
+            "default": "demo-home",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Map Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          },
+          "yaw": {
+            "default": 0,
+            "title": "Yaw",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "Pose",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "caption": {
+        "maxLength": 2000,
+        "title": "Caption",
+        "type": "string"
+      },
+      "confidence": {
+        "maximum": 1,
+        "minimum": 0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "frame_id": {
+        "format": "uuid",
+        "title": "Frame Id",
+        "type": "string"
+      },
+      "location": {
+        "enum": [
+          "bed",
+          "floor",
+          "chair",
+          "unknown"
+        ],
+        "title": "Location",
+        "type": "string"
+      },
+      "model": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model"
+      },
+      "person": {
+        "title": "Person",
+        "type": "boolean"
+      },
+      "pose": {
+        "$ref": "#/$defs/Pose"
+      },
+      "posture": {
+        "enum": [
+          "standing",
+          "sitting",
+          "lying",
+          "unknown"
+        ],
+        "title": "Posture",
+        "type": "string"
+      },
+      "schema_version": {
+        "const": "0.1",
+        "default": "0.1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "source": {
+        "default": "mock",
+        "enum": [
+          "mock",
+          "simulation_ground_truth",
+          "simulation_vlm",
+          "hardware_vlm"
+        ],
+        "title": "Source",
+        "type": "string"
+      },
+      "ts": {
+        "minimum": 0,
+        "title": "Ts",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "ts",
+      "frame_id",
+      "person",
+      "posture",
+      "location",
+      "confidence",
+      "caption",
+      "pose"
+    ],
+    "title": "Perception",
+    "type": "object"
+  },
+  "dog.map": {
+    "$defs": {
+      "Point": {
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "Point",
+        "type": "object"
+      },
+      "Room": {
+        "additionalProperties": false,
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0,
+            "title": "Height",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "width": {
+            "exclusiveMinimum": 0,
+            "title": "Width",
+            "type": "number"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "id",
+          "label",
+          "width",
+          "height"
+        ],
+        "title": "Room",
+        "type": "object"
+      },
+      "Waypoint": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "id"
+        ],
+        "title": "Waypoint",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "map_id": {
+        "maxLength": 100,
+        "minLength": 1,
+        "title": "Map Id",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/$defs/Point"
+      },
+      "png_b64": {
+        "anyOf": [
+          {
+            "maxLength": 500000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Png B64"
+      },
+      "resolution_m": {
+        "exclusiveMinimum": 0,
+        "title": "Resolution M",
+        "type": "number"
+      },
+      "rooms": {
+        "items": {
+          "$ref": "#/$defs/Room"
+        },
+        "maxItems": 100,
+        "title": "Rooms",
+        "type": "array"
+      },
+      "schema_version": {
+        "const": "0.1",
+        "default": "0.1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "ts": {
+        "minimum": 0,
+        "title": "Ts",
+        "type": "integer"
+      },
+      "waypoints": {
+        "items": {
+          "$ref": "#/$defs/Waypoint"
+        },
+        "maxItems": 100,
+        "title": "Waypoints",
+        "type": "array"
+      }
+    },
+    "required": [
+      "ts",
+      "map_id",
+      "origin",
+      "resolution_m",
+      "waypoints"
+    ],
+    "title": "DogMap",
+    "type": "object"
+  },
+  "dog.status": {
+    "$defs": {
+      "Pose": {
+        "additionalProperties": false,
+        "properties": {
+          "map_id": {
+            "default": "demo-home",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Map Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          },
+          "yaw": {
+            "default": 0,
+            "title": "Yaw",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "Pose",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "battery_pct": {
+        "maximum": 100,
+        "minimum": 0,
+        "title": "Battery Pct",
+        "type": "number"
+      },
+      "pose": {
+        "$ref": "#/$defs/Pose"
+      },
+      "schema_version": {
+        "const": "0.1",
+        "default": "0.1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "state": {
+        "enum": [
+          "idle",
+          "patrolling",
+          "paused",
+          "estop",
+          "lowbatt"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "ts": {
+        "minimum": 0,
+        "title": "Ts",
+        "type": "integer"
+      },
+      "waypoint": {
+        "anyOf": [
+          {
+            "maxLength": 100,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Waypoint"
+      }
+    },
+    "required": [
+      "ts",
+      "state",
+      "battery_pct",
+      "pose"
+    ],
+    "title": "DogStatus",
+    "type": "object"
+  },
+  "event": {
+    "$defs": {
+      "Evidence": {
+        "additionalProperties": false,
+        "properties": {
+          "crop_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Crop Url"
+          },
+          "frame_id": {
+            "format": "uuid",
+            "title": "Frame Id",
+            "type": "string"
+          },
+          "pose": {
+            "$ref": "#/$defs/Pose"
+          }
+        },
+        "required": [
+          "frame_id",
+          "pose"
+        ],
+        "title": "Evidence",
+        "type": "object"
+      },
+      "Pose": {
+        "additionalProperties": false,
+        "properties": {
+          "map_id": {
+            "default": "demo-home",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Map Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          },
+          "yaw": {
+            "default": 0,
+            "title": "Yaw",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "Pose",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "acknowledged": {
+        "default": false,
+        "title": "Acknowledged",
+        "type": "boolean"
+      },
+      "acknowledged_at": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Acknowledged At"
+      },
+      "acknowledged_by": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Acknowledged By"
+      },
+      "event_id": {
+        "format": "uuid",
+        "title": "Event Id",
+        "type": "string"
+      },
+      "evidence": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "kind": {
+        "enum": [
+          "checkin_ok",
+          "checkin_no_reply",
+          "checkin_audio_failed",
+          "fall_suspected",
+          "fall_confirmed",
+          "reminder_due"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "schema_version": {
+        "const": "0.1",
+        "default": "0.1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "severity": {
+        "enum": [
+          "info",
+          "warn",
+          "critical"
+        ],
+        "title": "Severity",
+        "type": "string"
+      },
+      "ts": {
+        "minimum": 0,
+        "title": "Ts",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "ts",
+      "event_id",
+      "kind",
+      "evidence",
+      "severity"
+    ],
+    "title": "Event",
+    "type": "object"
+  },
+  "voice.heard": {
+    "additionalProperties": false,
+    "properties": {
+      "confidence": {
+        "maximum": 1,
+        "minimum": 0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "event_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Event Id"
+      },
+      "schema_version": {
+        "const": "0.1",
+        "default": "0.1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "speaker": {
+        "const": "resident",
+        "default": "resident",
+        "title": "Speaker",
+        "type": "string"
+      },
+      "text": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      },
+      "ts": {
+        "minimum": 0,
+        "title": "Ts",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "ts",
+      "text",
+      "confidence"
+    ],
+    "title": "VoiceHeard",
+    "type": "object"
+  }
+}

@@ -19,13 +19,15 @@
 
 ## Verification and handoff
 
-- Use the commands documented in `README.md` and component READMEs. From the root, run `PYTHONPATH=app_backend .venv/bin/python -m pytest app_backend/tests -q`, `.venv/bin/python contract/export_schemas.py --check`, and `node --check frontend/app.js` for the software demo. SDK/simulator checks have separate prerequisites.
+- Use the commands documented in `README.md` and component READMEs. From the root, run `.venv/bin/python -m pytest robot/app_backend/tests -q`, `.venv/bin/python robot/contract/export_schemas.py --check`, and `node --check robot/frontend/app.js` for the software demo. SDK/simulator checks have separate prerequisites.
 - Verify changed behavior against its acceptance criteria, including relevant failure cases. Use checks appropriate to the change.
 - Report what changed, what was verified, and any remaining blockers. Never claim an unrun check passed.
 - Mark a task complete only when its stated completion condition is satisfied.
-- For simulator changes, follow `simulation/README.md`; distinguish direct MuJoCo physics, DimOS integration, rendered-image inference, and actual robot runs. Keep model/dependency revisions and measured results reproducible.
+- For simulator changes, follow `robot/simulation/README.md`; distinguish direct MuJoCo physics, DimOS integration, rendered-image inference, and actual robot runs. Keep model/dependency revisions and measured results reproducible.
 
 ## Engineering and collaboration
+
+- Keep simulator/demo code, its frontend, app backend, robot backend, and contract under `robot/`. Preserve the separate top-level team services and Swift app; do not spread simulator implementation into them.
 
 - Prefer existing open-source implementations, simulators, datasets, and suitable public internet assets over rebuilding them. Search and reuse them proactively when they improve the task.
 - Routine dependency installation, public asset downloads, reversible development, and local experiments within the requested scope do not need repeated permission. Make progress without asking the user to approve ordinary implementation choices.

@@ -95,7 +95,7 @@ a connection blocker, not a reason to substitute simulated data.
 2. On GX10, inspect `nvidia-smi`, OS/architecture, and the actual installed
    image-capable model before selecting its runtime. A model name or health
    response alone does not prove image input works.
-3. Use the existing [brain API](../contract/brain.md) in local mode. Preserve
+3. Use the existing [brain API](contract/brain.md) in local mode. Preserve
    hardware source, frame ID, capture timestamp and synchronized pose before
    connecting observations to policy. The probe is diagnostic, not that adapter.
 4. Verify the physical stop/recovery procedure, then a supervised short motion

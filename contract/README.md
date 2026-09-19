@@ -120,6 +120,16 @@ Subconscious agents are advisory only: no dog-control, emergency-policy,
 notification, or tool-execution authority. Provider errors cannot change the
 deterministic incident rules. External requests are explicit and bounded.
 
+## Family message dispatch
+
+`app_backend` now also accepts free-text family messages and relays them to
+`robot_backend` for an asynchronous navigate/speak/listen/recall/speak
+sequence, fanning progress out to family clients. This is a separate,
+in-memory feature from the incident state machine above; see
+[family_messages.md](family_messages.md) for the app_backend-to-robot_backend
+interface, run lifecycle, and mock-mode testing path. `robot_backend` does not
+implement its side of this yet.
+
 ## Integration signoff
 
 Rehearse bed exemption, unknown/low-confidence posture, duplicates/stale ticks,

@@ -13,6 +13,7 @@ as work progresses and record a reason for blocked work.
 - [ ] TASK-003: Connect a simulation-only body adapter to the API. Done when real simulator status/pose reaches the app with correct time/map IDs and no physical-robot fallback.
 - [ ] TASK-004: Connect and evaluate GX10 local image inference. Done when rendered frames produce valid measured observations and the scenario matrix distinguishes VLM results from ground truth.
 - [ ] TASK-005: Integrate actual speech, messaging, and Elastic adapters. Done when provisioned services acknowledge execution and privacy boundaries are verified with synthetic data.
+- [ ] TASK-006: Implement `robot_backend`'s side of `contract/family_messages.md` (`POST /dispatch`, `POST /internal/events` calls). Done when a real navigate/speak/listen/recall/speak run on the GX10 posts live events into `app_backend` and completes without `ANNIE_FAMILY_MOCK_ROBOT`.
 
 ## Blocked
 

@@ -3,6 +3,7 @@ import asyncio
 import contextlib
 import hmac
 import ipaddress
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .family import FamilyService, InternalEventIn, MessageIn
 from .models import Ack, Command, CommandReceipt, Ingest, Say, Scenario
 from .service import Service, now_ms
 from .subconscious_provider import DEFAULT_MODEL, SubconsciousAPIError, SubconsciousInputError, run_team
@@ -47,16 +49,24 @@ def same_origin(headers, scheme):
     return parsed.scheme == scheme and parsed.netloc == headers.get('host') and not parsed.path and not parsed.query and not parsed.fragment
 
 
-def create_app(db_path=None, mode=None, token=None, clock=now_ms):
+def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service=None,
+                internal_secret=None):
     db_path = db_path or os.getenv('ANNIE_DB_PATH', '.data/annie.sqlite3')
     mode = mode or os.getenv('ANNIE_MODE', 'demo')
     if mode not in ('demo', 'live'):
         raise ValueError('ANNIE_MODE must be demo or live')
     token = os.getenv('ANNIE_API_TOKEN', '') if token is None else token
+    internal_secret = os.getenv('ANNIE_INTERNAL_SECRET', '') if internal_secret is None else internal_secret
 
     @asynccontextmanager
     async def lifespan(app):
         app.state.service = Service(db_path, mode, clock)
+        app.state.family = family_service or FamilyService(
+            clock=clock,
+            robot_backend_url=os.getenv('ROBOT_BACKEND_URL', ''),
+            dispatch_timeout=float(os.getenv('ANNIE_ROBOT_DISPATCH_TIMEOUT_S', '3')),
+            mock=os.getenv('ANNIE_FAMILY_MOCK_ROBOT', 'false').lower() == 'true',
+        )
         app.state.agent_lock = asyncio.Lock()
         async def ticker():
             while True:
@@ -69,6 +79,8 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            for background in list(app.state.family.background_tasks):
+                background.cancel()
             app.state.service.close()
 
     app = FastAPI(title='Annie API', version='0.1.0', lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -104,7 +116,16 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms):
         elif not request.client or not loopback(request.client.host):
             raise HTTPException(403, 'Without ANNIE_API_TOKEN only loopback clients are allowed')
 
+    async def authorize_internal(request: Request):
+        # Separate trust domain from `authorize`: robot_backend calls this from
+        # a different LAN host, never with the family ANNIE_API_TOKEN. An
+        # unconfigured secret must reject everything, never fall open.
+        given = request.headers.get('x-internal-secret', '')
+        if not internal_secret or not hmac.compare_digest(given.encode(), internal_secret.encode()):
+            raise HTTPException(401, 'Valid X-Internal-Secret header required')
+
     router = APIRouter(dependencies=[Depends(authorize)])
+    internal_router = APIRouter(dependencies=[Depends(authorize_internal)])
 
     @app.get('/')
     async def root():
@@ -205,6 +226,33 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms):
             raise HTTPException(422, 'Invalid channel payload; consult contract/schemas.json')
         return {'accepted': accepted}
 
+    @router.post('/api/messages', status_code=202)
+    async def post_message(body: MessageIn):
+        # Must never block on robot_backend: the dispatch runs as a background
+        # task started inside post_message, so this returns immediately.
+        _message, run = app.state.family.post_message(body.author_id, body.text)
+        return {'run_id': run['run_id'], 'status': run['status']}
+
+    @router.get('/api/runs/{run_id}')
+    async def get_run(run_id: UUID):
+        run = app.state.family.runs.get(str(run_id))
+        if run is None:
+            raise HTTPException(404, 'Unknown run')
+        return run
+
+    @router.get('/api/thread')
+    async def get_thread():
+        return app.state.family.thread
+
+    @internal_router.post('/internal/events', status_code=202)
+    async def internal_event(body: InternalEventIn):
+        try:
+            return app.state.family.add_event(str(body.run_id), body.kind, body.payload, body.at)
+        except KeyError:
+            raise HTTPException(404, 'Unknown run') from None
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
     def demo_only():
         if mode != 'demo':
             raise HTTPException(403, 'Demo controls are unavailable in live mode')
@@ -220,58 +268,81 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms):
         return app.state.service.status()
 
     app.include_router(router)
+    app.include_router(internal_router)
 
-    @app.websocket('/live')
-    async def live(ws: WebSocket):
+    async def ws_authenticate(ws: WebSocket) -> bool:
         scheme = 'https' if ws.url.scheme == 'wss' else 'http'
         if ws.query_params or not same_origin(ws.headers, scheme):
             await ws.close(code=1008)
-            return
+            return False
         if not token and (not ws.client or not loopback(ws.client.host)):
             await ws.close(code=1008)
-            return
+            return False
         await ws.accept()
         if token:
             try:
                 message = await asyncio.wait_for(ws.receive_text(), timeout=5)
                 if len(message) > 4096:
                     raise ValueError()
-                import json
                 auth = json.loads(message)
                 if not isinstance(auth, dict) or set(auth) != {'token'} or not isinstance(auth['token'], str) or not hmac.compare_digest(auth['token'].encode(), token.encode()):
                     raise ValueError()
             except (asyncio.TimeoutError, ValueError, WebSocketDisconnect):
                 await ws.close(code=1008)
+                return False
+        return True
+
+    async def ws_pump(ws: WebSocket, queue: asyncio.Queue):
+        # Receive concurrently so disconnected clients don't retain queues indefinitely.
+        async def send_updates():
+            while True:
+                await ws.send_json(await queue.get())
+        async def receive_disconnect():
+            while True:
+                message = await ws.receive()
+                if message['type'] == 'websocket.disconnect':
+                    return
+                await ws.close(code=1008)
                 return
+        tasks = {asyncio.create_task(send_updates()), asyncio.create_task(receive_disconnect())}
+        try:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    @app.websocket('/live')
+    async def live(ws: WebSocket):
+        if not await ws_authenticate(ws):
+            return
         service = app.state.service
         queue = asyncio.Queue(maxsize=100)
         service.subscribers.add(queue)
         try:
             await ws.send_json({'type': 'snapshot', 'data': service.status()})
-            # Receive concurrently so disconnected clients don't retain queues indefinitely.
-            async def send_updates():
-                while True:
-                    await ws.send_json(await queue.get())
-            async def receive_disconnect():
-                while True:
-                    message = await ws.receive()
-                    if message['type'] == 'websocket.disconnect':
-                        return
-                    await ws.close(code=1008)
-                    return
-            tasks = {asyncio.create_task(send_updates()), asyncio.create_task(receive_disconnect())}
-            try:
-                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                for task in done:
-                    task.result()
-            finally:
-                for task in tasks:
-                    task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
+            await ws_pump(ws, queue)
         except (WebSocketDisconnect, asyncio.CancelledError):
             pass
         finally:
             service.subscribers.discard(queue)
+
+    @app.websocket('/ws/family')
+    async def ws_family(ws: WebSocket):
+        if not await ws_authenticate(ws):
+            return
+        family = app.state.family
+        queue = asyncio.Queue(maxsize=100)
+        family.subscribers.add(queue)
+        try:
+            await ws.send_json({'type': 'snapshot', 'data': family.recent_history()})
+            await ws_pump(ws, queue)
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+        finally:
+            family.subscribers.discard(queue)
 
     static = Path(__file__).resolve().parents[2] / 'frontend'
     if static.is_dir():

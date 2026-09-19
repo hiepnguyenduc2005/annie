@@ -1,10 +1,5 @@
 # Robot backend
 
-The approved robot-to-app boundary now includes typed maps, captions, observer
-poses, event evidence, released crops, transcripts, and two-way commands. See
-[contract v0.1](../contract/README.md). The older status-only envelope is a
-compatibility option; full frames remain on the trusted local compute network.
-
 This folder is an independent FastAPI service. Copy this folder to its server
 and install its own dependencies. Python 3.10 or newer is recommended.
 

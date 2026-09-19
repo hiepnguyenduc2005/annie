@@ -1,0 +1,3 @@
+# Read-only Go2 WebRTC bring-up; separate from the app and full DimOS runtime.
+# https://github.com/legion1581/unitree_webrtc_connect (MIT)
+unitree-webrtc-connect==2.2.0

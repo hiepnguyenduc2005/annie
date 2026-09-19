@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Annie — Live simulation</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/">annie<span>LAB</span></a>
+      <div class="header-title">
+        Robot simulation <span>/</span>
+        <span id="header-model">Unitree Go2</span>
+      </div>
+      <div class="connection">
+        <i id="connection-dot"></i><span id="connection">Connecting</span>
+      </div>
+    </header>
+    <main>
+      <section class="intro">
+        <div>
+          <p class="eyebrow">ANNIE · LIVE HOME DEMO</p>
+          <h1>Welcome to grandma’s house.</h1>
+          <p>
+            Follow her day, see through Annie’s camera, and test a complete check-in.
+          </p>
+        </div>
+        <a
+          class="app-link"
+          href="http://127.0.0.1:8000/app/"
+          target="_blank"
+          rel="noopener"
+          >Open family app ↗</a
+        >
+      </section>
+      <div class="workspace">
+        <section class="viewport-panel" aria-label="Live simulation viewport">
+          <div class="scene-bar">
+            <div class="scene-title-row">
+              <span class="eyebrow">SCENE LIBRARY</span
+              ><span id="scene-count" class="badge">Loading catalog</span>
+            </div>
+            <div class="scene-picker">
+              <button id="previous-scene" aria-label="Previous scene">←</button
+              ><label class="visually-hidden" for="scene-select"
+                >Choose scene</label
+              ><select id="scene-select">
+                <option value="">Original Go2 model</option></select
+              ><button id="next-scene" aria-label="Next scene">→</button>
+            </div>
+            <p id="scene-description" class="hint">
+              Choose a generated home to inspect its layout and scenario.
+            </p>
+          </div>
+          <div class="viewport-top">
+            <span><i class="live-dot"></i> MUJOCO RENDER</span
+            ><span id="render-rate">Waiting for frames</span>
+          </div>
+          <div class="viewport">
+            <img
+              id="frame"
+              alt="Live rendered Unitree Go2 robot in the MuJoCo physics simulator"
+            />
+            <div id="loading">Preparing the renderer…</div>
+            <span class="frame-label"
+              >SIMULATED CAMERA · NO PHYSICAL ROBOT</span
+            >
+          </div>
+          <div class="transport">
+            <button id="open-house">Enter full house</button>
+            <button id="play" class="primary" disabled>Play simulation</button>
+            <button id="step" disabled>Step once</button>
+            <button id="reset" disabled>Reset</button>
+            <span class="keyboard">Space to play / pause</span>
+          </div>
+          <div class="mission-bar" id="mission-bar">
+            <div class="mission-buttons">
+              <button id="mission-patrol" class="primary">Patrol home</button>
+              <button id="mission-goto-bedroom">Go to bedroom</button>
+              <button id="mission-goto-living-room">Living room</button>
+              <button id="mission-come-home">Come home</button>
+              <button id="mission-turn-left">Turn left 90°</button>
+              <button id="mission-look">Look around</button>
+              <button id="mission-stop">Stop</button>
+              <button id="mission-resume">Resume</button>
+            </div>
+            <p id="mission-status" class="mission-status">
+              Missions unavailable: locomotion controller not loaded.
+            </p>
+          </div>
+          <div class="dog-cam">
+            <img id="dog-frame" alt="Live view from the simulated robot front camera" />
+            <span class="dog-cam-caption">Dog camera</span>
+          </div>
+          <div id="notice" role="status" aria-live="polite">
+            Waiting for the local simulator.
+          </div>
+        </section>
+        <aside>
+          <section class="panel" id="daily-life-panel">
+            <p class="eyebrow">GRANDMA’S DAY</p>
+            <h2 id="resident-activity">Resident routine</h2>
+            <p id="resident-detail" class="hint">Choose the full house or daily-life scene to follow the resident.</p>
+            <div class="mission-buttons">
+              <button data-resident="routine">Start routine</button>
+              <button data-resident="fall">Stage a fall</button>
+              <button data-resident="recover">Recover</button>
+            </div>
+            <p class="hint">Authored actor animation. The brain receives camera pixels, not this activity label.</p>
+            <p id="stairs-capability" class="hint"></p>
+            <p class="eyebrow">ANNIE’S AI BRAIN</p>
+            <form id="intelligence-form">
+              <label for="intelligence-goal">Give Annie a goal</label>
+              <textarea id="intelligence-goal" maxlength="500" rows="3">Explore the ground floor and check on the resident. Describe what you see, stay clear of people, and choose your next action from camera evidence.</textarea>
+              <button type="submit" class="primary">Start AI / resume</button>
+              <button id="intelligence-stop" type="button">Pause AI</button>
+            </form>
+            <p id="autonomy-status" class="hint">Waiting for the model planner.</p>
+            <p id="agent-reason" class="hint"></p>
+            <p id="agent-context" class="hint"></p>
+            <p class="hint">Camera + goal + observation memory + execution feedback → model-selected action. Movement remains subject to the local stop interlocks.</p>
+          </section>
+          <section class="panel factory-panel">
+            <p class="eyebrow">BULK GENERATION</p>
+            <h2>Make a batch</h2>
+            <form id="factory-form">
+              <div class="factory-fields">
+                <label for="factory-count"
+                  >Scenes<select id="factory-count">
+                    <option>6</option>
+                    <option>12</option>
+                    <option selected>24</option>
+                    <option>48</option>
+                    <option>96</option>
+                  </select></label
+                ><label for="factory-seed"
+                  >Seed<input
+                    id="factory-seed"
+                    type="number"
+                    min="0"
+                    max="2147483647"
+                    value="2026"
+                    required
+                /></label>
+              </div>
+              <button class="primary" id="generate" type="submit">
+                Generate scenes
+              </button>
+            </form>
+            <p class="hint">
+              Bed-rest, floor, seated, standing, occluded, and empty rooms. A
+              seed reproduces the batch.
+            </p>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">RIGHT NOW</p>
+            <div class="state-heading">
+              <h2 id="run-state">Starting</h2>
+              <span class="badge">DIRECT MUJOCO</span>
+            </div>
+            <dl class="metrics">
+              <div>
+                <dt>Simulation time</dt>
+                <dd id="sim-time">—</dd>
+              </div>
+              <div>
+                <dt>Physics steps</dt>
+                <dd id="steps">—</dd>
+              </div>
+              <div>
+                <dt>Base height</dt>
+                <dd id="base-height">—</dd>
+              </div>
+              <div>
+                <dt>Physics timestep</dt>
+                <dd id="timestep">—</dd>
+              </div>
+              <div>
+                <dt>Active wall time</dt>
+                <dd id="wall-time">—</dd>
+              </div>
+              <div>
+                <dt>Measured playback</dt>
+                <dd id="achieved-speed">—</dd>
+              </div>
+              <div>
+                <dt>Simulated time of day</dt>
+                <dd id="day-time">09:00:00</dd>
+              </div>
+            </dl>
+            <label class="speed-label" for="speed"
+              >Playback speed<select id="speed">
+                <option value="0.25">0.25× · slow motion</option>
+                <option value="0.5">0.5× · half speed</option>
+                <option value="1" selected>1× · real time</option>
+                <option value="2">2× · accelerated</option>
+              </select></label
+            >
+            <p id="phase" class="hint">No routine schedule loaded.</p>
+          </section>
+          <section class="panel" id="brain-panel">
+            <p class="eyebrow">PERCEPTION</p>
+            <div class="state-heading">
+              <h2>What Annie sees</h2>
+              <span id="brain-mode" class="badge">DISCONNECTED</span>
+            </div>
+            <dl class="metrics brain-metrics">
+              <div>
+                <dt>Caption</dt>
+                <dd id="brain-caption">—</dd>
+              </div>
+              <div>
+                <dt>Posture</dt>
+                <dd id="brain-posture">—</dd>
+              </div>
+              <div>
+                <dt>Location</dt>
+                <dd id="brain-location">—</dd>
+              </div>
+              <div>
+                <dt>Confidence</dt>
+                <dd id="brain-confidence">—</dd>
+              </div>
+              <div>
+                <dt>Frame</dt>
+                <dd id="brain-frame">—</dd>
+              </div>
+              <div>
+                <dt>Latency</dt>
+                <dd id="brain-latency">—</dd>
+              </div>
+              <div>
+                <dt>Provider</dt>
+                <dd id="brain-provider">—</dd>
+              </div>
+              <div>
+                <dt>App ingest</dt>
+                <dd id="brain-ingest">—</dd>
+              </div>
+              <div>
+                <dt>Updated</dt>
+                <dd id="brain-updated">—</dd>
+              </div>
+            </dl>
+            <p id="brain-error" class="hint" hidden></p>
+            <p id="brain-note" class="hint"></p>
+          </section>
+          <section class="panel" id="person-safety-panel">
+            <p class="eyebrow">CAMERA PERSON STOP</p>
+            <div class="state-heading">
+              <h2>Person safety</h2>
+              <span id="safety-state" class="badge">NO DATA</span>
+            </div>
+            <dl class="metrics brain-metrics">
+              <div>
+                <dt>State</dt>
+                <dd id="safety-state-text">—</dd>
+              </div>
+              <div>
+                <dt>Reason</dt>
+                <dd id="safety-reason">—</dd>
+              </div>
+              <div>
+                <dt>Person confidence</dt>
+                <dd id="safety-confidence">—</dd>
+              </div>
+              <div>
+                <dt>Decision latency</dt>
+                <dd id="safety-latency">—</dd>
+              </div>
+            </dl>
+            <p id="safety-error" class="hint" hidden></p>
+            <p class="hint">
+              Software stop from camera person detection. It is a convenience
+              behavior, not a safety guarantee or an emergency stop.
+            </p>
+          </section>
+          <section class="panel" id="voice-panel">
+            <p class="eyebrow">VOICE OUTPUT</p>
+            <h2>Speak</h2>
+            <form id="say-form">
+              <label class="visually-hidden" for="say-text"
+                >Message for Annie to speak</label
+              >
+              <textarea
+                id="say-text"
+                maxlength="2000"
+                rows="3"
+                placeholder="Text for the simulated dog to speak (max 2000 characters)"
+                required
+              ></textarea>
+              <button id="say-send" class="primary" type="submit">
+                Synthesize speech
+              </button>
+            </form>
+            <div id="say-audio-wrap" hidden>
+              <p id="say-meta" class="hint"></p>
+              <p id="say-clip-text" class="hint"></p>
+              <p id="say-native" class="hint" hidden></p>
+              <audio id="say-audio" controls preload="none"></audio>
+              <button id="say-play" class="primary" type="button" hidden>
+                ▶ Hear Annie
+              </button>
+            </div>
+            <p id="say-status" class="hint" role="status"></p>
+            <label class="toggle" for="demo-voice">
+              <input type="checkbox" id="demo-voice" />
+              Enable demo voice (autoplay new clips in this browser)
+            </label>
+            <p class="hint">
+              Default off: clips wait for the Hear Annie button. When enabled,
+              the latest clip plays automatically; only actual playback ends
+              send the played receipt.
+            </p>
+          </section>
+          <section class="panel" id="transcribe-panel">
+            <p class="eyebrow">VOICE INPUT</p>
+            <h2>Hear a recorded reply</h2>
+            <p class="hint">
+              Local Whisper processes the recording on this computer. MiMo is
+              an explicit cloud alternative, verified on synthetic speech.
+            </p>
+            <form id="transcribe-form">
+              <label for="transcribe-provider">Speech recognition</label>
+              <select id="transcribe-provider">
+                <option value="local">Local Whisper · offline</option>
+                <option value="cloud">MiMo · synthetic audio to cloud</option>
+              </select>
+              <label class="file-label" for="transcribe-file"
+                >Upload a synthetic/demo WAV (max 20 s)<input
+                  id="transcribe-file"
+                  type="file"
+                  accept="audio/wav,.wav"
+                  required
+              /></label>
+              <button id="transcribe-send" class="primary" type="submit">
+                Transcribe upload
+              </button>
+            </form>
+            <p id="transcribe-result" class="hint" role="status">
+              No upload transcribed yet.
+            </p>
+            <p class="hint">
+              Sent only when you press the button, through the local audio brain
+              proxy. Maximum 4 MB. Do not upload real personal recordings.
+            </p>
+          </section>
+          <section class="panel" id="resident-reply-panel">
+            <p class="eyebrow">CHECK-IN DEMO</p>
+            <h2>Replay a resident reply</h2>
+            <p id="reply-window" class="hint" role="status">Waiting for a check-in.</p>
+            <div class="camera-buttons">
+              <button data-reply="okay" disabled>Replay “okay”</button>
+              <button data-reply="help" disabled>Replay “help me”</button>
+              <button data-reply="not-okay" disabled>Replay “not okay”</button>
+              <button data-reply="ambiguous" disabled>Replay “maybe”</button>
+            </div>
+            <p id="resident-reply-result" class="hint" role="status"></p>
+            <p class="hint">Synthetic WAV input at its recorded sample rate → local Whisper → incident policy.
+              These controls do not capture a microphone or send an expected transcript.</p>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">LOOK AROUND</p>
+            <h2>Camera</h2>
+            <div class="camera-buttons">
+              <button data-camera="room">Room</button
+              ><button data-camera="front">Front</button
+              ><button data-camera="side">Side</button
+              ><button data-camera="top">Top</button>
+              <button data-camera="downstairs">Downstairs</button>
+              <button data-camera="upstairs">Upstairs</button>
+              <button data-camera="whole-house">Whole house</button>
+            </div>
+            <p class="hint">
+              These controls move the viewer camera, not the robot.
+            </p>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">SCENARIO LABELS</p>
+            <h2>Simulation ground truth</h2>
+            <pre id="ground-truth" class="ground-truth">
+No scenario loaded.</pre
+            >
+            <p class="hint">
+              These are generated labels, not vision-model predictions.
+            </p>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">TRY A COMPARISON</p>
+            <h2>Joint control</h2>
+            <label class="toggle"
+              ><input type="checkbox" id="hold" /> Hold the starting joint
+              pose</label
+            >
+            <p id="control-mode" class="hint">
+              Passive physics. No navigation or gait controller.
+            </p>
+            <p class="hint">
+              Reset, enable hold, and press play. Disable hold to see the robot
+              settle under gravity.
+            </p>
+          </section>
+          <section class="panel progress">
+            <p class="eyebrow">WHAT THIS PROVES</p>
+            <div>
+              <span class="check">✓</span
+              ><span>Real robot model &amp; contacts</span>
+            </div>
+            <div>
+              <span class="check">✓</span><span>Live rendered physics</span>
+            </div>
+            <div>
+              <span class="pending">○</span
+              ><span>DimOS navigation — in progress</span>
+            </div>
+            <div>
+              <span class="pending">○</span
+              ><span>Camera inference + native speech + family receipts</span>
+            </div>
+          </section>
+        </aside>
+      </div>
+      <footer>
+        <span id="version">MuJoCo · Unitree Go1 locomotion surrogate</span
+        ><span id="footer-honesty"
+          >Walking uses a matched Go1 model and policy; Go2 hardware is not
+          connected.</span
+        >
+        <a href="https://polyhaven.com/" target="_blank" rel="noopener"
+          >Powered by Poly Haven</a
+        >
+      </footer>
+    </main>
+  </body>
+</html>

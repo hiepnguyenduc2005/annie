@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Annie — Home, together</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="./" aria-label="Annie home"
+        ><span class="brand-mark">a</span>annie<span class="brand-sub"
+          >HOME, TOGETHER</span
+        ></a
+      >
+      <div class="connection">
+        <span id="connection-dot"></span
+        ><span id="connection-text">Connecting</span
+        ><span class="pill" id="mode">DEMO</span>
+      </div>
+    </header>
+    <main>
+      <section class="intro">
+        <div>
+          <p class="eyebrow">A LITTLE CLOSER, EVEN FROM HERE</p>
+          <h1>Welcome to<br /><em>grandma’s house.</em></h1>
+          <p class="intro-copy">
+            A check-in, a familiar voice, a little peace of mind.<br />See what
+            Annie observed and stay in touch.
+          </p>
+        </div>
+        <div class="start-card">
+          <span class="mini-icon">⌂</span><strong>Let’s check in.</strong>
+          <p>
+            Check the robot status and observations, and stay in touch. Demo
+            tools below still run synthetic scenarios.
+          </p>
+          <button class="primary" id="seed">
+            Start simulated home <span aria-hidden="true">↗</span>
+          </button>
+        </div>
+      </section>
+      <div id="notice" role="status" aria-live="polite" hidden></div>
+      <section class="summary" aria-label="Home status">
+        <div>
+          <span class="label">ANNIE</span
+          ><strong id="robot-state">No robot observations</strong
+          ><span id="robot-detail">Waiting for a simulated home</span>
+        </div>
+        <div>
+          <span class="label">LATEST OBSERVATION</span
+          ><strong id="observation-title">Nothing observed yet</strong
+          ><span id="observation-detail">Evidence will appear here</span>
+        </div>
+        <div>
+          <span class="label">CHECK-IN</span
+          ><strong id="checkin-title">No active check-in</strong
+          ><span id="checkin-detail">Start the demo to explore</span>
+        </div>
+      </section>
+      <div class="grid">
+        <section class="card map-card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">THE VIEW FROM HOME</p>
+              <h2>Annie’s surroundings</h2>
+            </div>
+            <span class="tag">Observer map</span>
+          </div>
+          <div
+            id="map"
+            class="map"
+            aria-label="Robot observation position on the home map"
+          >
+            <p class="empty">The home map appears after initialization.</p>
+          </div>
+          <div class="map-footer">
+            <span><i class="map-dot"></i> Robot observation position</span
+            ><span id="map-id">No map</span>
+          </div>
+          <p class="fine">
+            A pin locates the observing robot, not a measured resident position.
+          </p>
+          <div class="controls" aria-label="Queue robot commands">
+            <button data-command="look">Look</button
+            ><button data-command="resume">Resume</button
+            ><button data-command="stop">Software stop</button>
+          </div>
+          <p class="fine">
+            Commands go to the robot bridge and report execution receipts.
+            Software stop is not a hardware emergency stop.
+          </p>
+        </section>
+        <section class="card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">STAY IN THE LOOP</p>
+              <h2>Check-in log</h2>
+            </div>
+            <span id="event-count" class="tag">0 events</span>
+          </div>
+          <div id="events" class="events">
+            <p class="empty">No events yet. Safe bed-rest should stay quiet.</p>
+          </div>
+        </section>
+        <section class="card">
+          <p class="eyebrow">A FAMILIAR VOICE</p>
+          <h2>Send a message through Annie</h2>
+          <p class="muted">Let grandma know you’re thinking of her.</p>
+          <form id="say-form">
+            <label for="message">Your message</label
+            ><textarea
+              id="message"
+              maxlength="2000"
+              rows="3"
+              placeholder="Hi Grandma, just checking in. How are you feeling?"
+              required
+            ></textarea
+            ><button type="submit" class="primary">
+              Queue message <span aria-hidden="true">↗</span>
+            </button>
+          </form>
+          <p id="command-result" class="fine" role="status">
+            No playback adapter connected.
+          </p>
+        </section>
+        <section class="card">
+          <p class="eyebrow">MEMORIES WITH CONTEXT</p>
+          <h2>Ask what Annie observed</h2>
+          <p class="muted">Answers refer to recorded captions and evidence.</p>
+          <form id="query-form">
+            <label for="question">Ask a question</label>
+            <div class="input-row">
+              <input
+                id="question"
+                maxlength="2000"
+                placeholder="Where were the glasses?"
+                required
+              /><button type="submit" class="primary">Ask</button>
+            </div>
+          </form>
+          <div id="answer" class="answer" aria-live="polite">
+            <span class="fine"
+              >Local caption search. No invented answers or images.</span
+            >
+          </div>
+        </section>
+      </div>
+      <section class="demo-tools card">
+        <div>
+          <p class="eyebrow">DEMO WORKBENCH</p>
+          <h2>Explore a check-in</h2>
+          <p class="muted">
+            Synthetic inputs exercise the same event rules. This is not the
+            MuJoCo simulator.
+          </p>
+        </div>
+        <div class="scenario-buttons">
+          <button data-scenario="safe_bed">Resting on bed</button
+          ><button data-scenario="fall">Possible floor incident</button
+          ><button data-scenario="okay">Resident: “I’m okay”</button
+          ><button data-scenario="help">Resident: “Help”</button
+          ><button data-scenario="timeout">Simulate no reply</button>
+        </div>
+      </section>
+      <details class="settings">
+        <summary>Connection settings</summary>
+        <label for="api-token"
+          >API token, if configured (kept in memory only)</label
+        >
+        <div class="input-row">
+          <input
+            type="password"
+            id="api-token"
+            autocomplete="off"
+            placeholder="Optional for the loopback demo"
+          /><button id="connect">Reconnect</button>
+        </div>
+      </details>
+      <footer>
+        <span class="brand-text">annie</span
+        ><span>Built to help us look out for each other.</span
+        ><span>Staged assistance prototype</span>
+      </footer>
+    </main>
+  </body>
+</html>

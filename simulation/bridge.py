@@ -47,6 +47,8 @@ class Bridge:
         if self.status_file is None:
             return
         status = dict(updated_at=int(self.clock() * 1000), perception_mode=self.perception,
+            context_map_id=self.map_id,
+            inference_limit_reached=self.perception == 'vision' and self.inferences >= self.max_inferences,
             inferences=self.inferences, max_inferences=self.max_inferences,
             last_perception=self.last_perception, last_provider=self.last_provider,
             last_latency_ms=self.last_latency_ms, last_error=self.last_error,
@@ -115,6 +117,7 @@ class Bridge:
         ts = int(self.clock() * 1000)
         scene = state.get("current_scene") or {}
         if self.map_id != state["map_id"]:
+            self.last_perception = self.last_latency_ms = self.ingest_accepted = None
             size = (scene.get("ground_truth") or {}).get("room_size_m")
             origin = {"x": -size[0]/2, "y": -size[1]/2} if size else {"x": 0, "y": 0}
             rooms = scene.get("rooms", [{"id": "home", "label": "Synthetic home",
@@ -206,6 +209,9 @@ class Bridge:
             return
         try:
             observation = await self.request(self.viewer, "GET", "/observation")
+            if not 0 <= self.clock() * 1000 - observation['ts'] <= 5000:
+                self.last_error = 'Camera frame is stale or future-dated; inference skipped'
+                return
             frame_id = observation["frame_id"]
             if frame_id in self.frames:
                 return
@@ -220,9 +226,17 @@ class Bridge:
             perception = result["perception"]
             if any(perception[key] != payload[key] for key in ("frame_id", "ts", "pose")):
                 raise ValueError("Inference evidence mismatch")
+            if self.map_id and payload['pose']['map_id'] != self.map_id:
+                self.ingest_accepted = False
+                self.last_error = 'Inference belongs to a previous scene'
+                return
             self.record_perception(perception)
             provider = result.get("provider") or {}
             self.last_provider = {k: str(provider[k])[:200] for k in ("mode", "model") if k in provider}
+            if isinstance(provider.get('usage'), dict):
+                self.last_provider['usage'] = {k: v for k, v in provider['usage'].items()
+                    if k in ('prompt_tokens', 'completion_tokens', 'total_tokens', 'cost_usd')
+                    and type(v) in (int, float) and math.isfinite(v) and v >= 0}
             latency = result.get("latency_ms")
             self.last_latency_ms = latency if isinstance(latency, (int, float)) and math.isfinite(latency) else None
             self.ingest_accepted = None

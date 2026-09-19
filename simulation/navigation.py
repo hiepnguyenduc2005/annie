@@ -34,27 +34,42 @@ class Navigator:
             -size[1] / 2 + 0.48,
             size[1] / 2 - 0.48,
         )
-        self.obstacles = []
+        self.obstacles = []  # Inflated by the robot radius; used for planning.
+        self.colliders = []  # Raw geom bounds; entering one is a hard fault.
         for i in range(model.ngeom):
-            if not (model.geom(i).name or "").startswith("env_"):
+            name = model.geom(i).name or ""
+            if not name.startswith("env_"):
                 continue
-            if not (model.geom_contype[i] or model.geom_conaffinity[i]):
+            # Residents block the footprint even though the person scan mesh is
+            # visual-only (contype 0): the body mission must never overlap them.
+            resident = name.startswith(("env_person_", "env_resident"))
+            if not resident and not (model.geom_contype[i] or model.geom_conaffinity[i]):
                 continue
             # Use conservative transformed bounds for static obstacle shapes.
             # Planes and rugs do not block the robot's footprint.
             if int(model.geom_type[i]) == 0:
                 continue
-            half = np.abs(data.geom_xmat[i].reshape(3, 3)) @ model.geom_size[i]
-            center = data.geom_xpos[i]
+            rotation = data.geom_xmat[i].reshape(3, 3)
+            if resident and int(model.geom_type[i]) == 7:
+                # geom_size does not describe a mesh; use its local AABB.
+                local_center = model.geom_aabb[i][:3]
+                local_half = model.geom_aabb[i][3:]
+                center = data.geom_xpos[i] + rotation @ local_center
+                half = np.abs(rotation) @ local_half
+            else:
+                half = np.abs(rotation) @ model.geom_size[i]
+                center = data.geom_xpos[i]
             if center[2] + half[2] < 0.12 or center[2] - half[2] > 0.7:
                 continue
+            box = (
+                center[0] - half[0],
+                center[0] + half[0],
+                center[1] - half[1],
+                center[1] + half[1],
+            )
+            self.colliders.append(box)
             self.obstacles.append(
-                (
-                    center[0] - half[0] - 0.38,
-                    center[0] + half[0] + 0.38,
-                    center[1] - half[1] - 0.38,
-                    center[1] + half[1] + 0.38,
-                )
+                (box[0] - 0.38, box[1] + 0.38, box[2] - 0.38, box[3] + 0.38)
             )
         self.resolution = 0.12
         self.commands = []
@@ -63,6 +78,7 @@ class Navigator:
         self.goals = []
         self.state = "idle"
         self.waypoint = None
+        self.turn_yaw = None
         self.started = 0
         self.scan_yaw = None
         self.last_progress = (0.0, self.home)
@@ -85,6 +101,17 @@ class Navigator:
             lo_x <= x <= hi_x
             and lo_y <= y <= hi_y
             and not any(a <= x <= b and c <= y <= d for a, b, c, d in self.obstacles)
+        )
+
+    def blocked(self, point):
+        """True when the measured base center leaves the room or enters a raw
+        obstacle box. Planning uses the inflated map, so brushing the safety
+        margin near a corner is not a fault; actual overlap is."""
+        x, y = point
+        lo_x, hi_x, lo_y, hi_y = self.bounds
+        return (
+            not (lo_x <= x <= hi_x and lo_y <= y <= hi_y)
+            or any(a <= x <= b and c <= y <= d for a, b, c, d in self.colliders)
         )
 
     def nearest_free(self, point):
@@ -162,8 +189,10 @@ class Navigator:
         self.state = "failed"
         self.path = []
 
-    def command(self, cmd, waypoint=None, command_id=None):
+    def command(self, cmd, waypoint=None, command_id=None, heading=None):
         command_id = command_id or str(uuid4())
+        # Duplicate suppression covers only the retained 100-command window;
+        # upstream callers must dedupe retried IDs older than that.
         if any(c["command_id"] == command_id for c in self.commands):
             return
         if self.active and self.active["status"] in ("accepted", "executing"):
@@ -194,6 +223,24 @@ class Navigator:
                 self.state = "scanning"
                 self.scan_yaw = yaw_of(self.data.qpos[3:7])
                 self.update("executing", "Turning robot to inspect the scene")
+            elif cmd == "turn":
+                # heading is an ABSOLUTE world yaw target in radians [-pi, pi],
+                # not a relative offset; callers pre-add the desired offset.
+                if (
+                    isinstance(heading, bool)
+                    or not isinstance(heading, (int, float))
+                    or not math.isfinite(heading)
+                ):
+                    raise ValueError(
+                        "Turn heading must be a finite absolute world yaw in radians"
+                    )
+                if not -math.pi <= heading <= math.pi:
+                    raise ValueError("Turn heading must be within [-pi, pi] radians")
+                self.state = "turning"
+                self.turn_yaw = float(heading)
+                self.update(
+                    "executing", f"Turning to absolute yaw {heading:.2f} rad"
+                )
             else:
                 self.goals = (
                     ["living-room", "bedroom", "hallway", "home"]
@@ -211,22 +258,30 @@ class Navigator:
                 "completed", "Reached all requested waypoints using measured robot pose"
             )
             return
-        self.waypoint = self.goals.pop(0)
-        target = next((w for w in self.waypoints if w["id"] == self.waypoint), None)
+        # Peek, validate and plan first so a failure leaves the goal queued.
+        target = next((w for w in self.waypoints if w["id"] == self.goals[0]), None)
         if target is None:
             raise ValueError("Unknown waypoint")
-        self.path = self.plan(tuple(self.data.qpos[:2]), (target["x"], target["y"]))
+        path = self.plan(tuple(self.data.qpos[:2]), (target["x"], target["y"]))
+        self.waypoint = self.goals.pop(0)
+        self.path = path
         self.state = "moving"
         self.update("executing", f"Walking to {self.waypoint}")
 
     def velocity(self):
-        if self.state not in ("moving", "scanning"):
+        if self.state not in ("moving", "scanning", "turning"):
             return 0.0, 0.0, 0.0
         now = float(self.data.time)
         if now - self.started > 150:
             self.fail("Mission exceeded 150 simulation seconds")
             return 0.0, 0.0, 0.0
         yaw = yaw_of(self.data.qpos[3:7])
+        # The person/furniture stop guard applies to rotation missions too;
+        # a base that leaves the room or overlaps a resident stops every state.
+        p = tuple(self.data.qpos[:2])
+        if self.data.qpos[2] < 0.17 or self.blocked(p):
+            self.fail("Robot left the room, entered an obstacle, or lost standing height")
+            return 0.0, 0.0, 0.0
         if self.state == "scanning":
             elapsed = now - self.started
             if elapsed >= 12:
@@ -240,10 +295,16 @@ class Navigator:
                 0.65 if elapsed < 4 else -0.65 if elapsed < 9 else 0
             )
             return 0.0, 0.0, max(-1.0, min(1.0, 3 * angle(target - yaw)))
-        p = tuple(self.data.qpos[:2])
-        if self.data.qpos[2] < 0.17 or not self.free(p):
-            self.fail("Robot left the navigable area or lost standing height")
-            return 0.0, 0.0, 0.0
+        if self.state == "turning":
+            error = angle(self.turn_yaw - yaw)
+            if abs(error) < 0.12:
+                self.state = "idle"
+                self.update(
+                    "completed",
+                    f"Turn finished with {error:.2f} rad measured yaw error",
+                )
+                return 0.0, 0.0, 0.0
+            return 0.0, 0.0, max(-1.0, min(1.0, 3 * error))
         if now - self.last_progress[0] > 25:
             if math.dist(p, self.last_progress[1]) < 0.08:
                 self.fail("No measured progress toward waypoint")

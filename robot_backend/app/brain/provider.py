@@ -142,6 +142,7 @@ def sanitize_jpeg(encoded: str, resize_longest_side: int | None = None) -> str:
 # model; verified against OpenRouter's public model catalog. See
 # contract/brain.md for the primary sources.
 PRICE_CAPS_USD_PER_M = {
+    'google/gemini-2.5-flash-lite:floor': {'prompt': 0.11, 'completion': 0.41},
     'qwen/qwen3-vl-32b-instruct:floor': {'prompt': 0.11, 'completion': 0.42},
     'deepseek/deepseek-v4.1-flash:floor': {'prompt': 0.31, 'completion': 1.21},
     'xiaomi/mimo-v2.5:floor': {'prompt': 0.15, 'completion': 0.29},

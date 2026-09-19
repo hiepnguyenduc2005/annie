@@ -170,6 +170,57 @@ h1 {
   gap: 9px;
   border-top: 1px solid var(--line);
 }
+.mission-bar {
+  padding: 15px 20px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  background: #1d2a20;
+}
+.mission-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mission-buttons button {
+  padding: 10px 14px;
+}
+.mission-status {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.dog-cam {
+  position: relative;
+  height: 170px;
+  border-top: 1px solid var(--line);
+  background: #1a211d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.dog-cam img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: none;
+}
+.dog-cam img.ready {
+  display: block;
+}
+.dog-cam-caption {
+  position: absolute;
+  bottom: 10px;
+  left: 14px;
+  color: #e3eddf;
+  background: #142017c9;
+  font-size: 8px;
+  letter-spacing: 1.1px;
+  padding: 5px 9px;
+  border-radius: 5px;
+}
 button {
   font: inherit;
   font-size: 12px;
@@ -374,6 +425,13 @@ footer {
   .transport button.primary {
     min-width: 126px;
   }
+  .mission-buttons button {
+    flex: 1 1 40%;
+    white-space: normal;
+  }
+  .dog-cam {
+    height: 130px;
+  }
   aside {
     grid-template-columns: 1fr;
   }
@@ -451,6 +509,62 @@ select:focus-visible {
   overflow-wrap: anywhere;
   max-height: 220px;
   overflow: auto;
+}
+#safety-error {
+  color: #ffc6a5;
+}
+#brain-panel .brain-metrics dd {
+  font-size: 11px;
+  text-align: right;
+  max-width: 70%;
+  overflow-wrap: anywhere;
+}
+#say-text {
+  width: 100%;
+  resize: vertical;
+  min-height: 62px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: #14201a;
+  border: 1px solid #384b3d;
+  border-radius: 7px;
+  padding: 9px 10px;
+  margin-bottom: 10px;
+}
+#say-audio {
+  width: 100%;
+  height: 36px;
+  margin: 10px 0 8px;
+}
+#say-play {
+  width: 100%;
+}
+.file-label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.file-label input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.file-label input::file-selector-button {
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  background: #233028;
+  color: var(--text);
+  border: 1px solid #384b3d;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-right: 8px;
+}
+.file-label input::file-selector-button:hover {
+  background: #314535;
 }
 .visually-hidden {
   position: absolute;

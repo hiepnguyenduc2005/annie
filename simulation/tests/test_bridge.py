@@ -71,7 +71,7 @@ def test_vision_preserves_evidence_deduplicates_and_caps_attempts():
             ingests.append(data)
             return httpx.Response(200, json={})
         async with httpx.AsyncClient(base_url='http://test', transport=httpx.MockTransport(handler)) as client:
-            bridge = Bridge(client, client, client, perception='vision', max_inferences=2)
+            bridge = Bridge(client, client, client, perception='vision', max_inferences=2, clock=lambda: .123)
             await bridge.infer()
             await bridge.infer()
             assert len(sent) == 1
@@ -97,7 +97,7 @@ def test_provider_failure_does_not_fabricate_perception_or_leak(caplog):
                 return httpx.Response(503, text='secret provider data')
             raise AssertionError('No app ingestion allowed on provider failure')
         async with httpx.AsyncClient(base_url='http://test', transport=httpx.MockTransport(handler)) as client:
-            bridge = Bridge(client, client, client, perception='vision')
+            bridge = Bridge(client, client, client, perception='vision', clock=lambda: .001)
             await bridge.infer()
             assert bridge.inferences == 1
     asyncio.run(exercise())
@@ -185,7 +185,7 @@ def test_status_file_preserves_stale_result_and_omits_images(tmp_path):
             return httpx.Response(200,json={'accepted':False})
         async with httpx.AsyncClient(base_url='http://test', transport=httpx.MockTransport(handler)) as client:
             path = tmp_path / 'nested' / 'status.json'
-            bridge = Bridge(client, client, client, perception='vision', status_file=path)
+            bridge = Bridge(client, client, client, perception='vision', status_file=path, clock=lambda: .123)
             await bridge.infer()
             status = json.loads(path.read_text())
             assert status['last_perception']['ts'] == 123

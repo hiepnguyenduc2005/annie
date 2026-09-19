@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import shutil
 import struct
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -26,6 +27,7 @@ TIMEOUT_SECONDS = 30.0
 SAMPLE_RATE_HZ = 22050
 CHANNELS = 1
 BYTES_PER_SAMPLE = 2
+CHECKIN_PROMPT = 'Are you okay? Please say okay or help.'
 
 _RIFF = b"RIFF"
 _WAVE = b"WAVE"
@@ -95,6 +97,19 @@ class SpeechAdapter:
     async def _synthesize(self, text, command_id):
         self.output_dir.mkdir(parents=True, exist_ok=True)
         clip_path = self.output_dir / f"{command_id}.wav"
+        # Only the fixed, approved question is cached. Family messages retain
+        # their command identity and are synthesized normally.
+        cache = self.output_dir / 'checkin-pcm22050-v1.wav'
+        if text == CHECKIN_PROMPT and cache.is_file():
+            try:
+                sample_count = parse_wav_header(cache.read_bytes())
+                shutil.copyfile(cache, clip_path)
+                return {'command_id': command_id, 'status': 'synthesized',
+                        'file_path': str(clip_path), 'duration_s': sample_count / SAMPLE_RATE_HZ,
+                        'sample_rate_hz': SAMPLE_RATE_HZ, 'channels': CHANNELS,
+                        'played': False, 'cached': True}
+            except (SpeechError, OSError):
+                cache.unlink(missing_ok=True)
         # Write to a unique temp path first so a crash or timeout never leaves
         # a partial file at the final clip path.
         temp_path = clip_path.with_name(f".{uuid4().hex}.part")
@@ -120,6 +135,8 @@ class SpeechAdapter:
             sample_count = parse_wav_header(temp_path.read_bytes())
             duration = sample_count / SAMPLE_RATE_HZ
             temp_path.replace(clip_path)
+            if text == CHECKIN_PROMPT:
+                shutil.copyfile(clip_path, cache)
             return {
                 "command_id": command_id,
                 "status": "synthesized",

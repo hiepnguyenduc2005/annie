@@ -13,7 +13,8 @@
     <header>
       <a class="brand" href="/">annie<span>LAB</span></a>
       <div class="header-title">
-        Robot simulation <span>/</span> Unitree Go2
+        Robot simulation <span>/</span>
+        <span id="header-model">Unitree Go2</span>
       </div>
       <div class="connection">
         <i id="connection-dot"></i><span id="connection">Connecting</span>
@@ -74,6 +75,25 @@
             <button id="step" disabled>Step once</button>
             <button id="reset" disabled>Reset</button>
             <span class="keyboard">Space to play / pause</span>
+          </div>
+          <div class="mission-bar" id="mission-bar">
+            <div class="mission-buttons">
+              <button id="mission-patrol" class="primary">Patrol home</button>
+              <button id="mission-goto-bedroom">Go to bedroom</button>
+              <button id="mission-goto-living-room">Living room</button>
+              <button id="mission-come-home">Come home</button>
+              <button id="mission-turn-left">Turn left 90°</button>
+              <button id="mission-look">Look around</button>
+              <button id="mission-stop">Stop</button>
+              <button id="mission-resume">Resume</button>
+            </div>
+            <p id="mission-status" class="mission-status">
+              Missions unavailable: locomotion controller not loaded.
+            </p>
+          </div>
+          <div class="dog-cam">
+            <img id="dog-frame" alt="Live view from the simulated robot front camera" />
+            <span class="dog-cam-caption">Dog camera</span>
           </div>
           <div id="notice" role="status" aria-live="polite">
             Waiting for the local simulator.
@@ -158,6 +178,152 @@
             >
             <p id="phase" class="hint">No routine schedule loaded.</p>
           </section>
+          <section class="panel" id="brain-panel">
+            <p class="eyebrow">PERCEPTION</p>
+            <div class="state-heading">
+              <h2>What Annie sees</h2>
+              <span id="brain-mode" class="badge">DISCONNECTED</span>
+            </div>
+            <dl class="metrics brain-metrics">
+              <div>
+                <dt>Caption</dt>
+                <dd id="brain-caption">—</dd>
+              </div>
+              <div>
+                <dt>Posture</dt>
+                <dd id="brain-posture">—</dd>
+              </div>
+              <div>
+                <dt>Location</dt>
+                <dd id="brain-location">—</dd>
+              </div>
+              <div>
+                <dt>Confidence</dt>
+                <dd id="brain-confidence">—</dd>
+              </div>
+              <div>
+                <dt>Frame</dt>
+                <dd id="brain-frame">—</dd>
+              </div>
+              <div>
+                <dt>Latency</dt>
+                <dd id="brain-latency">—</dd>
+              </div>
+              <div>
+                <dt>Provider</dt>
+                <dd id="brain-provider">—</dd>
+              </div>
+              <div>
+                <dt>App ingest</dt>
+                <dd id="brain-ingest">—</dd>
+              </div>
+              <div>
+                <dt>Updated</dt>
+                <dd id="brain-updated">—</dd>
+              </div>
+            </dl>
+            <p id="brain-error" class="hint" hidden></p>
+            <p id="brain-note" class="hint"></p>
+          </section>
+          <section class="panel" id="person-safety-panel">
+            <p class="eyebrow">CAMERA PERSON STOP</p>
+            <div class="state-heading">
+              <h2>Person safety</h2>
+              <span id="safety-state" class="badge">NO DATA</span>
+            </div>
+            <dl class="metrics brain-metrics">
+              <div>
+                <dt>State</dt>
+                <dd id="safety-state-text">—</dd>
+              </div>
+              <div>
+                <dt>Reason</dt>
+                <dd id="safety-reason">—</dd>
+              </div>
+              <div>
+                <dt>Person confidence</dt>
+                <dd id="safety-confidence">—</dd>
+              </div>
+              <div>
+                <dt>Decision latency</dt>
+                <dd id="safety-latency">—</dd>
+              </div>
+            </dl>
+            <p id="safety-error" class="hint" hidden></p>
+            <p class="hint">
+              Software stop from camera person detection. It is a convenience
+              behavior, not a safety guarantee or an emergency stop.
+            </p>
+          </section>
+          <section class="panel" id="voice-panel">
+            <p class="eyebrow">VOICE OUTPUT</p>
+            <h2>Speak</h2>
+            <form id="say-form">
+              <label class="visually-hidden" for="say-text"
+                >Message for Annie to speak</label
+              >
+              <textarea
+                id="say-text"
+                maxlength="2000"
+                rows="3"
+                placeholder="Text for the simulated dog to speak (max 2000 characters)"
+                required
+              ></textarea>
+              <button id="say-send" class="primary" type="submit">
+                Synthesize speech
+              </button>
+            </form>
+            <div id="say-audio-wrap" hidden>
+              <p id="say-meta" class="hint"></p>
+              <p id="say-clip-text" class="hint"></p>
+              <audio id="say-audio" controls preload="none"></audio>
+              <button id="say-play" class="primary" type="button" hidden>
+                ▶ Hear Annie
+              </button>
+            </div>
+            <p id="say-status" class="hint" role="status"></p>
+            <label class="toggle" for="demo-voice">
+              <input type="checkbox" id="demo-voice" />
+              Enable demo voice (autoplay new clips in this browser)
+            </label>
+            <p class="hint">
+              Default off: clips wait for the Hear Annie button. When enabled,
+              the latest clip plays automatically; only actual playback ends
+              send the played receipt.
+            </p>
+          </section>
+          <section class="panel" id="transcribe-panel">
+            <p class="eyebrow">VOICE INPUT</p>
+            <h2>Hear a recorded reply</h2>
+            <p class="hint">
+              Local Whisper processes the recording on this computer. MiMo is
+              an explicit cloud alternative, verified on synthetic speech.
+            </p>
+            <form id="transcribe-form">
+              <label for="transcribe-provider">Speech recognition</label>
+              <select id="transcribe-provider">
+                <option value="local">Local Whisper · offline</option>
+                <option value="cloud">MiMo · synthetic audio to cloud</option>
+              </select>
+              <label class="file-label" for="transcribe-file"
+                >Upload a synthetic/demo WAV (max 20 s)<input
+                  id="transcribe-file"
+                  type="file"
+                  accept="audio/wav,.wav"
+                  required
+              /></label>
+              <button id="transcribe-send" class="primary" type="submit">
+                Transcribe upload
+              </button>
+            </form>
+            <p id="transcribe-result" class="hint" role="status">
+              No upload transcribed yet.
+            </p>
+            <p class="hint">
+              Sent only when you press the button, through the local audio brain
+              proxy. Maximum 4 MB. Do not upload real personal recordings.
+            </p>
+          </section>
           <section class="panel">
             <p class="eyebrow">LOOK AROUND</p>
             <h2>Camera</h2>
@@ -217,10 +383,10 @@ No scenario loaded.</pre
         </aside>
       </div>
       <footer>
-        <span id="version">MuJoCo · Unitree Go2</span
-        ><span
-          >Physics and joint control do not establish autonomous walking or fall
-          recognition.</span
+        <span id="version">MuJoCo · Unitree Go1 locomotion surrogate</span
+        ><span id="footer-honesty"
+          >Walking uses a matched Go1 model and policy; Go2 hardware is not
+          connected.</span
         >
         <a href="https://polyhaven.com/" target="_blank" rel="noopener"
           >Powered by Poly Haven</a

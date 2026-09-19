@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 
 APPROVED_VISION_MODELS = frozenset({
+    'google/gemini-2.5-flash-lite:floor',
     'qwen/qwen3-vl-32b-instruct:floor',
     'deepseek/deepseek-v4.1-flash:floor',
     'xiaomi/mimo-v2.5:floor',
@@ -21,6 +22,8 @@ APPROVED_AUDIO_MODELS = frozenset({'xiaomi/mimo-v2.5:floor'})
 #   reserve $0.50.
 # - mimo-v2.5: 1050000 ctx * $0.15/M + 512 out * $0.29/M < $0.16, reserve $0.20.
 MODEL_RESERVATION_USD = {
+    # 1,048,576 context * $0.11/M + 512 output * $0.41/M < $0.12.
+    'google/gemini-2.5-flash-lite:floor': 0.12,
     'qwen/qwen3-vl-32b-instruct:floor': 0.02,
     'deepseek/deepseek-v4.1-flash:floor': 0.50,
     'xiaomi/mimo-v2.5:floor': 0.20,

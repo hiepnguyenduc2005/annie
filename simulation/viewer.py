@@ -12,12 +12,15 @@ import mimetypes
 import queue
 import threading
 import time
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from uuid import UUID, uuid4
 
 WEB = Path(__file__).resolve().parent / "web"
+if __package__ in (None, ''):
+    sys.path.insert(0, str(WEB.parent.parent))
 PRESETS = {"front": (180, -20, 1.6), "side": (90, -20, 1.6), "top": (90, -89, 1.8)}
 
 
@@ -36,9 +39,9 @@ def validate_control(value, scene_ids=()):
     }:
         raise ValueError("action must be play, pause, reset, step, camera, or hold")
     if value["action"] == "mission":
-        if not set(value) <= {"action", "cmd", "waypoint", "command_id"} or value.get(
+        if not set(value) <= {"action", "cmd", "waypoint", "command_id", "heading"} or value.get(
             "cmd"
-        ) not in {"goto", "patrol", "stop", "resume", "look"}:
+        ) not in {"goto", "patrol", "stop", "resume", "look", "turn"}:
             raise ValueError("invalid mission")
         if value["cmd"] == "goto" and value.get("waypoint") not in {
             "home",
@@ -47,6 +50,14 @@ def validate_control(value, scene_ids=()):
             "hallway",
         }:
             raise ValueError("unknown waypoint")
+        if value['cmd'] != 'goto' and 'waypoint' in value:
+            raise ValueError('waypoint is only valid for goto')
+        if value['cmd'] == 'turn':
+            heading = value.get('heading')
+            if type(heading) not in (int, float) or not math.isfinite(heading) or not -math.pi <= heading <= math.pi:
+                raise ValueError('turn requires absolute heading in [-pi, pi]')
+        elif 'heading' in value:
+            raise ValueError('heading is only valid for turn')
         if "command_id" in value:
             UUID(value["command_id"])
         return value
@@ -144,6 +155,8 @@ class Shared:
         self.robot_frame = None
         self.speech = {}
         self.speech_lock = threading.Lock()
+        self.stt_lock = threading.Lock()
+        self.stt = None
 
 
 def handler_for(shared, port):
@@ -253,7 +266,7 @@ def handler_for(shared, port):
             if not self.allowed(write=True):
                 return
             path = urlsplit(self.path).path
-            if path in {"/say", "/speech/played", "/transcribe"}:
+            if path in {"/say", "/speech/played", "/transcribe", "/transcribe-local"}:
                 self.speech_request(path)
                 return
             if path != "/control":
@@ -291,7 +304,7 @@ def handler_for(shared, port):
 
         def speech_request(self, path):
             try:
-                limit = 5600000 if path == "/transcribe" else 10000
+                limit = 5600000 if path in ('/transcribe', '/transcribe-local') else 10000
                 length = int(self.headers.get("Content-Length", "0"))
                 if self.headers.get("Transfer-Encoding") or not 0 < length <= limit or self.headers.get_content_type() != "application/json":
                     raise ValueError()
@@ -299,6 +312,28 @@ def handler_for(shared, port):
                 value = json.loads(self.rfile.read(length))
                 if not isinstance(value, dict):
                     raise TypeError()
+                if path == '/transcribe-local':
+                    if set(value) != {'audio_b64', 'format', 'source', 'utterance_id'} or value['format'] != 'wav' or value['source'] != 'simulation_audio':
+                        raise ValueError()
+                    uid = str(UUID(value['utterance_id']))
+                    raw = base64.b64decode(value['audio_b64'], validate=True)
+                    if not shared.stt_lock.acquire(blocking=False):
+                        self.reply(429, {'error': 'Local transcription is busy'})
+                        return
+                    try:
+                        from simulation.local_stt import LocalSTTAdapter, LocalSTTError
+                        from dataclasses import asdict
+                        if shared.stt is None:
+                            shared.stt = LocalSTTAdapter()
+                        result = asdict(shared.stt.transcribe(raw, utterance_id=uid))
+                        result.update(source='simulation_audio', provider={'mode': 'local', 'model': result['model']},
+                                      quality='Raw Whisper signals; not calibrated confidence')
+                        self.reply(200, result)
+                    except LocalSTTError:
+                        self.reply(422, {'error': 'Invalid or unrecognized local audio'})
+                    finally:
+                        shared.stt_lock.release()
+                    return
                 if path == "/transcribe":
                     import os
                     import urllib.error
@@ -327,6 +362,7 @@ def handler_for(shared, port):
                         if cid not in shared.speech:
                             raise ValueError()
                         shared.speech[cid]["status"] = "played"
+                        shared.speech[cid]["played"] = True
                     self.reply(200, {"command_id": cid, "status": "played"})
                     return
                 if not set(value) <= {"text", "command_id"}:
@@ -435,12 +471,13 @@ class SceneCatalog:
 class MujocoSession:
     """A model, renderer and controls, all created and used on the main thread."""
 
-    def __init__(self, path, scene=None, locomotion=False):
+    def __init__(self, path, scene=None, locomotion=False, person_safety=None):
         import mujoco
 
         self.mj = mujoco
         self.locomotion_enabled = locomotion
         self.controller = self.navigator = None
+        self.person_safety = person_safety
         if locomotion:
             try:
                 from simulation.locomotion import prepare_locomotion_model
@@ -510,6 +547,8 @@ class MujocoSession:
         self.mj.mj_forward(self.model, self.data)
         self.physics_error = physics_fault(self.data, self.mj)
         self.map_id = "sim-" + str(uuid4())
+        if self.person_safety:
+            self.person_safety.reset(self.map_id)
         if self.controller:
             self.controller.reset()
         if self.navigator:
@@ -521,7 +560,13 @@ class MujocoSession:
     def controls(self):
         model, data = self.model, self.data
         if self.controller:
-            self.controller.apply(*self.navigator.velocity())
+            safety = self.person_safety.snapshot() if self.person_safety else None
+            if safety and safety['blocked']:
+                if self.navigator.state in ('moving', 'scanning', 'turning'):
+                    self.navigator.fail(safety['reason'])
+                self.controller.apply(0, 0, 0)
+            else:
+                self.controller.apply(*self.navigator.velocity())
         elif self.position_servos:
             data.ctrl[:] = self.nominal_ctrl
         elif self.hold and self.hold_supported:
@@ -678,6 +723,7 @@ class MujocoSession:
             "map_id": self.map_id,
             "locomotion": self.controller.state() if self.controller else None,
             "navigation": self.navigator.snapshot() if self.navigator else None,
+            "person_safety": self.person_safety.snapshot() if self.person_safety else {'enabled': False},
             "simulation_time": simulation_time,
             "scene_elapsed": simulation_time,
             "active_wall_time": self.active_wall_time,
@@ -719,13 +765,26 @@ class MujocoSession:
 
 def run(args):
     catalog = SceneCatalog(args.scenes)
+    guard = None
+    if args.person_safety:
+        from simulation.person_safety import PersonSafety
+        guard = PersonSafety()
     first_id = next(iter(catalog.entries), None)
     session = MujocoSession(
         catalog.paths[first_id] if first_id else args.model,
         catalog.entries.get(first_id),
         args.locomotion,
+        guard,
     )
     shared = Shared()
+    def warm_question():
+        from simulation.speech import SpeechAdapter, CHECKIN_PROMPT
+        try:
+            asyncio.run(SpeechAdapter().speak(CHECKIN_PROMPT, str(uuid4())))
+        except Exception:
+            # A later speech request reports an explicit failure if unavailable.
+            pass
+    threading.Thread(target=warm_question, daemon=True, name='question-audio-warmup').start()
     shared.catalog = catalog
     server = ThreadingHTTPServer((args.host, args.port), handler_for(shared, args.port))
     server.daemon_threads = True
@@ -787,6 +846,7 @@ def run(args):
                             candidate_catalog.paths[scene_id],
                             candidate_catalog.entries[scene_id],
                             args.locomotion,
+                            guard,
                         )
                         if candidate.physics_error:
                             raise ValueError("scene has invalid initial physics")
@@ -826,10 +886,13 @@ def run(args):
                     session.accumulator = 0.0
                 elif action == "mission":
                     if session.navigator:
+                        if guard and command['cmd'] not in ('stop',):
+                            guard.explicit_restart()
                         session.navigator.command(
                             command["cmd"],
                             command.get("waypoint"),
                             command.get("command_id"),
+                            heading=command.get('heading'),
                         )
                         session.running = session.physics_error is None
                     else:
@@ -840,6 +903,8 @@ def run(args):
                     session.hold = command["enabled"] and session.hold_supported
                 elif action == "reset":
                     session.reset()
+                    with shared.lock:
+                        shared.observation = None
                 elif action == "step":
                     session.running = False
                     session.step()
@@ -858,15 +923,19 @@ def run(args):
                 now >= next_observation
                 and session.controller
                 and session.physics_error is None
+                and (guard or session.running or shared.observation is None)
             ):
-                next_observation = now + 0.5
+                next_observation = now + (0.1 if guard else 0.5)
                 try:
                     robot_frame, observation = session.observation()
+                    if guard:
+                        guard.submit(observation)
                     with shared.lock:
-                        shared.robot_frame, shared.observation = (
-                            robot_frame,
-                            observation,
-                        )
+                        shared.robot_frame = robot_frame
+                        # Safety preview stays fresh while paused so an explicit
+                        # mission can start; incident evidence remains paused.
+                        if session.running or shared.observation is None:
+                            shared.observation = observation
                 except Exception as exc:  # noqa: BLE001 - expose rendering failure
                     session.render_error = f"{type(exc).__name__}: robot camera failed"
             with shared.lock:
@@ -892,12 +961,16 @@ def run(args):
     finally:
         server.shutdown()
         server.server_close()
+        if guard:
+            guard.close()
         session.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument('--person-safety', action='store_true',
+                        help='Inhibit movement on person detection or unavailable camera detector')
     parser.add_argument(
         "--locomotion",
         action="store_true",

@@ -19,6 +19,21 @@ def write_adapter(tmp_path, **kwargs):
     return SpeechAdapter(tmp_path / "clips", **kwargs)
 
 
+def test_cached_question_reuses_audio_but_never_playback_receipt(tmp_path):
+    from simulation.speech import CHECKIN_PROMPT
+    adapter = write_adapter(tmp_path)
+    adapter.output_dir.mkdir()
+    (adapter.output_dir / 'checkin-pcm22050-v1.wav').write_bytes(minimal_wav())
+    async def forbidden(_argv):
+        raise AssertionError('Cached question must not launch synthesis')
+    adapter._spawn = forbidden
+    cid = str(uuid4())
+    receipt = asyncio.run(adapter.speak(CHECKIN_PROMPT, cid))
+    assert receipt['command_id'] == cid
+    assert receipt['cached'] is True and receipt['played'] is False
+    assert receipt['status'] == 'synthesized'
+
+
 def test_rejects_empty_whitespace_and_oversized_text(tmp_path):
     adapter = write_adapter(tmp_path)
     for bad in ["", "   ", None, 123, "x" * (MAX_TEXT_CHARS + 1)]:

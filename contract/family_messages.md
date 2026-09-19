@@ -58,7 +58,12 @@ Request:
 ```
 
 `kind` is one of `navigating`, `arrived`, `speaking`, `listening`, `heard`,
-`recalling`, `recalled`, `completed`, `failed`. `payload` is an open,
+`recalling`, `recalled`, `completed`, `failed`. app_backend adds two derived
+fields to the stored event before returning it to clients — `summary` (a
+display line) and `speaker` (`annie`, `resident` or `system`). Those are
+app_backend's own output: **do not send them**, and expect clients to render
+them instead of reaching into `payload`, so an unfamiliar payload degrades to
+a readable line rather than breaking a UI. `payload` is an open,
 step-specific dict (free-form; bounded only by the app's overall request-size
 limit). `completed`/`failed` are terminal: they close the run, and any further
 event for that `run_id` is rejected with 409. An unknown `run_id` is 404.

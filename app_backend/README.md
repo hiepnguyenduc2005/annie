@@ -72,6 +72,11 @@ resident data automatically. See [setup and evidence format](../docs/SUBCONSCIOU
 | `GET /api/thread` | The family message thread, oldest first |
 | `WS /ws/family` | Initial `{type:"snapshot",data:{thread,runs}}`, then `message`/`run_status`/`run_event` envelopes |
 | `POST /internal/events` | Called by robot_backend only; `X-Internal-Secret` header required, not the family token |
+| `GET /api/reminders` | Resident view's reminder list |
+| `POST /api/reminders` | `{"time":"16:30","title":"…"}`; time must be `HH:MM` |
+| `PATCH /api/reminders/{id}/toggle` | Flip one reminder's done state; 404 if unknown |
+| `GET /api/memory` | Observation feed shown in the resident view's activity tab |
+| `POST /api/ask` | `{"question":"Where is my phone?"}` → `{answer}` from recorded observations only |
 
 When a token is configured, send `{"token":"…"}` as the first WebSocket message
 within five seconds; otherwise the initial snapshot arrives immediately. Clients

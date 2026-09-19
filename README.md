@@ -1,4 +1,4 @@
-# Annie architecture
+# Annie
 
 Two independently runnable FastAPI services separate application concerns from
 robot-side processing. The app service runs on a server; the robot service runs

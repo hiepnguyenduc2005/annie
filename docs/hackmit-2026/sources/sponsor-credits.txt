@@ -1,0 +1,199 @@
+SPONSOR CREDITS
+
+ELASTIC
+
+
+30 Day Elastic Cloud Trial
+
+
+How to access
+[https://www.elastic.co/cloud/cloud-trial-overview/30-days](https://www.elastic.co/cloud/cloud-trial-overview/30-days)
+
+DIMENSIONAL
+
+
+20 × Unitree Go2, 10 × Anvil OpenYAM
+
+
+How to access
+Hardware lending through the HackMIT hardware booth and lending system has been requested by Dimensional.
+
+NOTABILITY
+
+
+Every attendee gets one month of Notability Pro, free.
+Pro is our top tier, and it includes everything Notability offers: our full AI toolkit, including Smart Notes, Audio Transcription, Handwriting Recognition, Math Conversion, and Chat with your notes.
+Notability works across iPad, iPhone, Mac, and Android, so students can capture ideas, plan, and document their build on whatever device they bring to the hack.
+Quantity: one free month per attendee, with no cap on the number of participants.
+
+
+How to access
+Code: HACKMIT
+It unlocks one free month of Notability Pro, our full toolkit for capturing ideas, planning, and documenting a build. Share it with your attendees now so they can set up and get comfortable with Notability before hack day. This code has a 500 redemption cap.
+
+REGENERON
+
+
+Starter Kit for tools, tips and datasets for hackers working on Regeneron's prize track for clinical trials, biostatistics and other clinical biotech objectives
+
+
+How to access
+[https://regn.link/hackMIT](https://regn.link/hackMIT)
+
+MINTLIFY
+
+
+1 month free of Mintlify Pro
+
+
+How to access
+Enter in this code when you sign up: MINTHACKMIT
+
+ARDUINO
+
+
+Arduino App Lab, the environment to program the UNO Q board
+
+
+How to access
+[https://docs.arduino.cc/software/app-lab/](https://docs.arduino.cc/software/app-lab/)
+
+SPACEXAI
+
+
+One month of Cursor Pro free!
+
+
+How to access
+Come visit our booth and get the code to redeem one month of Cursor Pro, which now includes access to Grok Bot.
+
+WARP
+
+
+We're giving HackMIT participants access to one free month of Warp's build plan.
+Build plan gives users extended access to our Warp AI Agent harness, where they can build on the Warp platform with AI.
+This credit pack is worth $20.
+
+
+How to access
+Users just need to use the checkout code HACKMIT on the Stripe checkout portal when they sign up for a monthly $20 Build plan on Warp.
+
+RUNPOD
+
+
+We are providing 250 Runpod credit codes valued at $15 each for attendees who stop by our booth and see a demo.
+
+
+How to access
+Hackers will scan a QR code and submit a form to redeem the credit code.
+
+FRAGMENT
+
+
+We're giving HackMIT participants access to the Fragment startup plan, which typically costs $2,500/mo, for free during the hackathon.
+Fragment makes it seamless to design and launch any product that involves money movement.
+This could be as simple as building a marketplace funds flow, or as complex as building an insurance billing system end-to-end. Our system helps you design and build quickly using our MCP, and enforces correctness so you can't lose track of a single dollar.
+
+
+How to access
+Hackers can request access by emailing shabaig@fragment.dev
+
+ESPRESSIF SYSTEMS
+
+
+ESP Private Agents
+The ESP Private Agents Platform is a self-hosted, multi-modal AI agent platform that lets IoT device makers deploy AI agents within their own AWS environments. It provides:
+A ready-to-use agent runtime: no need to build an agent backend from scratch on top of AWS Bedrock or other LLM services.
+Multi-modal support: native voice and text interaction for natural human-device interfaces.
+Pluggable tools — Local Tools for device control, and MCP Tools for integrating external APIs and cloud services.
+A unified dashboard: configure system prompts, test responses, and monitor usage in one place.
+Flexible integration: connect your agents to a web app, mobile app, or physical device.
+Read the announcement: [ESP Private Agents announcement](https://developer.espressif.com/blog/2025/12/annoucing_esp_private_agents_platform/)
+Browse the documentation: [https://docs.agents.espressif.com/#get-started](https://docs.agents.espressif.com/#get-started)
+Each team within the hackathon can get to enjoy an increase in quota usage if they intend to use ESP Private Agents in their projects during the course of the hackathon.
+
+
+How to access
+Create your admin account
+Go to [https://agents.espressif.com/](https://agents.espressif.com/) and click "Manage Agents".
+Under Need an account?, click "Sign up" and complete the registration.
+Sign in with your new account.
+Click your profile icon in the top-right corner and select "Profile".
+Under Account Details, copy your "User ID".
+Submit this User ID in the form we or the HackMIT team will share with you.
+About the Quota: Each team's quota will be increased from 200K to 2M one day before the hackathon, and will stay at that level for its duration. If you need more, request it in the Discord channel.
+
+LINQ
+
+
+Linq will provide hackers with complimentary access to the Linq API for the duration of the hackathon.
+Participants can use our messaging infrastructure to build experiences using iMessage, RCS, and SMS, with access to features like rich media, reactions, read receipts, group chats, and webhooks.
+
+
+How to access
+We’ll provide a dedicated hackathon landing page where participants can sign up and receive access to the Linq API. The page will include everything they need to get started building with Linq during the hackathon.
+Link: [linqapp.com/s/events/hack-mit](https://linqapp.com/s/events/hack-mit)
+
+ASUS
+
+
+ASUS ZenScreen MB169CK-P portable monitors (Qty: 29): Lightweight and portable 16" monitors that easily connects to your laptops or devices via single cable connectivity.
+ASUS Ascent GX10 AI supercomputers (Qty: 29): Compact AI supercomputers that deliver powerful local AI computing and development capabilities. Devices have been pre-installed with Nemotron.
+ASUS UGen300 USB AI accelerators (Qty: 19): Compact USB-connected AI accelerators that boost AI computing performance and enable efficient local AI workloads.
+ASUS Agentic PCs - ASUS ExpertCenter Pro ET500A B8 and ASUS ExpertCenter Pro ET500I W8 (Qty: 4): AI-ready desktop PCs for AI applications and intelligent workflows.
+ASUS desktop monitors (Qty: 12): 24-inch monitors built for clear visuals and smooth performance.
+
+
+How to access
+Devices will be available to checkout during the hackathon through HackMIT's hardware checkout system
+
+DEEPGRAM
+
+
+Deepgram is providing every hacker $200 in free API credits — no credit card required.
+Credits work across the full Deepgram voice AI platform: real-time and batch speech-to-text, text-to-speech, and the Voice Agent API for building end-to-end conversational voice agents. That's enough credit to power roughly hundreds of hours of transcription or a full weekend of voice agent development. Hackers can build anything from live captioning to fully interactive voice apps. SDKs are available in Python, JavaScript, Java, Go, Rust, and C#.
+
+
+How to access
+Hackers sign up at [https://dpgr.am/hackmit26](https://dpgr.am/hackmit26) The $200 credit is applied automatically to their account at signup, and they get an API key immediately from the Deepgram Console. No credit card or promo code is required. The same link will be on our booth QR code and swag.
+
+VOLORIDGE
+
+
+Voloridge will provide access to high-performance AWS compute resources for teams participating in our challenge.
+Both CPU-focused instances and GPU-enabled instances will be available, with substantial compute, memory, and storage suitable for large-scale data processing and machine learning workloads.
+
+
+How to access
+If you’d like access, come talk to the Voloridge team at our booth! Tell us about your project and what you’re trying to build, and we’ll help get you set up with the compute resources that make sense for your needs
+
+COGNITION
+
+
+Hey hackers! For $1000 of Devin credits for your teams please fill out the form here: [https://docs.google.com/forms/d/e/1FAIpQLScEccO2E529ZrJX0FScd9BVYRUJqHzjlUWxVa9Auo35tVuqiA/viewform?usp=publish-editor](https://docs.google.com/forms/d/e/1FAIpQLScEccO2E529ZrJX0FScd9BVYRUJqHzjlUWxVa9Auo35tVuqiA/viewform?usp=publish-editor)
+
+
+Devin's cloud agents run all night and without needing to have your computer open so you can have agents coding while everyone else sleeps ;) Credits work across Devin Webapp (Cloud), Devin CLI, and Devin Desktop: https://docs.devin.ai/get-started/devin-intro
+
+
+How to access
+Come to our booth
+
+OPENAI
+
+
+$50 in Codex credits and $50 in API credits per person, available for up to 320 participants.
+
+
+How to access
+[OpenAI credit request form](https://docs.google.com/forms/d/e/1FAIpQLSf6GOnpn5hn-Ttd3VCPMBL7Fm_nZHUNK155AEPHYtFTRyNSZw/viewform?usp=publish-editor)
+
+META
+
+
+$50 in Meta Model API credits
+
+
+How to access
+Create a Meta Model API account at [https://dev.meta.ai/](https://dev.meta.ai/)
+Complete the intake form at [Meta credit intake form](https://docs.google.com/forms/d/e/1FAIpQLSe6gmGabgh0xjvMoHapkN8qzdXZloDRmpkPinWHvDqOIG7-pQ/viewform?usp=header)

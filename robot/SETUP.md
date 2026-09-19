@@ -169,6 +169,14 @@ test, or permission to treat its person classification as a collision sensor.
 The robot was subsequently powered off by the operator; hardware attempts
 stopped and the BLE backend disconnected.
 
+The separate [patrol supervisor](patrol/README.md) supplies an immutable
+boundary, sensor and planner freshness gates, latched faults, and one-command
+receipt tracking. Its 44 pure supervisor tests and 11 mocked bridge cases pass;
+these are software tests. The hardware adapter is not wired to it, and all
+physical stop, loss-link, map-boundary and obstacle behavior attestations
+remain false until controlled measurement. `missing_verifications` exposes
+the unmet checks to the operator.
+
 ## Verification and outstanding work
 
 - [x] Host inventory executes in the existing Mac runtime.

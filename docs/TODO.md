@@ -18,6 +18,7 @@ as work progresses and record a reason for blocked work.
 
 - [ ] TASK-007: Physical Go2 patrol within the operator's requested five-metre boundary (REQ-001; HW-04–HW-06).
   - Verified: V3 authentication, Wi-Fi AP, 720p camera, measured pose/battery, LiDAR, firmware 1.1.15, and enabled obstacle avoidance. See [hardware setup](../robot/SETUP.md).
+  - Prepared: [offline patrol supervisor](../robot/patrol/README.md), with 44 pure gate tests and 11 mocked bridge cases; physical adapter integration remains open. No verification flags are inferred from stationary acknowledgments.
   - Blockers: operator has no physical controller; independent stop/recovery, moving-stop and link-loss behavior, physical map alignment, and enforced boundary are unverified. A stop acknowledgment at rest and an offline driver fix do not satisfy these checks.
   - Done when: a nearby operator can reliably stop the robot and one deliberately slow, bounded physical route completes with measured pose and execution evidence.
 

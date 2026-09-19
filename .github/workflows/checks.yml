@@ -16,3 +16,5 @@ jobs:
       - run: PYTHONPATH=app_backend python -m pytest app_backend/tests -q
       - run: python contract/export_schemas.py --check
       - run: node --check frontend/app.js
+      - run: node --check simulation/web/app.js
+      - run: python -m compileall -q simulation

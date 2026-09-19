@@ -50,6 +50,16 @@ no paid calls or notifications run automatically.
 The separate [robot backend](robot_backend/README.md) runs on port 8001 during
 local development. Its feature packages are scaffolds, not working integrations.
 
+## Run the live robot simulator
+
+The separate [MuJoCo viewer](simulation/README.md) runs at
+[localhost:8766](http://127.0.0.1:8766/) with the actual Go2 model, live rendering,
+play/pause, reset, single-step, camera views, and optional joint-pose holding.
+Its README includes pinned dependencies and model setup for a fresh checkout.
+It is currently separate from DimOS navigation and the family app's synthetic
+incident scenarios. [SDK findings](docs/SIMULATION_FINDINGS.md) record actual
+launch results and remaining integration work.
+
 ## Contract and data boundary
 
 The team explicitly expanded the initial status-only proposal on 2026-09-19.

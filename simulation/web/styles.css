@@ -1,0 +1,389 @@
+:root {
+  color-scheme: dark;
+  --bg: #111813;
+  --panel: #19231c;
+  --line: #2a392e;
+  --text: #eaf1e6;
+  --muted: #9aac9b;
+  --lime: #c3e998;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 42px;
+  border-bottom: 1px solid var(--line);
+  padding: 20px 4%;
+}
+.brand {
+  color: var(--text);
+  font-size: 30px;
+  letter-spacing: -1.5px;
+  font-weight: 750;
+  text-decoration: none;
+}
+.brand span {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--lime);
+  padding-left: 9px;
+}
+.header-title {
+  color: var(--muted);
+  font-size: 12px;
+}
+.header-title span {
+  color: #516753;
+  margin: 0 14px;
+}
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  margin-left: auto;
+  color: var(--muted);
+}
+.connection i,
+.live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d8a76c;
+}
+.connection i.online,
+.live-dot {
+  background: var(--lime);
+}
+main {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 34px 4%;
+}
+.intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 27px;
+  gap: 24px;
+}
+.eyebrow {
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 1.8px;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+h1 {
+  font-size: 34px;
+  font-weight: 450;
+  letter-spacing: -1.2px;
+  margin: 0 0 8px;
+}
+.intro p:last-child {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+.app-link {
+  color: var(--lime);
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+.viewport-panel {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.viewport-top {
+  display: flex;
+  justify-content: space-between;
+  padding: 15px 20px;
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.live-dot {
+  margin-right: 8px;
+}
+.viewport {
+  position: relative;
+  height: clamp(280px, calc(100dvh - 395px), 660px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #242b27;
+  overflow: hidden;
+}
+.viewport img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: none;
+}
+.viewport img.ready {
+  display: block;
+}
+#loading {
+  position: absolute;
+  color: var(--muted);
+  font-size: 13px;
+}
+.frame-label {
+  position: absolute;
+  bottom: 18px;
+  left: 20px;
+  color: #e3eddf;
+  background: #142017c9;
+  backdrop-filter: blur(5px);
+  font-size: 8px;
+  letter-spacing: 1.1px;
+  padding: 6px 10px;
+  border-radius: 5px;
+}
+.transport {
+  padding: 17px 20px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-top: 1px solid var(--line);
+}
+button {
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  background: #233028;
+  color: var(--text);
+  border: 1px solid #384b3d;
+  border-radius: 7px;
+  padding: 10px 13px;
+  white-space: nowrap;
+}
+button:hover {
+  background: #314535;
+}
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 3px;
+}
+button.primary {
+  background: var(--lime);
+  color: #26361e;
+  border-color: var(--lime);
+  font-weight: 650;
+  min-width: 142px;
+}
+button.primary:hover {
+  background: #d4f4af;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+.keyboard {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+}
+#notice {
+  border-top: 1px solid var(--line);
+  padding: 12px 20px;
+  color: var(--muted);
+  font-size: 11px;
+  min-height: 42px;
+}
+#notice.error {
+  color: #ffc6a5;
+}
+aside {
+  display: grid;
+  gap: 15px;
+}
+.panel {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 20px;
+  border-radius: 13px;
+}
+.panel h2 {
+  font-size: 16px;
+  font-weight: 500;
+  margin: 0 0 13px;
+}
+.state-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.state-heading h2 {
+  margin: 0;
+}
+.badge {
+  font-size: 7px;
+  letter-spacing: 0.7px;
+  background: #2a3d2c;
+  border: 1px solid #3a523a;
+  color: var(--lime);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+.metrics {
+  margin: 18px 0 0;
+}
+.metrics div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  padding: 10px 0;
+}
+.metrics div:last-child {
+  padding-bottom: 0;
+}
+.metrics dt {
+  font-size: 11px;
+  color: var(--muted);
+}
+.metrics dd {
+  font:
+    13px ui-monospace,
+    SFMono-Regular,
+    monospace;
+  margin: 0;
+}
+.camera-buttons {
+  display: flex;
+  gap: 6px;
+}
+.camera-buttons button {
+  flex: 1;
+  padding: 8px;
+}
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin: 12px 0 0;
+}
+.toggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+}
+.toggle input {
+  accent-color: var(--lime);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+.progress div {
+  display: flex;
+  gap: 9px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 11px;
+}
+.check {
+  color: var(--lime);
+}
+.pending {
+  color: #687f6b;
+}
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: 10px;
+  color: #829884;
+  padding: 25px 0 0;
+}
+@media (min-width: 1450px) {
+  .viewport {
+    max-height: 670px;
+  }
+}
+@media (max-width: 1000px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  aside {
+    grid-template-columns: 1fr 1fr;
+  }
+  .keyboard {
+    display: none;
+  }
+  .viewport {
+    max-height: 620px;
+  }
+}
+@media (max-width: 600px) {
+  header {
+    gap: 15px;
+  }
+  .header-title {
+    display: none;
+  }
+  main {
+    padding-top: 24px;
+  }
+  .intro {
+    align-items: start;
+    flex-direction: column;
+    gap: 16px;
+  }
+  h1 {
+    font-size: 30px;
+  }
+  .viewport-top {
+    padding: 13px 14px;
+  }
+  .transport {
+    padding: 14px;
+    gap: 6px;
+  }
+  .transport button {
+    font-size: 11px;
+    padding: 9px 10px;
+  }
+  .transport button.primary {
+    min-width: 126px;
+  }
+  aside {
+    grid-template-columns: 1fr;
+  }
+  .frame-label {
+    left: 12px;
+    bottom: 12px;
+    font-size: 7px;
+  }
+  footer {
+    flex-direction: column;
+    gap: 5px;
+  }
+}

@@ -17,3 +17,4 @@ logs/
 node_modules/
 .cache/
 .playwright-cli/
+MUJOCO_LOG.TXT

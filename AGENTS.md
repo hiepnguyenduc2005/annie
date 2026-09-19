@@ -23,6 +23,7 @@
 - Verify changed behavior against its acceptance criteria, including relevant failure cases. Use checks appropriate to the change.
 - Report what changed, what was verified, and any remaining blockers. Never claim an unrun check passed.
 - Mark a task complete only when its stated completion condition is satisfied.
+- For simulator changes, follow `simulation/README.md`; distinguish direct MuJoCo physics, DimOS integration, rendered-image inference, and actual robot runs. Keep model/dependency revisions and measured results reproducible.
 
 ## Engineering and collaboration
 

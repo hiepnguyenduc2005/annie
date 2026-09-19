@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Annie — Live simulation</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/">annie<span>LAB</span></a>
+      <div class="header-title">
+        Robot simulation <span>/</span> Unitree Go2
+      </div>
+      <div class="connection">
+        <i id="connection-dot"></i><span id="connection">Connecting</span>
+      </div>
+    </header>
+    <main>
+      <section class="intro">
+        <div>
+          <p class="eyebrow">LIVE PHYSICS WORKBENCH</p>
+          <h1>A place to try things.</h1>
+          <p>
+            Explore the robot, inspect the scene, and watch each physics step.
+          </p>
+        </div>
+        <a
+          class="app-link"
+          href="http://127.0.0.1:8000/app/"
+          target="_blank"
+          rel="noopener"
+          >Open family app ↗</a
+        >
+      </section>
+      <div class="workspace">
+        <section class="viewport-panel" aria-label="Live simulation viewport">
+          <div class="viewport-top">
+            <span><i class="live-dot"></i> MUJOCO RENDER</span
+            ><span id="render-rate">Waiting for frames</span>
+          </div>
+          <div class="viewport">
+            <img
+              id="frame"
+              alt="Live rendered Unitree Go2 robot in the MuJoCo physics simulator"
+            />
+            <div id="loading">Preparing the renderer…</div>
+            <span class="frame-label"
+              >SIMULATED CAMERA · NO PHYSICAL ROBOT</span
+            >
+          </div>
+          <div class="transport">
+            <button id="play" class="primary" disabled>Play simulation</button>
+            <button id="step" disabled>Step once</button>
+            <button id="reset" disabled>Reset</button>
+            <span class="keyboard">Space to play / pause</span>
+          </div>
+          <div id="notice" role="status" aria-live="polite">
+            Waiting for the local simulator.
+          </div>
+        </section>
+        <aside>
+          <section class="panel">
+            <p class="eyebrow">RIGHT NOW</p>
+            <div class="state-heading">
+              <h2 id="run-state">Starting</h2>
+              <span class="badge">DIRECT MUJOCO</span>
+            </div>
+            <dl class="metrics">
+              <div>
+                <dt>Simulation time</dt>
+                <dd id="sim-time">—</dd>
+              </div>
+              <div>
+                <dt>Physics steps</dt>
+                <dd id="steps">—</dd>
+              </div>
+              <div>
+                <dt>Base height</dt>
+                <dd id="base-height">—</dd>
+              </div>
+              <div>
+                <dt>Physics timestep</dt>
+                <dd id="timestep">—</dd>
+              </div>
+            </dl>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">LOOK AROUND</p>
+            <h2>Camera</h2>
+            <div class="camera-buttons">
+              <button data-camera="front">Front</button
+              ><button data-camera="side">Side</button
+              ><button data-camera="top">Top</button>
+            </div>
+            <p class="hint">
+              These controls move the viewer camera, not the robot.
+            </p>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">TRY A COMPARISON</p>
+            <h2>Joint control</h2>
+            <label class="toggle"
+              ><input type="checkbox" id="hold" /> Hold the starting joint
+              pose</label
+            >
+            <p id="control-mode" class="hint">
+              Passive physics. No navigation or gait controller.
+            </p>
+            <p class="hint">
+              Reset, enable hold, and press play. Disable hold to see the robot
+              settle under gravity.
+            </p>
+          </section>
+          <section class="panel progress">
+            <p class="eyebrow">WHAT THIS PROVES</p>
+            <div>
+              <span class="check">✓</span
+              ><span>Real robot model &amp; contacts</span>
+            </div>
+            <div>
+              <span class="check">✓</span><span>Live rendered physics</span>
+            </div>
+            <div>
+              <span class="pending">○</span
+              ><span>DimOS navigation — in progress</span>
+            </div>
+            <div>
+              <span class="pending">○</span
+              ><span>Home scene &amp; perception — next</span>
+            </div>
+          </section>
+        </aside>
+      </div>
+      <footer>
+        <span id="version">MuJoCo · Unitree Go2</span
+        ><span
+          >Physics and joint control do not establish autonomous walking or fall
+          recognition.</span
+        >
+      </footer>
+    </main>
+  </body>
+</html>

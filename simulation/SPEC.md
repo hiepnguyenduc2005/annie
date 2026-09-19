@@ -34,6 +34,13 @@ Track layers independently. A recorded JSON fixture is useful for layer A but
 cannot pass layers B–F. A ground-truth label must be labeled as such and cannot
 be scored as VLM perception.
 
+Current interactive entry point: [live viewer setup](README.md), port 8766.
+It implements layer B inspection with play/pause/reset, single-step, camera
+presets, and optional PD joint holding. It has no app/SDK connection yet.
+The inspected DimOS legacy simulator maps `unitree_go2` to a Go1 model/policy;
+the direct viewer uses the actual Go2 asset. Record this distinction in runs
+instead of treating both paths as identical robot dynamics.
+
 ## World and actors
 
 Start with one floor and a small scene: bedroom/bed, adjacent floor area,

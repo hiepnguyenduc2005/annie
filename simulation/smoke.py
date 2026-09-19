@@ -25,9 +25,9 @@ numerical warning) is reported, never silently passed.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 
 MINIMAL_XML = """
 <mujoco>
@@ -183,11 +183,16 @@ def main() -> int:
     parser.add_argument(
         "--render", type=Path, default=None, help="Directory for periodic PNG frames."
     )
-    parser.add_argument("--json", type=Path, default=None, help="Write result JSON here.")
+    parser.add_argument(
+        "--json", type=Path, default=None, help="Write result JSON here."
+    )
     args = parser.parse_args()
 
     if args.steps <= 0:
-        print(f"ERROR: --steps must be a positive integer, got {args.steps}", file=sys.stderr)
+        print(
+            f"ERROR: --steps must be a positive integer, got {args.steps}",
+            file=sys.stderr,
+        )
         return 1
     if args.model is not None and not args.model.exists():
         print(f"ERROR: model not found: {args.model}", file=sys.stderr)

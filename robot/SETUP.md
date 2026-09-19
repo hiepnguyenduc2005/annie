@@ -114,12 +114,23 @@ On 2026-09-19 this Mac had Python 3.12.13, DimOS 0.0.13.post1 and the WebRTC
 driver 2.2.0. No USB audio device was enumerated. Initial bounded LAN and BLE
 discovery found no robot, including a direct BLE scan that completed without
 an exception. The operator confirmed the dog is present and powered on.
-After the operator completed startup, Bluetooth advertised the exact name on
-the loaner's label. The earlier generic `Unitree` name was filtered out by
-DimOS's default name prefixes. The legacy BLE setup handshake then timed out;
-no network settings were changed. Use the official [Unitree Go app](https://www.unitree.com/app/go2/)
-for initial Wi-Fi pairing. The Mac's current network did not return the robot
-to a directed multicast discovery probe. Physical WebRTC connection, GX10
+After startup, Bluetooth advertised the exact name on the loaner's label.
+The earlier generic `Unitree` name was filtered out by DimOS's default name
+prefixes. A GATT connection succeeded on the FFE0 service. A correctly chunked
+legacy handshake received a plaintext `0xF1` response with BLE module version
+3: this unit uses V3 authentication. The installed DimOS provisioning helper
+expects a legacy encrypted reply and cannot complete this setup.
+
+The operator also reported a region mismatch in the International Unitree Go
+app. The vendor's [V3 protocol documentation](https://github.com/legion1581/unitree_ui/blob/main/docs/bluetooth-v3.md)
+requires the per-device AES key for Wi-Fi configuration and local WebRTC.
+The label's Wi-Fi password is not that key. Obtain a valid key or working
+region-matched account from the loaner owner; no Unitree key/account was
+configured in the existing environment. Do not infer the robot's exact firmware
+release or sales region from the BLE module version alone.
+
+No Wi-Fi configuration or motion was changed. The Mac's current network did
+not return the robot to multicast discovery. Physical WebRTC connection, GX10
 access, audio and motion remain unverified.
 
 ## Verification and outstanding work
@@ -129,7 +140,8 @@ access, audio and motion remain unverified.
   early video delivery, timeouts, disconnect failure, and omission of vendor
   secrets. Tests use fake connections and never dial hardware.
 - [x] Contract schema export check and frontend JavaScript syntax check pass.
-- [ ] Complete the app's initial Wi-Fi setup and discover the actual robot IP.
+- [ ] Obtain the V3 per-device key or a working region-matched owner login.
+- [ ] Complete Wi-Fi setup and discover the actual robot IP.
 - [ ] Run the stationary probe on the physical robot and record firmware.
 - [ ] Verify the GX10 runtime, local image inference and USB audio.
 - [ ] Connect synchronized hardware evidence to the app and rehearse bounded motion.

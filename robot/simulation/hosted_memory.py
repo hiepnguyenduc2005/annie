@@ -8,6 +8,9 @@ never logs credentials.
 """
 import os
 import re
+import math
+import json as json_codec
+import asyncio
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -47,6 +50,8 @@ class ElasticMemory:
     def __init__(self, url: str, api_key: str, index: str,
                  client: httpx.AsyncClient | None = None):
         self._url = _validate_url(url)
+        if not INDEX_PATTERN.fullmatch(index) or not api_key:
+            raise MemoryUnavailable('elastic index or credentials are invalid')
         self._index = index
         self._headers = {
             'Authorization': 'ApiKey {0}'.format(api_key),
@@ -57,17 +62,23 @@ class ElasticMemory:
     async def _send(self, method: str, path: str, json: Any,
                     timeout: float) -> dict:
         url = '{0}/{1}{2}'.format(self._url, self._index, path)
+        async def exchange(client):
+            async with asyncio.timeout(timeout):
+                async with client.stream(method,url,json=json,timeout=timeout,headers=self._headers) as response:
+                    response.raise_for_status()
+                    raw=bytearray()
+                    async for chunk in response.aiter_bytes():
+                        raw.extend(chunk)
+                        if len(raw)>65536:
+                            raise MemoryUnavailable('elastic response exceeds 64 KB')
+                    return json_codec.loads(raw)
         try:
             if self._client is None:
                 async with httpx.AsyncClient(
-                        timeout=timeout, headers=self._headers) as client:
-                    response = await client.request(method, url, json=json)
+                        timeout=timeout, headers=self._headers, trust_env=False, follow_redirects=False) as client:
+                    return await exchange(client)
             else:
-                response = await self._client.request(
-                    method, url, json=json, timeout=timeout,
-                    headers=self._headers)
-            response.raise_for_status()
-            return response.json()
+                return await exchange(self._client)
         except Exception as exc:
             raise MemoryUnavailable(
                 'elastic {0} failed: {1} at {2}'.format(
@@ -108,18 +119,18 @@ class ElasticMemory:
         pose = source.get('pose')
         caption = source.get('caption')
         map_id = source.get('map_id')
-        if not isinstance(frame_id, str) or not frame_id:
+        if not isinstance(frame_id, str) or not 1 <= len(frame_id) <= 64:
             return None
         if not isinstance(ts, int) or isinstance(ts, bool) or ts < 0:
             return None
-        if not isinstance(caption, str) or not caption:
+        if not isinstance(caption, str) or not 1 <= len(caption) <= 2000:
             return None
-        if not isinstance(map_id, str) or not map_id:
+        if not isinstance(map_id, str) or not 1 <= len(map_id) <= 100:
             return None
         if not isinstance(pose, dict):
             return None
         x, y, yaw = pose.get('x'), pose.get('y'), pose.get('yaw')
-        if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+        if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
                    for v in (x, y, yaw)):
             return None
         return {
@@ -151,7 +162,7 @@ class ElasticMemory:
         payload = await self._send('POST', '/_search', body, SEARCH_TIMEOUT_S)
         hits = payload.get('hits', {}).get('hits', [])
         memories = []
-        for hit in hits:
+        for hit in hits[:SEARCH_SIZE]:
             memory = self._cited_memory(hit)
             if memory is not None and memory['pose']['map_id'] == map_id:
                 memories.append(memory)

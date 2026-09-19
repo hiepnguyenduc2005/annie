@@ -65,9 +65,9 @@ struct ContentView: View {
                 RemindersView()
                     .tabItem { Label("Reminders", systemImage: "checklist") }
                 AskView()
-                    .tabItem { Label("Ask Annie", systemImage: "bubble.left.and.bubbles.right") }
+                    .tabItem { Label("Ask Annie", systemImage: "pawprint.fill") }
                 ActivityView()
-                    .tabItem { Label("Activity", systemImage: "eye") }
+                    .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
                 ProfileView()
                     .tabItem { Label("Profile", systemImage: "person.crop.circle") }
             }

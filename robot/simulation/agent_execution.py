@@ -33,6 +33,10 @@ def gate_action(action, *, state, status, frame, now_ms, last_speech_ms=None):
         waypoint=action.get('waypoint_id')
         if waypoint not in {p['id'] for p in state['navigation']['waypoints']}:
             return None,'Model waypoint is not in the current navigable map'
+        target=next(p for p in state['navigation']['waypoints'] if p['id']==waypoint)
+        pose=state.get('qpos_base')
+        if pose and math.hypot(pose[0]-target['x'],pose[1]-target['y'])<.3:
+            return None,'Already at that waypoint; choose observation, speech, or a different destination'
         return {'cmd':'goto','waypoint':waypoint},'Model-selected waypoint accepted'
     if kind=='say':
         if last_speech_ms is not None and now_ms-last_speech_ms<15000:

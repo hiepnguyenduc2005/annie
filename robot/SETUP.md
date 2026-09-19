@@ -121,17 +121,53 @@ legacy handshake received a plaintext `0xF1` response with BLE module version
 3: this unit uses V3 authentication. The installed DimOS provisioning helper
 expects a legacy encrypted reply and cannot complete this setup.
 
-The operator also reported a region mismatch in the International Unitree Go
-app. The vendor's [V3 protocol documentation](https://github.com/legion1581/unitree_ui/blob/main/docs/bluetooth-v3.md)
-requires the per-device AES key for Wi-Fi configuration and local WebRTC.
-The label's Wi-Fi password is not that key. Obtain a valid key or working
-region-matched account from the loaner owner; no Unitree key/account was
-configured in the existing environment. Do not infer the robot's exact firmware
-release or sales region from the BLE module version alone.
+The operator initially encountered a region mismatch in the International app.
+An owner-supplied per-device AES key subsequently authenticated V3 BLE and
+returned the expected serial. A local CoreBluetooth wrapper around
+[unitree_ui](https://github.com/legion1581/unitree_ui), revision
+`3eb378b7adcf06a7773724efcbb4f58a8df98e11` (MIT), provisioned AP mode and received
+the robot's ready acknowledgment. Credentials and machine-specific settings
+remain in ignored, restricted local storage; they are not part of this guide.
 
-No Wi-Fi configuration or motion was changed. The Mac's current network did
-not return the robot to multicast discovery. Physical WebRTC connection, GX10
-access, audio and motion remain unverified.
+Live WebRTC at the robot's AP address `192.168.12.1` passed the stationary
+probe: a decoded 1280×720 camera frame, battery/IMU status, odometry pose, and
+clean disconnect. The first complete run measured 46% battery. A subsequent
+read-only query reported firmware **1.1.15**, motion-controller mode `mcf`,
+obstacle avoidance enabled, and a decoded LiDAR voxel stream. The model plate
+still identifies only Go2; the Air/Pro edition has not been independently read.
+The Mac briefly joined the robot AP for each check, then returned to its prior
+internet network. These observations establish transport and sensor access,
+not sustained app integration or navigation.
+
+A priority StopMove request was acknowledged while the robot was stationary
+in 44.8 ms. That is request round-trip time, not measured stopping performance.
+No stand, walking, mode-switch, or patrol command was sent. The operator has
+requested a five-metre patrol boundary and reported no physical controller.
+The boundary, physical stop/recovery, and loss-of-link behavior remain unverified.
+
+The initially installed DimOS 0.0.13.post1 `stop_movement` implementation only
+cancelled its host timer. A local backport emitted neutral joystick input;
+offline checks verified explicit stop and timer expiry emit zero input, and
+closed-loop handling returns safely. The isolated environment was subsequently
+upgraded to DimOS 0.0.14 from upstream revision
+`c1c3cdc9d2ee54ca72259465688395699d7d99a2`, which includes this correction.
+The wheel used `DIMOS_ALLOW_MISSING_COCKPIT=1` because the checkout's optional
+web build was absent. Adding `eclipse-zenoh==1.10.1` allowed the voxel mapper,
+patrol module and full Go2 navigation blueprint to import on this Mac. Import
+success is not a running or hardware-validated navigation stack.
+The host-side stop cannot stop the robot over a lost link and is not a
+validated robot-side watchdog.
+Do not launch the full DimOS blueprint as a stationary test: its Go2 module
+automatically sends stand/balance commands on startup. Hardware motion still
+requires the stop and bounded-path checks in HW-04 through HW-06.
+
+The existing local Qwen3-VL 2B brain also processed one actual hardware camera
+frame in 3,819 ms through `/infer`. Camera and pose were paired by host receipt
+time (26 ms apart); calibrated sensor synchronization remains unverified.
+This was local image inference on the Mac, not a full planning turn, a GX10
+test, or permission to treat its person classification as a collision sensor.
+The robot was subsequently powered off by the operator; hardware attempts
+stopped and the BLE backend disconnected.
 
 ## Verification and outstanding work
 
@@ -140,9 +176,11 @@ access, audio and motion remain unverified.
   early video delivery, timeouts, disconnect failure, and omission of vendor
   secrets. Tests use fake connections and never dial hardware.
 - [x] Contract schema export check and frontend JavaScript syntax check pass.
-- [ ] Obtain the V3 per-device key or a working region-matched owner login.
-- [ ] Complete Wi-Fi setup and discover the actual robot IP.
-- [ ] Run the stationary probe on the physical robot and record firmware.
+- [x] Authenticate V3 BLE with the owner-provided per-device key.
+- [x] Complete AP setup and verify the actual robot IP over WebRTC.
+- [x] Run the stationary probe on the physical robot and read firmware 1.1.15.
+- [ ] Verify an operator stop, moving-stop response, link-loss behavior, and
+  the requested physical patrol boundary before enabling autonomous motion.
 - [ ] Verify the GX10 runtime, local image inference and USB audio.
 - [ ] Connect synchronized hardware evidence to the app and rehearse bounded motion.
 

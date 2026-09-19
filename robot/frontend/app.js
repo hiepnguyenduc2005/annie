@@ -14,7 +14,7 @@ const names = {
   fall_confirmed: "Family attention needed",
   checkin_ok: "Resident reassurance received",
   checkin_no_reply: "No reassurance received",
-  checkin_audio_failed: "Audio delivery failed",
+  checkin_audio_failed: "Check-in communication failed",
   reminder_due: "Reminder due",
 };
 function notice(text, error = false) {
@@ -264,6 +264,7 @@ function renderEvents() {
     heading.textContent = names[event.kind] || event.kind;
     const detail = document.createElement("p");
     detail.textContent = `${when(event.ts)} · ${event.acknowledged ? "Acknowledged by family" : event.severity} · evidence ${event.evidence.frame_id.slice(0, 8)}`;
+    if (event.reason) detail.textContent += ` · ${event.reason.replaceAll('_', ' ')}`;
     item.append(heading, detail);
     if (!event.acknowledged) {
       const button = document.createElement("button");

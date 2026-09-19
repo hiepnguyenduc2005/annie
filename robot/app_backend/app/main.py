@@ -18,6 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .models import Ack, Command, CommandReceipt, Ingest, Say, Scenario
 from .service import Service, now_ms
 from .subconscious_provider import DEFAULT_MODEL, SubconsciousAPIError, SubconsciousInputError, run_team
+from .audio_reply import build_audio_reply_router
 
 
 class AgentRequest(BaseModel):
@@ -222,6 +223,7 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, require_audio_
         return app.state.service.status()
 
     app.include_router(router)
+    app.include_router(build_audio_reply_router(lambda: app.state.service, authorize))
 
     @app.websocket('/live')
     async def live(ws: WebSocket):

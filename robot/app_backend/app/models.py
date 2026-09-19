@@ -76,6 +76,7 @@ class Event(Versioned):
     kind: Literal['checkin_ok', 'checkin_no_reply', 'checkin_audio_failed', 'fall_suspected', 'fall_confirmed', 'reminder_due']
     evidence: Evidence
     severity: Literal['info', 'warn', 'critical']
+    reason: Literal['playback_failed', 'playback_timeout', 'input_unavailable', 'recognition_timeout'] | None = None
     acknowledged: bool = False
     acknowledged_by: str | None = None
     acknowledged_at: Timestamp | None = None

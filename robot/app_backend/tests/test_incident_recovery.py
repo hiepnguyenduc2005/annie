@@ -107,7 +107,8 @@ def test_awaiting_reply_survives_restart_and_resolves_once(db_path, now):
         assert restored.pending['deadline_at'] == deadline
         now[0] = deadline + 1
         restored.tick()
-        assert kinds(restored).count('checkin_no_reply') == 1
+        # Receipt mode with no registered capture is an audio failure.
+        assert kinds(restored).count('checkin_audio_failed') == 1
         assert kinds(restored).count('fall_confirmed') == 1
         restored.tick(now[0] + 5000)
         assert kinds(restored).count('fall_confirmed') == 1
@@ -221,8 +222,8 @@ def test_crash_between_escalation_event_and_pending_clear_is_atomic(db_path, now
     suspect(svc)
     deadline = svc.pending['audio_deadline_at']
     original = svc.event
-    def crashing_event(kind, severity, evidence, ts=None):
-        event = original(kind, severity, evidence, ts=ts)
+    def crashing_event(kind, severity, evidence, ts=None, reason=None):
+        event = original(kind, severity, evidence, ts=ts, reason=reason)
         if kind == 'checkin_audio_failed':
             raise CrashAfterEventInsert
         return event

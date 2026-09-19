@@ -9,6 +9,7 @@ import functools
 from pathlib import Path
 from uuid import uuid4
 from .models import CHANNEL_MODELS, Event, Perception, VoiceHeard
+from . import audio_reply
 
 
 def now_ms():
@@ -188,8 +189,8 @@ class Service:
     def events(self, since=0):
         return [json.loads(row[0]) for row in self.db.execute('SELECT payload FROM events WHERE ts > ? ORDER BY ts, id', (since,))]
 
-    def event(self, kind, severity, evidence, ts=None):
-        event = Event(ts=self.clock() if ts is None else ts, event_id=uuid4(), kind=kind, severity=severity, evidence=evidence).model_dump(mode='json')
+    def event(self, kind, severity, evidence, ts=None, reason=None):
+        event = Event(ts=self.clock() if ts is None else ts, event_id=uuid4(), kind=kind, severity=severity, evidence=evidence, reason=reason).model_dump(mode='json')
         self.db.execute('INSERT INTO events VALUES (?, ?, ?)', (event['event_id'], event['ts'], json.dumps(event)))
         if not self._atomic_depth:
             self.db.commit()
@@ -258,13 +259,13 @@ class Service:
             self._save_pending()
             self.emit('checkin', pending)
         elif item['status'] == 'failed':
-            self.audio_failed(now)
+            self.audio_failed(now, 'playback_failed')
 
-    def audio_failed(self, now):
+    def audio_failed(self, now, reason='playback_failed'):
         if self.pending:
             # Delivery failure: the check-in was never heard, so label it as such
             # instead of a no-reply reassurance timeout.
-            self.event('checkin_audio_failed', 'warn', self.pending_evidence)
+            self.event('checkin_audio_failed', 'warn', self.pending_evidence, reason=reason)
             self.escalate(now)
 
     def ingest(self, channel, data):
@@ -389,6 +390,39 @@ class Service:
             self._save_pending()
             self.emit('checkin', None)
 
+    @atomic('apply_voice_reply')
+    def apply_voice_reply(self, intent, event_id, now):
+        """Atomically apply one quality-accepted synthetic voice reply.
+
+        Counts only for the exact incident while its reply window is open;
+        the caller has already validated capture timing and Whisper quality.
+        No confidence is fabricated; the emitted payloads are the same
+        checkin_ok / fall_confirmed kinds the text path emits.
+        """
+        pending = self.pending
+        if not pending or str(event_id) != str(pending.get('event_id')):
+            return False
+        if pending.get('phase') == 'awaiting_playback':
+            return False
+        deadline = pending.get('deadline_at')
+        # A validated capture that completed by the deadline may arrive up to
+        # RESULT_GRACE_MS late in wall time without losing its effect.
+        if deadline is not None and now > deadline + audio_reply.RESULT_GRACE_MS:
+            return False
+        if intent == 'reassurance':
+            self.event('checkin_ok', 'info', self.pending_evidence)
+            self.pending = None
+            self._save_pending()
+            self.emit('checkin', None)
+            return True
+        if intent == 'concern':
+            # Explicit concern escalates even while still awaiting playback,
+            # mirroring the help path in reply(); this method itself only
+            # rejects for a cleared or non-matching incident.
+            self.escalate(now)
+            return True
+        return False
+
     @atomic('tick')
     def tick(self, now=None):
         now = self.clock() if now is None else now
@@ -396,10 +430,35 @@ class Service:
             return
         audio_deadline = self.pending.get('audio_deadline_at')
         if audio_deadline is not None and now >= audio_deadline:
-            self.audio_failed(now)
-        elif self.pending and self.pending.get('deadline_at') is not None and now >= self.pending['deadline_at']:
+            self.audio_failed(now, 'playback_timeout' if self.require_audio_receipt else 'playback_failed')
+        elif self.pending.get('deadline_at') is not None and now >= self.pending['deadline_at']:
+            grace_until = audio_reply.pending_grace(self)
+            if grace_until is not None and now <= grace_until:
+                return
+            registry = getattr(self, '_audio_reply_registry', None) or {}
+            entry = registry.get(str(self.pending.get('event_id')))
+            if not self.require_audio_receipt:
+                # Legacy demo path: the historical plain checkin_no_reply
+                # stands; ambiguity or silence was never claimed.
+                self.event('checkin_no_reply', 'warn', self.pending_evidence)
+            elif entry is not None and entry['ended_at'] is None:
+                # Registered in-flight capture past every bound: recognition
+                # failed, distinct from resident silence.
+                self.event('checkin_audio_failed', 'warn', self.pending_evidence,
+                           reason='recognition_timeout')
+            else:
+                completed_rejected = entry is not None and entry['ended_at'] is not None
+                if completed_rejected:
+                    # Input existed, completed in valid bounds, but the
+                    # transcript was ambiguous or failed quality: not
+                    # evidence about the resident, so plain no-reply.
+                    self.event('checkin_no_reply', 'warn', self.pending_evidence)
+                else:
+                    # Receipt mode with absent input: the capture pipeline
+                    # never produced audio; the honest label is audio failure.
+                    self.event('checkin_audio_failed', 'warn', self.pending_evidence,
+                               reason='input_unavailable')
             # `now` can be an explicit demo deadline; event timestamps remain wall time.
-            self.event('checkin_no_reply', 'warn', self.pending_evidence)
             self.escalate(now)
 
     def query(self, text):

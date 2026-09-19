@@ -78,7 +78,9 @@ def test_completed_receipt_starts_eight_second_window(service):
     assert kinds(service) == ['fall_suspected']
     service.tick(started + 8000)
     # Same-timestamp events have no defined relative order.
-    assert Counter(kinds(service)) == Counter({'fall_suspected': 1, 'checkin_no_reply': 1, 'fall_confirmed': 1})
+    # Receipt mode with no registered audio input is an audio failure
+    # (input_unavailable), not a no-reply silence claim.
+    assert Counter(kinds(service)) == Counter({'fall_suspected': 1, 'checkin_audio_failed': 1, 'fall_confirmed': 1})
 
 
 def test_accepted_and_executing_never_count_as_delivery(service):

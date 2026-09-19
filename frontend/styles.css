@@ -476,3 +476,76 @@ footer span:last-child {
     letter-spacing: -1px;
   }
 }
+
+/* Family message thread: what Zach sent, and how the errand went. */
+.family-thread {
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 14px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.family-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.family-sent {
+  margin: 0 0 0 auto;
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 16px 16px 4px 16px;
+  background: var(--green);
+  color: var(--white);
+}
+.run-status {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.run-completed {
+  color: var(--green);
+}
+.run-unreachable,
+.run-failed {
+  color: var(--alert);
+}
+.beat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.beat-annie,
+.beat-resident {
+  padding: 9px 13px;
+  border-radius: 14px;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  max-width: 85%;
+}
+.beat-annie {
+  border-left: 3px solid var(--green);
+}
+.beat-resident {
+  border-left: 3px solid var(--alert);
+}
+.beat-who {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#author {
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  color: inherit;
+  font: inherit;
+}

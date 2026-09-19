@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from simulation.local_perception import (
+from robot.simulation.local_perception import (
     LocalPerceptionError,
     PersonDetector,
     default_checkpoint,
@@ -38,7 +38,7 @@ def test_load_observation_frame_requires_payload():
 
 
 def test_fetch_viewer_observation_reports_unavailable():
-    from simulation.local_perception import fetch_viewer_observation
+    from robot.simulation.local_perception import fetch_viewer_observation
 
     with pytest.raises(LocalPerceptionError, match="viewer unavailable"):
         fetch_viewer_observation("http://127.0.0.1:1", timeout_s=0.05)

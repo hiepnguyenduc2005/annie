@@ -11,10 +11,10 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: app_backend/requirements.lock
-      - run: python -m pip install -r app_backend/requirements.lock
-      - run: PYTHONPATH=app_backend python -m pytest app_backend/tests -q
-      - run: python contract/export_schemas.py --check
-      - run: node --check frontend/app.js
-      - run: node --check simulation/web/app.js
-      - run: python -m compileall -q simulation
+          cache-dependency-path: robot/app_backend/requirements.lock
+      - run: python -m pip install -r robot/robot_backend/requirements-brain.txt
+      - run: python -m pytest robot/app_backend/tests robot/robot_backend/tests robot/simulation/tests/test_bridge.py robot/simulation/tests/test_speech.py -q
+      - run: python robot/contract/export_schemas.py --check
+      - run: node --check robot/frontend/app.js
+      - run: node --check robot/simulation/web/app.js
+      - run: python -m compileall -q robot

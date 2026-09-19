@@ -2,7 +2,7 @@
 
 Verified on 2026-09-19. Source and dependency caches are ignored; local logs and
 renders are in `output/simulation/`. The live viewer and scene factory are
-versioned under `simulation/`.
+versioned under `robot/simulation/`.
 
 ## Versions
 
@@ -22,7 +22,7 @@ coordinates, and 12 actuators. A 500-step zero-torque run advances one simulated
 second with finite state and no numerical warnings. Its base settles from
 0.270 m to about 0.094 m. This checks passive physics, not locomotion.
 
-The [live viewer](../simulation/README.md) renders actual MuJoCo frames and
+The [live viewer](../robot/simulation/README.md) renders actual MuJoCo frames and
 supports play/pause, reset, single-step, camera controls, and optional bounded
 PD joint holding. Browser controls, malformed requests, origin checks, numerical
 fault detection, and reset recovery were exercised. It is separate from the

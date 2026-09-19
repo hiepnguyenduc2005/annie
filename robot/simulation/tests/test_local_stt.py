@@ -7,7 +7,7 @@ import wave
 
 import pytest
 
-from simulation.local_stt import (
+from robot.simulation.local_stt import (
     DEFAULT_CACHE_DIR,
     LocalSTTAdapter,
     LocalSTTError,
@@ -115,7 +115,7 @@ def test_rejects_invalid_and_oversized_audio():
     with pytest.raises(LocalSTTError):
         adapter2.transcribe(bytes(raw))
     # A valid WAV padded past the byte bound is rejected outright.
-    from simulation.local_stt import MAX_WAV_BYTES
+    from robot.simulation.local_stt import MAX_WAV_BYTES
 
     padded = bytearray(pcm_wav(seconds=0.1))
     pad_len = MAX_WAV_BYTES + 1 - len(padded) - 4  # 4 bytes for JUNK

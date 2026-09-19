@@ -1,6 +1,6 @@
 """HTTP adapter for the simulated body. Battery 100% is a synthetic placeholder.
 
-Run: .venv/bin/python simulation/bridge.py --once
+Run: .venv/bin/python robot/simulation/bridge.py --once
 Vision is opt-in and bounded; authored ground truth is a distinct demo mode.
 Speech completion requires a browser playback receipt; no hardware execution.
 """

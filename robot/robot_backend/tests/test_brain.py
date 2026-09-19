@@ -9,10 +9,10 @@ import httpx
 from PIL import Image
 import pytest
 
-from robot_backend.app.brain.api import create_app
-from robot_backend.app.brain.models import MAX_BODY_BYTES
-from robot_backend.app.brain.budget import APPROVED_VISION_MODELS, MODEL_RESERVATION_USD
-from robot_backend.app.brain.provider import (
+from robot.robot_backend.app.brain.api import create_app
+from robot.robot_backend.app.brain.models import MAX_BODY_BYTES
+from robot.robot_backend.app.brain.budget import APPROVED_VISION_MODELS, MODEL_RESERVATION_USD
+from robot.robot_backend.app.brain.provider import (
     COMPACT_PROMPT, PRICE_CAPS_USD_PER_M, PROMPT, VisionConfig, sanitize_jpeg)
 
 
@@ -154,7 +154,7 @@ def test_openrouter_reserves_before_failed_egress_and_blocks_after_restart(tmp_p
 
 
 def test_shared_ledger_accumulates_across_models(tmp_path):
-    from robot_backend.app.brain.budget import BudgetError, reserve_attempt
+    from robot.robot_backend.app.brain.budget import BudgetError, reserve_attempt
     path = tmp_path / 'usage.json'
     reserve_attempt(str(path), 100, 20, model='qwen/qwen3-vl-32b-instruct:floor',
                     reservation_usd=MODEL_RESERVATION_USD['qwen/qwen3-vl-32b-instruct:floor'])
@@ -175,7 +175,7 @@ def test_shared_ledger_accumulates_across_models(tmp_path):
 
 
 def test_legacy_single_model_ledger_is_migrated(tmp_path):
-    from robot_backend.app.brain.budget import reserve_attempt
+    from robot.robot_backend.app.brain.budget import reserve_attempt
     path = tmp_path / 'usage.json'
     path.write_text(json.dumps({'model': 'qwen/qwen3-vl-32b-instruct:floor',
                                 'attempts': 2, 'reserved_usd': 0.04}))
@@ -347,7 +347,7 @@ def test_provider_usage_allowlist():
 
 
 def test_corrupted_ledger_fails_closed(tmp_path):
-    from robot_backend.app.brain.budget import reserve_attempt, BudgetError
+    from robot.robot_backend.app.brain.budget import reserve_attempt, BudgetError
     path = tmp_path / 'usage.json'
     path.write_text('bad json')
     with pytest.raises(BudgetError):
@@ -356,7 +356,7 @@ def test_corrupted_ledger_fails_closed(tmp_path):
 
 
 def test_budget_reservation_cap(tmp_path):
-    from robot_backend.app.brain.budget import reserve_attempt, BudgetError
+    from robot.robot_backend.app.brain.budget import reserve_attempt, BudgetError
     path = tmp_path / 'usage.json'
     reservation = MODEL_RESERVATION_USD[APPROVED_VISION_MODEL]
     reserve_attempt(str(path), 100, reservation, model=APPROVED_VISION_MODEL,

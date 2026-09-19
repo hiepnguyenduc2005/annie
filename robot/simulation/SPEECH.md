@@ -6,7 +6,7 @@ omni adapters with the same small interface.
 
 ## What it does
 
-`simulation/speech.py` exposes `SpeechAdapter.speak(text, command_id)`:
+`robot/simulation/speech.py` exposes `SpeechAdapter.speak(text, command_id)`:
 
 - Accepts at most 2000 characters of non-empty text.
 - Rejects malformed command ids (must be a canonical UUID string).
@@ -75,7 +75,7 @@ They are not part of this adapter and have no code path here.
 
 ## Tests
 
-`simulation/tests/test_speech.py` covers:
+`robot/simulation/tests/test_speech.py` covers:
 
 - empty, whitespace, non-string, and oversized text rejection
 - non-UUID command id rejection
@@ -88,5 +88,5 @@ They are not part of this adapter and have no code path here.
 Run from the repository root:
 
 ```sh
-.venv/bin/python -m pytest simulation/tests/test_speech.py -q
+.venv/bin/python -m pytest robot/simulation/tests/test_speech.py -q
 ```

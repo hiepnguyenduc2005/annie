@@ -5,6 +5,34 @@ poses, event evidence, released crops, transcripts, and two-way commands. See
 [contract v0.1](../contract/README.md). The older status-only envelope is a
 compatibility option; full frames remain on the trusted local compute network.
 
+**Owner: Ellis.** Own the family-facing API, application database, robot gateway,
+and the contract used by Sam's frontend and Roger's robot backend.
+
+## Owner responsibilities and handoffs
+
+- Give Sam a versioned API for approved updates, receipt acknowledgments, and
+  family messages, including empty/error/offline behavior.
+- Agree robot signals and command schemas with Roger; authenticate connections,
+  deduplicate IDs, handle reconnects, and distinguish queued from executed actions.
+- Preserve the existing demo policy and tests during the directory merge. It
+  currently runs here; agree a migration before relocating it or adding another
+  incident state machine in the robot backend.
+- Persist the approved fields in [contract v0.1](../contract/README.md).
+  [shared/messages.py](../../shared/messages.py) remains a legacy status format,
+  not the complete app boundary.
+- Coordinate notification adapters and verify delivery separately from queuing.
+  Robot control and perception belong to Henry and Roger.
+
+The first integration milestone is an approved signal received once despite a
+retry, followed by an identified family command and a verified response from a
+robot-service test adapter. Then exercise Sam's full acknowledge/message flow,
+including disconnects and expired commands. Rich evidence/map payloads follow
+the expanded contract, including its crop-release and retention requirements.
+
+Own `robot/app_backend/`; coordinate `shared/` and `robot/contract/` edits with all consumers.
+Follow the repository [merge rules](../../AGENTS.md). The remaining sections describe
+the existing local demo; they do not establish a connected robot deployment.
+
 Python 3.10+, FastAPI, and SQLite. Run one worker: the event bus and check-in
 state are in process. This is a local demonstration, not a medical device or a
 working robot integration. No calls reach hardware, cloud vision, or speech.
@@ -15,11 +43,11 @@ From the repository root:
 
 ```sh
 uv venv .venv --python 3.12
-uv pip install --python .venv/bin/python -r app_backend/requirements.lock
-.venv/bin/uvicorn app_backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
+uv pip install --python .venv/bin/python -r robot/app_backend/requirements.lock
+.venv/bin/uvicorn robot.app_backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
-Open http://127.0.0.1:8000/app/ for the dashboard when the root `frontend/` directory
+Open http://127.0.0.1:8000/app/ for the dashboard when the root `robot/frontend/` directory
 is present. `/` preserves the welcome response; `/health` returns `{"status":"ok"}`.
 The server starts empty. `POST /demo/seed` explicitly loads synthetic data.
 
@@ -29,7 +57,7 @@ Environment variables:
   does not connect any real providers or hardware automatically.
 - `ANNIE_DB_PATH`: SQLite location; default `.data/annie.sqlite3`, relative to
   the process working directory. Events and the latest 1,000 perception memories
-  persist. Current robot/map/check-in state and queued commands do not survive
+  persist. Pending check-ins, episode state, and the bounded command journal also survive
   restart; this demo is unsuitable for unattended monitoring.
 - `ANNIE_API_TOKEN`: optional bearer token. Without it, data routes accept only
   loopback clients. With it, every data request requires `Authorization: Bearer …`.
@@ -48,7 +76,7 @@ when testing on a phone, and configure `ANNIE_API_TOKEN` first.
 `POST /agents/run` supports the optional advisory Subconscious team. It requires
 `SUBCONSCIOUS_API_KEY`, `ANNIE_ENABLE_CLOUD_AGENTS=true`, and request
 `allow_cloud:true`. It sends only the supplied task/evidence and does not pull
-resident data automatically. See [setup and evidence format](../docs/SUBCONSCIOUS.md).
+resident data automatically. See [setup and evidence format](../../docs/SUBCONSCIOUS.md).
 
 ## API
 
@@ -78,7 +106,7 @@ so an equal-timestamp arrival is not missed.
 
 Input channels: `dog.status`, `dog.map`, `brain.perception`, `voice.heard`.
 Output channels also include `event`, `command`, and `checkin` (pending data or
-null). Exact schemas are generated in `contract/schemas.json`. Unknown fields,
+null). Exact schemas are generated in `robot/contract/schemas.json`. Unknown fields,
 including raw image fields, are rejected. `dog.frame` is never accepted.
 Coordinates are metres and describe the observing robot, not the resident or
 object. Timestamps are integer Unix milliseconds. Image evidence is null unless
@@ -124,14 +152,14 @@ this core. Optional provider modules are not automatically invoked.
 From the repository root:
 
 ```sh
-PYTHONPATH=app_backend .venv/bin/python -m pytest app_backend/tests -q
-.venv/bin/python contract/export_schemas.py --check
+.venv/bin/python -m pytest robot/app_backend/tests -q
+.venv/bin/python robot/contract/export_schemas.py --check
 ```
 
 Regenerate schemas after changing models:
 
 ```sh
-.venv/bin/python contract/export_schemas.py
+.venv/bin/python robot/contract/export_schemas.py
 ```
 
 Tests use in-memory/temporary SQLite, injected clocks, and TestClient. They do

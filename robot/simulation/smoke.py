@@ -12,9 +12,9 @@ from mj_forward on the default configuration. This is NOT a gait test and NOT
 a DimOS integration test.
 
 Usage:
-  python simulation/smoke.py --model path/to/model.xml --steps 200
-  python simulation/smoke.py --model model.xml --steps 500 --json out.json
-  python simulation/smoke.py --steps 200            # built-in minimal model
+  python robot/simulation/smoke.py --model path/to/model.xml --steps 200
+  python robot/simulation/smoke.py --model model.xml --steps 500 --json out.json
+  python robot/simulation/smoke.py --steps 200            # built-in minimal model
 
 Exit code 0 = physics stepped for the requested count without divergence.
 Exit code 1 = load failure, invalid arguments, or physics divergence.

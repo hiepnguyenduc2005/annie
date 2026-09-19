@@ -1,4 +1,4 @@
-"""Run with uvicorn robot_backend.app.brain.api:app --port 8002."""
+"""Run with uvicorn robot.robot_backend.app.brain.api:app --port 8002."""
 import asyncio
 import hmac
 import ipaddress
@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app_backend.app.models import Perception
+from robot.app_backend.app.models import Perception
 from .models import FrameRequest, InferenceResult, MAX_BODY_BYTES, ProviderMetadata
 from .provider import InvalidFrame, ProviderError, ProviderTimeout, VisionConfig, infer_image, sanitize_jpeg
 from .budget import BudgetError

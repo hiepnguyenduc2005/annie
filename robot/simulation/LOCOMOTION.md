@@ -10,7 +10,7 @@ DimOS navigation stack, or autonomous obstacle avoidance.
 
 The current cached environment is `.cache/dimos/.venv/bin/python` (Python 3.12,
 MuJoCo 3.13.0, NumPy 2.5.3, ONNX Runtime 1.30.0). A viewer environment can install
-`simulation/requirements-locomotion.txt`; no GPU is required. CPU inference uses
+`robot/simulation/requirements-locomotion.txt`; no GPU is required. CPU inference uses
 one intra-op and one inter-op thread.
 
 Required local files:
@@ -36,7 +36,7 @@ revision `8161bba264d7fa7c99ca301e91e7fb44737676ad`; retain its `unitree_go1/LIC
 
 ### Fresh-checkout bootstrap
 
-`simulation/setup_locomotion.py` prepares everything above in one command. It
+`robot/simulation/setup_locomotion.py` prepares everything above in one command. It
 downloads the pinned DimOS `mujoco_sim` archive (~60 MB; hard 100 MB cap) from
 `media.githubusercontent.com` at commit `c1c3cdc9d2ee54ca72259465688395699d7d99a2`
 (the URL serves the real gzip blob, not an LFS pointer), extracts ONLY the two
@@ -57,28 +57,28 @@ committed.
 ```sh
 uv venv .cache/sim-venv --python 3.12
 uv pip install --python .cache/sim-venv/bin/python \
-  -r simulation/requirements.txt -r simulation/requirements-locomotion.txt
+  -r robot/simulation/requirements.txt -r robot/simulation/requirements-locomotion.txt
 # Optional textured furnished scenes:
-uv pip install --python .cache/sim-venv/bin/python -r simulation/requirements-assets.txt
-.cache/sim-venv/bin/python simulation/assets.py
+uv pip install --python .cache/sim-venv/bin/python -r robot/simulation/requirements-assets.txt
+.cache/sim-venv/bin/python robot/simulation/assets.py
 
-.cache/sim-venv/bin/python simulation/setup_locomotion.py
+.cache/sim-venv/bin/python robot/simulation/setup_locomotion.py
 ```
 
 Generate scenes and run the live viewer with walking enabled:
 
 ```sh
 PY=.cache/sim-venv/bin/python
-$PY simulation/scenes.py --assets .cache/menagerie/unitree_go2 \
+$PY robot/simulation/scenes.py --assets .cache/menagerie/unitree_go2 \
   --output .data/simulation/scenes
-$PY simulation/viewer.py --model .cache/menagerie/unitree_go2/scene.xml \
+$PY robot/simulation/viewer.py --model .cache/menagerie/unitree_go2/scene.xml \
   --port 8766 --scenes .data/simulation/scenes/manifest.json --locomotion
 ```
 
 Run from the repository root:
 
 ```sh
-.cache/dimos/.venv/bin/python simulation/tests/test_locomotion.py
+.cache/dimos/.venv/bin/python robot/simulation/tests/test_locomotion.py
 ```
 
 This check composes a furnished empty scene (seed 2026), runs 20 simulated
@@ -111,7 +111,7 @@ perceived obstacles, and not a Go2 hardware result.
 ## Viewer integration API
 
 ```python
-from simulation.locomotion import prepare_locomotion_model, LocomotionController
+from robot.simulation.locomotion import prepare_locomotion_model, LocomotionController
 
 path = prepare_locomotion_model(scene_path)
 model = mujoco.MjModel.from_xml_path(str(path))

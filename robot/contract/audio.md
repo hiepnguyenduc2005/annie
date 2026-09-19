@@ -107,5 +107,5 @@ app-backend decision.
 Verification uses synthetic WAVs and mocked HTTP, never paid inference:
 
 ```sh
-.venv/bin/python -m pytest robot_backend/tests/test_audio.py -q
+.venv/bin/python -m pytest robot/robot_backend/tests/test_audio.py -q
 ```

@@ -14,6 +14,7 @@ const names = {
   fall_confirmed: "Family attention needed",
   checkin_ok: "Resident reassurance received",
   checkin_no_reply: "No reassurance received",
+  checkin_audio_failed: "Audio delivery failed",
   reminder_due: "Reminder due",
 };
 function notice(text, error = false) {
@@ -106,6 +107,39 @@ function renderStatus() {
 }
 function renderCheckin() {
   const pending = state.status?.pending_checkin;
+  if (pending?.phase === "queued_demo") {
+    text("checkin-title", "Waiting for reassurance");
+    const seconds = Math.max(
+      0,
+      Math.ceil((pending.deadline_at - Date.now()) / 1000),
+    );
+    text(
+      "checkin-detail",
+      `${seconds}s remaining · unverified demo delivery · response must match this event`,
+    );
+    return;
+  }
+  if (pending?.phase === "awaiting_playback") {
+    text("checkin-title", "Waiting for Annie to finish speaking");
+    const seconds = Math.max(
+      0,
+      Math.ceil((pending.audio_deadline_at - Date.now()) / 1000),
+    );
+    text("checkin-detail", `${seconds}s to deliver audio`);
+    return;
+  }
+  if (pending?.phase === "awaiting_reply") {
+    text("checkin-title", "Waiting for reassurance");
+    const seconds = Math.max(
+      0,
+      Math.ceil((pending.deadline_at - Date.now()) / 1000),
+    );
+    text(
+      "checkin-detail",
+      `${seconds}s remaining · response must match this event`,
+    );
+    return;
+  }
   text(
     "checkin-title",
     pending ? "Waiting for reassurance" : "No active check-in",

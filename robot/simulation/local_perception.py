@@ -207,4 +207,4 @@ def default_checkpoint(kind: str = "detect") -> Path:
     name = {"detect": "yolo11s.pt", "pose": "yolo11n-pose.pt"}.get(kind)
     if name is None:
         raise ValueError("kind must be 'detect' or 'pose'")
-    return Path(__file__).resolve().parents[1] / ".cache" / "yolo" / name
+    return Path(__file__).resolve().parents[2] / ".cache" / "yolo" / name

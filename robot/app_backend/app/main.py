@@ -47,16 +47,18 @@ def same_origin(headers, scheme):
     return parsed.scheme == scheme and parsed.netloc == headers.get('host') and not parsed.path and not parsed.query and not parsed.fragment
 
 
-def create_app(db_path=None, mode=None, token=None, clock=now_ms):
+def create_app(db_path=None, mode=None, token=None, clock=now_ms, require_audio_receipt=None):
     db_path = db_path or os.getenv('ANNIE_DB_PATH', '.data/annie.sqlite3')
     mode = mode or os.getenv('ANNIE_MODE', 'demo')
     if mode not in ('demo', 'live'):
         raise ValueError('ANNIE_MODE must be demo or live')
     token = os.getenv('ANNIE_API_TOKEN', '') if token is None else token
+    if require_audio_receipt is None:
+        require_audio_receipt = os.getenv('ANNIE_REQUIRE_AUDIO_RECEIPT', 'false').lower() == 'true'
 
     @asynccontextmanager
     async def lifespan(app):
-        app.state.service = Service(db_path, mode, clock)
+        app.state.service = Service(db_path, mode, clock, require_audio_receipt)
         app.state.agent_lock = asyncio.Lock()
         async def ticker():
             while True:

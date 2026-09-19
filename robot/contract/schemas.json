@@ -482,6 +482,7 @@
         "enum": [
           "checkin_ok",
           "checkin_no_reply",
+          "checkin_audio_failed",
           "fall_suspected",
           "fall_confirmed",
           "reminder_due"

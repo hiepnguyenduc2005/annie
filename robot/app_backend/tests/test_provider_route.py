@@ -2,7 +2,7 @@ import importlib
 
 from fastapi.testclient import TestClient
 
-main = importlib.import_module('app.main')
+main = importlib.import_module('robot.app_backend.app.main')
 
 
 def test_agents_require_explicit_egress_and_configuration(monkeypatch):

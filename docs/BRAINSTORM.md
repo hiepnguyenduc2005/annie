@@ -41,7 +41,7 @@ a caption first with an optional released crop. A future spatial memory should
 separate observer pose, estimated object position, and persistent object identity.
 Each requires its own evidence; a timestamped caption does not prove all three.
 
-The [simulation spec](../simulation/SPEC.md) records the working scenario matrix.
+The [simulation spec](../robot/simulation/SPEC.md) records the working scenario matrix.
 
 ## Entry format
 

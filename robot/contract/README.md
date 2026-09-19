@@ -1,7 +1,7 @@
 # Annie integration contract v0.1
 
 Working contract for the staged demo, based on the team's
-[original proposal](../docs/hackmit-2026/sources/proposed-contract.txt).
+[original proposal](../../docs/hackmit-2026/sources/proposed-contract.txt).
 [schemas.json](schemas.json) is generated from backend models;
 `/openapi.json` describes the implemented REST API. This contract distinguishes
 the runnable local mock from target hardware and service integrations.
@@ -34,7 +34,7 @@ is still required. Pub/Sub alone does not supply durable replay or delivery.
 
 | Channel | Direction | Payload/purpose |
 | --- | --- | --- |
-| `dog.frame` | Body → brain only | Proposed 2 Hz local JPEG, timestamp, UUID, dimensions, synchronized observer pose; never the app/cloud. |
+| `dog.frame` | Body → brain only | Proposed 2 Hz local JPEG, timestamp, UUID, dimensions, synchronized observer pose; never the app; synthetic simulator frames may reach an explicitly configured cloud brain. |
 | `dog.status` | Body → app | State, battery percentage, waypoint, pose, timestamp. |
 | `dog.map` | Body → app | Map ID, occupancy PNG, origin, resolution, waypoints; target every 30 s/on change. |
 | `dog.cmd` | Brain/app → body | Identified goto/stop/resume/look command. Software stop is not a hardware emergency stop. |
@@ -62,7 +62,8 @@ protection. Never put tokens in URLs or browser persistent storage.
 | `GET /events?since=0` | Event array strictly newer than `since`, ordered by timestamp; clients deduplicate by event ID. |
 | `POST /events/{id}/ack` | `{by:"family"}` → updated event. Idempotent receipt, not proof of resident safety. |
 | `POST /say` | `{text}` → command ID and queued status; not a playback confirmation. |
-| `GET /commands` | Recent queued commands. |
+| `GET /commands` | Recent commands with actual queued/accepted/executing/completed/failed status. |
+| `POST /commands/{id}/receipt` | Strict `{status,source:"simulation",detail?}`. Validated transitions; terminal receipt retries are idempotent. |
 | `POST /commands` | `{cmd,waypoint?}` → queued command; reject unknown waypoints. |
 | `POST /query` | `{text}` → `{answer,answerable,citations:[{frame_id,ts,pose,crop_url}]}`. Local lexical retrieval initially; missing evidence is explicitly unanswerable. |
 | `GET /frames/{id}` | Only an approved stored crop, otherwise 404; never arbitrary files or full frames. |
@@ -91,11 +92,15 @@ the implemented `event` and `command` envelopes.
    known floor/chair, confidence ≥0.8, start one `fall_suspected` check-in.
    Bed, unknown location, low confidence, duplicate/stale/future input, and
    inference failures cannot start an incident.
-2. Queue "Grandma, are you OK?" and start an eight-second window. Correlate
-   speech to the incident; pre-incident or unrelated speech cannot clear it.
+2. Queue "Are you okay? Please say okay or help." In receipt-required mode,
+   start the eight-second response window after player-reported completion.
+   Missing completion after an eight-second watchdog produces an audio-failure
+   alert. The legacy demo timer remains explicitly unverified.
 3. Confident explicit reassurance emits `checkin_ok`. Explicit help or timeout
    emits one `fall_confirmed` escalation. Ambiguous speech leaves the timer open.
-4. Debounce continuing incidents until a safe new observation resets the episode.
+4. Debounce continuing incidents until two fresh, confidently present, non-risky
+   observations at least 500 ms apart establish the single-resident recovery
+   assumption, or a deliberate demo reset occurs. Empty views never re-arm it.
    A background clock expires windows even when no new frame arrives.
 
 `fall_confirmed` means **escalation confirmed**, not a medically verified fall.
@@ -113,8 +118,7 @@ may leave**. Crops, captions, and transcripts can still contain PII.
 
 Cloud Deepgram/ElevenLabs, Elastic, Linq, or Subconscious are external egress,
 so this is local-first, not fully air-gapped. The demo uses synthetic data and
-may return null crop URLs; it does not fabricate live evidence. A cloud VLM
-fallback would require a separate policy change.
+may return null crop URLs; it does not fabricate live evidence. Cloud inference for synthetic simulator frames is now explicitly authorized, with a $20 total external inference cap; hardware/resident frames are rejected by the cloud brain. See [brain contract](brain.md). There is no automatic local/cloud/provider failover.
 
 Subconscious agents are advisory only: no dog-control, emergency-policy,
 notification, or tool-execution authority. Provider errors cannot change the
@@ -127,3 +131,7 @@ reassurance, help, timeout, acknowledgement, reconnect, and unanswerable queries
 Separately verify robot movement, model inference, actual speech playback,
 notifications, Elastic retrieval, and measured demo latency before claiming
 them complete. A map pin labels observer position, not resident position.
+
+## Simulation implementation
+
+`robot/simulation/bridge.py` translates real MuJoCo poses/maps and identified mission receipts into this API. The walking model is the matched Go1 surrogate with the existing DimOS policy. Battery is a synthetic 100% placeholder. Perception carries `source` (`mock`, `simulation_ground_truth`, `simulation_vlm`, or `hardware_vlm`) and optional `model`; these labels identify provenance, not model accuracy. Speech completion requires the browser to report playback ended; synthesis alone is not delivery. The app remains the sole incident-policy owner.

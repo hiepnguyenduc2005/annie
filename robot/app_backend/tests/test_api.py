@@ -2,7 +2,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
-from app.main import create_app
+from robot.app_backend.app.main import create_app
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def test_empty_start_seed_commands_and_query(client):
 
 def test_ingest_validation_and_raw_frame_rejection(client):
     assert client.post('/ingest', json={'channel': 'dog.frame', 'data': {}}).status_code == 422
-    from app.service import now_ms
+    from robot.app_backend.app.service import now_ms
     frame = {'ts': now_ms(), 'frame_id': str(uuid4()), 'person': True, 'posture': 'lying', 'location': 'bed', 'confidence': .9, 'caption': 'resting', 'pose': {'x': 1, 'y': 2}}
     for extra in ({'jpeg_b64': 'raw'}, {'confidence': 1.2}, {'ts': '123'}):
         assert client.post('/ingest', json={'channel': 'brain.perception', 'data': {**frame, **extra}}).status_code == 422

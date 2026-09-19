@@ -5,17 +5,17 @@ import sys
 import tempfile
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from simulation.locomotion import LocomotionController, prepare_locomotion_model
+from robot.simulation.locomotion import LocomotionController, prepare_locomotion_model
 
 
 class LocomotionPhysicsTests(unittest.TestCase):
     def test_forward_turn_stop(self):
         import mujoco
         import numpy as np
-        from simulation.scenes import make_scene
+        from robot.simulation.scenes import make_scene
         xml, _ = make_scene(ROOT / '.cache/menagerie/unitree_go2', 'empty', 0, 2026)
         with tempfile.TemporaryDirectory() as temp:
             scene = Path(temp) / 'scene.xml'

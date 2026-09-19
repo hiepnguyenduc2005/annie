@@ -504,19 +504,33 @@ async function pollBrain() {
   }
 }
 
-function wireSayClip(commandId, url, durationS, text) {
+function wireSayClip(commandId, url, durationS, text, playback) {
   const audio = $("say-audio");
+  const native = playback === "native";
+  const nativeNote = $("say-native");
+  nativeNote.hidden = !native;
   const meta =
     `Clip ${commandId.slice(0, 8)}` +
     (durationS == null ? "" : ` · ${Number(durationS).toFixed(1)} s`) +
     ` · ${url}`;
   $("say-audio-wrap").hidden = false;
+  audio.hidden = native;
   $("say-meta").textContent = meta;
   $("say-clip-text").textContent = text
     ? `Says: ${String(text).slice(0, 500)}`
     : "";
-  audio.src = url;
+  if (native) {
+    audio.removeAttribute("src");
+  } else {
+    audio.src = url;
+  }
   const playButton = $("say-play");
+  if (native) {
+    playButton.hidden = true;
+    playButton.onclick = null;
+    audio.onended = null;
+    return;
+  }
   playButton.hidden = false;
   playButton.onclick = () => audio.play().catch(() => {});
   audio.onended = () => {
@@ -532,6 +546,23 @@ function wireSayClip(commandId, url, durationS, text) {
 }
 
 let lastSeenClipId = null;
+let activeNativeId = null;
+
+function renderNativeStatus(clip) {
+  if (clip?.playback !== "native") return null;
+  const output = clip.output ?? "macos_default_output";
+  let label;
+  if (clip.status === "played") {
+    label = "Native playback finished (playback_process_completed).";
+  } else if (clip.status === "failed") {
+    label = "Native playback FAILED: " + (clip.playback_error ?? "unknown error") + ".";
+  } else if (clip.status === "playing") {
+    label = "Playing natively now...";
+  } else {
+    label = "Queued for native playback...";
+  }
+  return label + " | output: " + output + " | no browser replay for native clips.";
+}
 
 async function pollQueuedClips() {
   try {
@@ -541,6 +572,11 @@ async function pollQueuedClips() {
     const clips = Array.isArray(data?.speech) ? data.speech : [];
     if (!clips.length) return;
     const latest = clips[clips.length - 1];
+    const nativeNote = $("say-native");
+    if (activeNativeId) {
+      const tracked = clips.find((clip) => clip.command_id === activeNativeId);
+      if (tracked) nativeNote.textContent = renderNativeStatus(tracked);
+    }
     if (
       !latest?.command_id ||
       latest.command_id === lastSeenClipId ||
@@ -549,7 +585,13 @@ async function pollQueuedClips() {
     )
       return;
     lastSeenClipId = latest.command_id;
-    wireSayClip(latest.command_id, latest.url, latest.duration_s, latest.text);
+    wireSayClip(latest.command_id, latest.url, latest.duration_s, latest.text, latest.playback);
+    if (latest.playback === "native") {
+      activeNativeId = latest.command_id;
+      nativeNote.textContent = renderNativeStatus(latest);
+      $("say-status").textContent = "Native audio selected - clip plays on the computer default output, not in this tab.";
+      return;
+    }
     if ($("demo-voice").checked) {
       const audio = $("say-audio");
       try {
@@ -604,7 +646,13 @@ $("say-form").addEventListener("submit", async (event) => {
     const result = await postJSON("/say", { text: value });
     if (result.command_id && typeof result.url === "string") {
       lastSeenClipId = result.command_id;
-      wireSayClip(result.command_id, result.url, result.duration_s, value);
+      wireSayClip(result.command_id, result.url, result.duration_s, value, result.playback);
+      if (result.playback === "native") {
+        activeNativeId = result.command_id;
+        $("say-native").textContent = renderNativeStatus(result);
+        $("say-status").textContent = "Native audio selected - clip plays on the computer default output, not in this tab.";
+        return;
+      }
       $("say-status").textContent =
         "Clip synthesized. Press play — browsers may block automatic audio.";
       if ($("demo-voice").checked) {

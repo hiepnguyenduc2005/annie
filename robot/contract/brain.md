@@ -8,7 +8,7 @@ incident, voice, or robot-control authority.
 Run from the repository root (FastAPI, httpx, Pillow, and uvicorn required):
 
 ```sh
-.venv/bin/uvicorn robot_backend.app.brain.api:app --host 127.0.0.1 --port 8002 --no-proxy-headers --env-file .env
+.venv/bin/uvicorn robot.robot_backend.app.brain.api:app --host 127.0.0.1 --port 8002 --no-proxy-headers --env-file .env
 ```
 
 ## Configuration
@@ -91,7 +91,7 @@ Successful response:
 }
 ```
 
-The nested `perception` validates against `app_backend.app.models.Perception`;
+The nested `perception` validates against `robot.app_backend.app.models.Perception`;
 only that object enters the app's `brain.perception` channel. Capture UUID,
 timestamp, and pose come from the input and are preserved. Provider receives
 only sanitized pixels plus a fixed observation instruction, never the timestamp,
@@ -156,5 +156,5 @@ deduplicates frame IDs; producers should avoid sending the same frame twice.
 Verification uses synthetic JPEGs and mocked HTTP, not GX10 or paid inference:
 
 ```sh
-.venv/bin/python -m pytest robot_backend/tests/test_brain.py -q
+.venv/bin/python -m pytest robot/robot_backend/tests/test_brain.py -q
 ```

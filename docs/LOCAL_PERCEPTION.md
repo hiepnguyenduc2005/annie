@@ -6,7 +6,7 @@ substitutes ground-truth scene metadata for real camera output.
 
 ## Component
 
-`simulation/local_perception.py` loads an Ultralytics YOLO checkpoint and runs
+`robot/simulation/local_perception.py` loads an Ultralytics YOLO checkpoint and runs
 person-class (COCO id 0) detection on one observation frame at a time. Results
 carry the viewer `frame_id`, person bounding boxes in original-image pixel
 coordinates, raw model confidences, measured wall-clock latency, and a demo
@@ -32,7 +32,7 @@ in frame" is not "person within N meters".
 ## Usage
 
 ```python
-from simulation.local_perception import (
+from robot.simulation.local_perception import (
     PersonDetector, default_checkpoint, fetch_viewer_observation,
 )
 
@@ -80,7 +80,7 @@ Notes:
 ## Tests
 
 ```sh
-.cache/dimos/.venv/bin/python -m pytest simulation/tests/test_local_perception.py -q
+.cache/dimos/.venv/bin/python -m pytest robot/simulation/tests/test_local_perception.py -q
 ```
 
 The tests cover frame decoding, observation payload handling, viewer

@@ -20,7 +20,7 @@ from uuid import UUID, uuid4
 
 WEB = Path(__file__).resolve().parent / "web"
 if __package__ in (None, ''):
-    sys.path.insert(0, str(WEB.parent.parent))
+    sys.path.insert(0, str(WEB.parent.parent.parent))
 PRESETS = {"front": (180, -20, 1.6), "side": (90, -20, 1.6), "top": (90, -89, 1.8)}
 
 
@@ -321,7 +321,7 @@ def handler_for(shared, port):
                         self.reply(429, {'error': 'Local transcription is busy'})
                         return
                     try:
-                        from simulation.local_stt import LocalSTTAdapter, LocalSTTError
+                        from robot.simulation.local_stt import LocalSTTAdapter, LocalSTTError
                         from dataclasses import asdict
                         if shared.stt is None:
                             shared.stt = LocalSTTAdapter()
@@ -379,7 +379,7 @@ def handler_for(shared, port):
                         clip = shared.speech.get(cid)
                     if clip is None:
                         try:
-                            from simulation.speech import SpeechAdapter
+                            from robot.simulation.speech import SpeechAdapter
                         except ModuleNotFoundError:
                             from speech import SpeechAdapter
                         clip = asyncio.run(SpeechAdapter().speak(text, cid))
@@ -480,7 +480,7 @@ class MujocoSession:
         self.person_safety = person_safety
         if locomotion:
             try:
-                from simulation.locomotion import prepare_locomotion_model
+                from robot.simulation.locomotion import prepare_locomotion_model
             except ModuleNotFoundError:
                 from locomotion import prepare_locomotion_model
             path = prepare_locomotion_model(path)
@@ -524,8 +524,8 @@ class MujocoSession:
         )
         if locomotion:
             try:
-                from simulation.locomotion import LocomotionController
-                from simulation.navigation import Navigator
+                from robot.simulation.locomotion import LocomotionController
+                from robot.simulation.navigation import Navigator
             except ModuleNotFoundError:
                 from locomotion import LocomotionController
                 from navigation import Navigator
@@ -767,7 +767,7 @@ def run(args):
     catalog = SceneCatalog(args.scenes)
     guard = None
     if args.person_safety:
-        from simulation.person_safety import PersonSafety
+        from robot.simulation.person_safety import PersonSafety
         guard = PersonSafety()
     first_id = next(iter(catalog.entries), None)
     session = MujocoSession(
@@ -778,7 +778,7 @@ def run(args):
     )
     shared = Shared()
     def warm_question():
-        from simulation.speech import SpeechAdapter, CHECKIN_PROMPT
+        from robot.simulation.speech import SpeechAdapter, CHECKIN_PROMPT
         try:
             asyncio.run(SpeechAdapter().speak(CHECKIN_PROMPT, str(uuid4())))
         except Exception:
@@ -822,7 +822,7 @@ def run(args):
                     try:
                         if action == "generate":
                             try:
-                                from simulation.scenes import generate_batch
+                                from robot.simulation.scenes import generate_batch
                             except ModuleNotFoundError:
                                 from scenes import generate_batch
                             nonce = str(time.time_ns())

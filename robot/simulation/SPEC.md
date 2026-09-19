@@ -2,7 +2,7 @@
 
 Status: working proposal, 2026-09-19. The first scenario is **patrol → possible
 incident → resident check-in → family attention**. This document defines what
-to build and measure; [SDK findings](../docs/SIMULATION_FINDINGS.md) record what
+to build and measure; [SDK findings](../../docs/SIMULATION_FINDINGS.md) record what
 has actually run. The software dashboard's synthetic scenarios are a separate
 layer from MuJoCo or DimOS execution.
 
@@ -35,8 +35,7 @@ cannot pass layers B–F. A ground-truth label must be labeled as such and canno
 be scored as VLM perception.
 
 Current interactive entry point: [live viewer setup](README.md), port 8766.
-It implements layer B inspection with play/pause/reset, single-step, camera
-presets, and optional PD joint holding. It has no app/SDK connection yet.
+It implements direct MuJoCo inspection, a scene factory, trained Go1-surrogate walking, authored-map A* waypoint missions, a robot-mounted camera, app command receipts, and speech synthesis/playback acknowledgements. The full DimOS module/navigation stack remains a separate uncompleted integration. Image/audio inference runs behind the [brain contract](../contract/brain.md), with actual run results recorded separately.
 The inspected DimOS legacy simulator maps `unitree_go2` to a Go1 model/policy;
 the direct viewer uses the actual Go2 asset. Record this distinction in runs
 instead of treating both paths as identical robot dynamics.
@@ -114,7 +113,7 @@ policy and UX. No VLM claim. Use this mode to develop in parallel.
 on GX10 or another explicitly configured local endpoint. Validate person,
 posture, location category, confidence, and caption. Set a three-second request
 deadline; a timeout is missing evidence, never an incident label. Keep ambiguous
-location unknown. No automatic cloud fallback.
+location unknown. No automatic cloud fallback. The user explicitly authorized cloud inference for synthetic simulator images/audio and a combined $20 external inference cap. Hardware frames are rejected by cloud mode.
 
 Bed semantics can be visually inferred for the prototype but must be evaluated
 against known scene cases. A later geometric method would need calibrated
@@ -139,7 +138,7 @@ depth and transforms; neither VLM distance nor robot pose supplies that alone.
 | SIM-013 | App disconnect/reconnect | Refetch events/status, deduplicate by ID, preserve acknowledgements. |
 | SIM-014 | Memory hit and miss | Hit cites observation, timestamp and observer pin; miss explicitly unanswerable. |
 | SIM-015 | Map reset | New map ID; old coordinates not presented as belonging to the new map. |
-| SIM-016 | Privacy boundary | Full frames absent from app stream, cloud request captures, and routine logs. |
+| SIM-016 | Media boundary | Full frames absent from app stream and routine logs; cloud requests carry only explicitly configured synthetic simulator media. |
 | SIM-017 | Optional provider unavailable | Local check-in policy continues; no silent paid fallback. |
 
 For layers involving physics, preserve a short visual capture or measurable
@@ -172,3 +171,28 @@ scene; reminders follow only after both work. The main product choices to
 discuss are whether the robot checks in proactively or waits for family, what
 reassurance can safely close a check-in, and which observation is meaningful
 enough to share. Keep these separate from simulator plumbing.
+
+## Implemented motion and multimodal boundary (2026-09-19)
+
+Walking uses the matched upstream Go1 model and ONNX policy, with real joint
+actuation and measured MuJoCo displacement. The original Go2 model remains
+available without `--locomotion`. The planner uses authored collision geometry,
+not perception or SLAM. It performs bounded waypoint/patrol/stop/resume/look
+missions, fails if blocked or progress stops, and reports identified receipts.
+Robot-camera JPEGs and poses are captured together. Interactive walking is not
+stopped by the static scene observation schedule; each mission has its own
+150-second limit. The scene schedule does not animate residents.
+
+Cloud camera experiments use DeepSeek V4.1 Flash; the catalog does not expose
+a V4.1 Pro vision model. MiMo V2.5 is the candidate for image/audio input. Their
+latencies and actual modality behavior must be measured. A provider accepting
+an HTTP request is not proof it received the media or transcribed correctly.
+Local Qwen3-VL is an explicit alternative for comparison, with no automatic
+switching. Expired results remain visible as observations but cannot trigger
+fresh incident-policy decisions.
+
+Speech synthesis uses macOS `say` for the current laptop simulation, returning a
+WAV and a synthesized receipt. Only a browser `ended` event reports playback
+completion. This is laptop audio, not a speaker on real dog hardware. Synthetic
+WAV transcription has a separate request contract; it does not silently create
+resident reassurance or commands.

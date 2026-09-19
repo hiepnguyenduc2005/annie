@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from simulation.speech import MAX_TEXT_CHARS, SpeechAdapter, SpeechError, parse_wav_header
+from robot.simulation.speech import MAX_TEXT_CHARS, SpeechAdapter, SpeechError, parse_wav_header
 
 
 def minimal_wav(sample_count=64):
@@ -20,7 +20,7 @@ def write_adapter(tmp_path, **kwargs):
 
 
 def test_cached_question_reuses_audio_but_never_playback_receipt(tmp_path):
-    from simulation.speech import CHECKIN_PROMPT
+    from robot.simulation.speech import CHECKIN_PROMPT
     adapter = write_adapter(tmp_path)
     adapter.output_dir.mkdir()
     (adapter.output_dir / 'checkin-pcm22050-v1.wav').write_bytes(minimal_wav())

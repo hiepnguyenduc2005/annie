@@ -41,7 +41,7 @@ current official API documentation, and the pinned Go2 MuJoCo model.
 
 ## Export (inside Blender)
 
-    blender --background scene.blend --python simulation/blender_export.py -- \
+    blender --background scene.blend --python robot/simulation/blender_export.py -- \
         --output .data/simulation/blender/room
 
 Behavior:
@@ -91,7 +91,7 @@ Behavior:
 
 ## Compose (outside Blender, plain Python)
 
-    python simulation/blender_export.py compose \
+    python robot/simulation/blender_export.py compose \
         --environment .data/simulation/blender/room/environment.xml \
         --robot .cache/menagerie/unitree_go2/scene.xml \
         --output .data/simulation/blender/room/merged.xml

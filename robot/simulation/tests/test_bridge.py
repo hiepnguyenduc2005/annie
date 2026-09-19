@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import httpx
 
-from simulation.bridge import Bridge
+from robot.simulation.bridge import Bridge
 
 
 def test_body_map_reset_and_command_execution():

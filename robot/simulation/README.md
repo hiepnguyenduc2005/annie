@@ -12,7 +12,7 @@ Without hold, zero motor torque lets the robot settle under gravity.
 From the repository root, using this checkout's existing simulation environment:
 
 ```sh
-.cache/dimos/.venv/bin/python simulation/viewer.py \
+.cache/dimos/.venv/bin/python robot/simulation/viewer.py \
   --model .cache/menagerie/unitree_go2/scene.xml --port 8766
 ```
 
@@ -23,7 +23,7 @@ command. DimOS is not required for the viewer, scene factory, or smoke harness.
 
 ```sh
 uv venv .cache/sim-venv --python 3.12
-uv pip install --python .cache/sim-venv/bin/python -r simulation/requirements.txt
+uv pip install --python .cache/sim-venv/bin/python -r robot/simulation/requirements.txt
 ```
 
 The server binds only to loopback, validates Host and control origins, and
@@ -52,7 +52,7 @@ rejection, and recovery after an injected invalid motor-control value.
 
 ## Furnished scene factory
 
-`simulation/scenes.py` deterministically generates furnished home MJCF scenes
+`robot/simulation/scenes.py` deterministically generates furnished home MJCF scenes
 around the pinned Go2 model. The default run produces 24 scenes across 6
 categories (`safe_bed`, `floor_lying`, `seated`, `standing`, `occluded`,
 `empty`) from a fixed seed (default 2026); rerunning with the same seed and
@@ -80,12 +80,12 @@ records which mode was used in `visual_quality`.
 ```sh
 # 24 furnished scenes, 6 categories, seed 2026 (default count and seed)
 PY=.cache/dimos/.venv/bin/python   # or .cache/sim-venv/bin/python (fresh checkout)
-$PY simulation/scenes.py \
+$PY robot/simulation/scenes.py \
   --assets .cache/menagerie/unitree_go2 \
   --output .data/simulation/scenes
 
 # Larger deterministic batches: the CLI accepts up to 200 scenes per run
-$PY simulation/scenes.py \
+$PY robot/simulation/scenes.py \
   --assets .cache/menagerie/unitree_go2 --output .data/simulation/scenes \
   --count 200 --seed 2026
 ```
@@ -98,7 +98,7 @@ produce.
 Run the viewer against a generated catalog:
 
 ```sh
-$PY simulation/viewer.py \
+$PY robot/simulation/viewer.py \
   --model .cache/menagerie/unitree_go2/scene.xml --port 8766 \
   --scenes .data/simulation/scenes/manifest.json
 ```
@@ -108,15 +108,15 @@ accepts `scene` and `generate` controls on `POST /control`.
 
 ### Optional textured assets (network)
 
-`simulation/assets.py` downloads CC0 Poly Haven assets (chair, table, wood
+`robot/simulation/assets.py` downloads CC0 Poly Haven assets (chair, table, wood
 floor) and reuses the existing DimOS person scan into ignored
 `.cache/simulation-assets/`, with a 200 MiB download ceiling and a manifest of
 source URLs, hashes, and derived files. It needs `trimesh` beyond the base
 runtime:
 
 ```sh
-uv pip install --python .cache/sim-venv/bin/python -r simulation/requirements-assets.txt
-.cache/sim-venv/bin/python simulation/assets.py
+uv pip install --python .cache/sim-venv/bin/python -r robot/simulation/requirements-assets.txt
+.cache/sim-venv/bin/python robot/simulation/assets.py
 ```
 
 Scene generation itself never uses the network; it only reads this prepared
@@ -125,7 +125,7 @@ for a separate, verified Blender-to-MuJoCo export path.
 
 ## Physics smoke harness
 
-`simulation/smoke.py` is a reproducible physics-only smoke test built on
+`robot/simulation/smoke.py` is a reproducible physics-only smoke test built on
 direct MuJoCo bindings. It loads a local MJCF model, steps it for N steps with
 controls held at zero (unactuated), checks the state stays finite and the free
 base stays above the abort height, detects MuJoCo numerical warnings
@@ -188,13 +188,13 @@ Pillow installed):
 ```sh
 # 1. Built-in minimal drop test, 200 steps
 PY=.cache/dimos/.venv/bin/python
-$PY simulation/smoke.py \
+$PY robot/simulation/smoke.py \
   --steps 200 \
   --render output/simulation/reproducible/minimal \
   --json output/simulation/reproducible/minimal_result.json
 
 # 2. Real Go2 scene (unactuated, keyframe-initialized), 500 steps
-$PY simulation/smoke.py \
+$PY robot/simulation/smoke.py \
   --model .cache/menagerie/unitree_go2/scene.xml \
   --steps 500 \
   --render output/simulation/reproducible/go2 \
@@ -216,3 +216,73 @@ Recorded acceptance run (2026-09-19):
 `--steps 0` correctly exits 1 with an argument error before any physics runs.
 Frames are written to `output/simulation/reproducible/{minimal,go2}/` as PNGs
 (portable pixmaps as a fallback if Pillow is absent).
+
+## Walking, app commands, vision and speech
+
+Prepare the matched model/policy with [LOCOMOTION.md](LOCOMOTION.md), then start:
+
+```sh
+.cache/dimos/.venv/bin/python robot/simulation/viewer.py \
+  --model .cache/menagerie/unitree_go2/scene.xml \
+  --scenes .data/simulation/scenes/manifest.json --locomotion --port 8766
+```
+
+`--locomotion` replaces the robot with the matched Go1 surrogate for every
+furnished scene. The scene environment stays the same. Patrol, goto, software
+stop/resume and look commands drive the trained policy through real joint
+actuation. The planner uses a conservative authored collision map, not SLAM.
+Robot-front frames are separate from the movable room-view camera.
+
+Start the app API on port 8000 (root README). In another terminal:
+
+```sh
+.venv/bin/python robot/simulation/bridge.py --perception disabled
+```
+
+Family-app commands now reach the simulator and receive execution receipts.
+Maps reset to new IDs on scene/reset changes. Battery is a synthetic placeholder.
+The bridge can publish explicit ground truth with `--perception ground-truth`.
+
+For actual model inference, install the brain runtime and explicitly start it:
+
+```sh
+uv pip install --python .venv/bin/python -r robot/robot_backend/requirements-brain.txt
+.venv/bin/python robot/simulation/run_brain.py --mode cloud --model google/gemini-2.5-flash-lite:floor
+# Separate terminal; stop a previous bridge before starting another.
+.venv/bin/python robot/simulation/bridge.py --perception vision --max-inferences 20
+```
+
+The cloud launcher loads root `.env` privately and maps `OPENROUTER_API_KEY`.
+It starts no paid request until a frame/audio request arrives. A shared locked
+ledger caps conservative reservations at $20, including uncertain requests.
+The service never retries or switches providers automatically. See
+[brain contract](../contract/brain.md) for exact model/price boundaries.
+Use `--mode local` for Ollama/Qwen3-VL on port 11434. Model startup and render
+inference latency vary; the app rejects observations older than five seconds.
+
+The viewer's speech panel creates a bounded WAV through macOS `say`; press
+**Hear Annie** to play it. App messages follow the same path. A synthesized
+clip is not a playback receipt; the browser acknowledges when audio ends.
+See [speech details](SPEECH.md) and [audio contract](../contract/audio.md).
+
+For local camera person stopping and local WAV transcription:
+
+```sh
+uv pip install --python .cache/dimos/.venv/bin/python -r robot/simulation/requirements-perception.txt
+.cache/dimos/.venv/bin/python robot/simulation/setup_perception.py
+# Add --person-safety to the viewer command above.
+```
+
+The camera interlock uses YOLO11s at a separate 10 Hz capture target, with one
+latest pending frame. It inhibits movement on detections, model failure, or a
+result older than one second. A fresh clear view plus an explicit new mission
+is needed after a stop. The detector cannot see people outside its camera.
+The actual decision rate and false-negative envelope require qualification.
+Incident inference remains independently rate-limited by the bridge.
+Pausing holds incident evidence; camera safety preview continues.
+
+Use `ANNIE_REQUIRE_AUDIO_RECEIPT=true` for the app process. The fixed question
+is prepared at viewer startup and cached; speech completion is reported only
+by the selected player. Local Whisper is the default recorded-WAV option;
+MiMo cloud audio requires the brain launcher's explicit `--cloud-audio` flag.
+Current evidence and limitations are in [LIVE_DEMO.md](../../docs/LIVE_DEMO.md).

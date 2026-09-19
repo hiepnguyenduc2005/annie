@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app_backend.app.models import Perception
+from robot.app_backend.app.models import Perception
 
 MAX_JPEG_BYTES = 1_000_000
 MAX_BASE64_CHARS = 4 * ((MAX_JPEG_BYTES + 2) // 3)

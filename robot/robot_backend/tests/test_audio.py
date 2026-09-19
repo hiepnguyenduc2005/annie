@@ -12,11 +12,11 @@ from fastapi.testclient import TestClient
 import httpx
 import pytest
 
-from robot_backend.app.brain import audio
-from robot_backend.app.brain.audio import (
+from robot.robot_backend.app.brain import audio
+from robot.robot_backend.app.brain.audio import (
     AUDIO_MODEL, AUDIO_RESERVATION_USD, MAX_BASE64_CHARS, build_audio_router)
-from robot_backend.app.brain.budget import BudgetError
-from robot_backend.app.brain.provider import VisionConfig
+from robot.robot_backend.app.brain.budget import BudgetError
+from robot.robot_backend.app.brain.provider import VisionConfig
 
 
 def wav_bytes(rate=16000, channels=1, width=2, seconds=1.0, frames=None, magic=b'RIFF'):
@@ -107,7 +107,7 @@ def test_transcription_roundtrip_preserves_utterance_and_sends_audio_only():
 
 
 def test_cloud_audio_can_be_explicitly_enabled_with_local_vision():
-    from robot_backend.app.brain.api import create_app
+    from robot.robot_backend.app.brain.api import create_app
     requests = []
     def handle(request):
         requests.append(request)

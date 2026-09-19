@@ -1,5 +1,5 @@
-from simulation.person_safety import PersonSafety
-from simulation.viewer import validate_control
+from robot.simulation.person_safety import PersonSafety
+from robot.simulation.viewer import validate_control
 import pytest
 
 
@@ -50,7 +50,7 @@ def test_turn_contract_absolute_finite_heading():
 
 
 def test_interlock_zeros_controller_without_waiting_for_inference():
-    from simulation.viewer import MujocoSession
+    from robot.simulation.viewer import MujocoSession
     from types import SimpleNamespace
     class Controller:
         def apply(self, *velocity):

@@ -1,9 +1,9 @@
 # Shared protocol references
 
 The app-facing contract now permits typed status, map, perception, incident,
-voice-transcript, and command data. See [the contract](../contract/README.md)
-and [exported schemas](../contract/schemas.json). Typed producer/consumer
-validation is implemented in `app_backend/app/models.py`; the exporter checks
+voice-transcript, and command data. See [the contract](../robot/contract/README.md)
+and [exported schemas](../robot/contract/schemas.json). Typed producer/consumer
+validation is implemented in `robot/app_backend/app/models.py`; the exporter checks
 that published schemas match. A robot adapter can generate or vendor validators
 from this versioned artifact without importing the app service at runtime.
 

@@ -13,7 +13,7 @@ import sys
 
 
 def main():
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(root))
     from dotenv import load_dotenv
     import uvicorn
@@ -38,7 +38,7 @@ def main():
         os.environ['ANNIE_VISION_BASE_URL'] = 'http://127.0.0.1:11434/v1'
         os.environ['ANNIE_VISION_API_KEY'] = ''
         os.environ['ANNIE_VISION_MODEL'] = args.model or 'qwen3-vl:2b-instruct'
-    uvicorn.run('robot_backend.app.brain.api:app', host='127.0.0.1', port=args.port,
+    uvicorn.run('robot.robot_backend.app.brain.api:app', host='127.0.0.1', port=args.port,
                 proxy_headers=False, access_log=False)
 
 

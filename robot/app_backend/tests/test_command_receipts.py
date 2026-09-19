@@ -3,7 +3,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+from robot.app_backend.app.main import create_app
 
 
 def queue_goto(client):
@@ -76,7 +76,7 @@ def test_receipt_status_stream_preserves_ts_and_emits_updates():
 
 def test_service_receipt_rejects_unknown_and_preserves_history():
     now = [5000]
-    from app.service import Service
+    from robot.app_backend.app.service import Service
     service = Service(':memory:', clock=lambda: now[0])
     command = service.queue_command({'cmd': 'stop'})
     try:

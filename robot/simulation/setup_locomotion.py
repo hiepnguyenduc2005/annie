@@ -5,7 +5,7 @@ hashed Go1 files, and prepares the pinned sparse Menagerie Go1 mesh checkout.
 Everything lands in ignored cache; no binaries are committed. Reruns print
 ready and skip verified files; nothing is re-downloaded while hashes match.
 
-    python simulation/setup_locomotion.py
+    python robot/simulation/setup_locomotion.py
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 # Pinned DimOS revision whose released mujoco_sim data assets we verify.
 # The media URL at this revision serves the real ~60 MB gzip blob, not an LFS

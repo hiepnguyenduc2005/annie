@@ -1,6 +1,6 @@
 from uuid import uuid4
 import pytest
-from app.service import Service
+from robot.app_backend.app.service import Service
 
 
 @pytest.fixture
@@ -49,6 +49,10 @@ def test_distinct_frames_order_and_timeout_once(service):
     observe(service)
     observe(service)
     assert len(service.events()) == 3
+    # A resolved episode recovers only through two confident, present,
+    # affirmatively safe captures at least 500 ms apart within 5 s.
+    observe(service, location='bed')
+    service.time[0] += 600
     observe(service, location='bed')
     suspect(service)
     assert len(service.events()) == 4
@@ -103,7 +107,7 @@ def test_unknown_resets_candidate(service):
 
 
 def test_nonfinite_coordinates_rejected():
-    from app.models import Pose
+    from robot.app_backend.app.models import Pose
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         Pose(x=float('inf'), y=0)

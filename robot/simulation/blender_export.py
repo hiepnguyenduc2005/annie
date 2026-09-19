@@ -4,7 +4,7 @@ Two entry points:
 
 1. Exporter (run inside Blender):
 
-    blender --background scene.blend --python simulation/blender_export.py -- \
+    blender --background scene.blend --python robot/simulation/blender_export.py -- \
         --output .data/simulation/blender/room
 
    Exports visual mesh objects (mesh type, in scene, not in the COLLISION
@@ -16,7 +16,7 @@ Two entry points:
 
 2. Composer (run outside Blender with plain Python 3):
 
-    python simulation/blender_export.py compose \
+    python robot/simulation/blender_export.py compose \
         --environment .data/simulation/blender/room/environment.xml \
         --robot <go2-scene>.xml \
         --output <merged>.xml

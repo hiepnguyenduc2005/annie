@@ -20,7 +20,7 @@ class PersonSafety:
 
     @staticmethod
     def default_detector():
-        from simulation.local_perception import PersonDetector, default_checkpoint
+        from robot.simulation.local_perception import PersonDetector, default_checkpoint
         # CPU avoids competing with the local VLM's Apple GPU allocation.
         return PersonDetector(default_checkpoint(), device='cpu')
 

@@ -8,7 +8,7 @@ SHA256 = '85a76fe86dd8afe384648546b56a7a78580c7cb7b404fc595f97969322d502d5'
 
 
 def main():
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     target = root / '.cache/yolo/yolo11s.pt'
     blob = target.read_bytes() if target.exists() else b''
     if hashlib.sha256(blob).hexdigest() != SHA256:

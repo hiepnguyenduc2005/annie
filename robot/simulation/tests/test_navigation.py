@@ -1,7 +1,7 @@
 """Opt-in real MuJoCo checks for the Navigator waypoint missions.
 
 Run with the cached DimOS Python environment, for example:
-    .cache/dimos/.venv/bin/python simulation/tests/test_navigation.py
+    .cache/dimos/.venv/bin/python robot/simulation/tests/test_navigation.py
 
 These tests drive the trained Go1 policy through actual physics (no renderer,
 no pose writes) and measure waypoint completion, furniture contacts,
@@ -14,7 +14,7 @@ import math
 import sys
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
 MANIFEST = ROOT / ".data/simulation/scenes/manifest.json"
@@ -28,8 +28,8 @@ SCENE_IDS = [
 ]
 REPORT = ROOT / ".cache/locomotion/navigation_validation.json"
 
-from simulation.locomotion import LocomotionController, prepare_locomotion_model
-from simulation.navigation import Navigator
+from robot.simulation.locomotion import LocomotionController, prepare_locomotion_model
+from robot.simulation.navigation import Navigator
 
 
 def load_scene_entry(scene_id):

@@ -13,7 +13,7 @@ import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 MODEL_PATH = ROOT / ".cache/dimos/data/mujoco_sim/unitree_go1.xml"
 POLICY_PATH = ROOT / ".cache/dimos/data/mujoco_sim/unitree_go1_policy.onnx"
 MESH_PATH = ROOT / ".cache/menagerie_full/unitree_go1/assets"

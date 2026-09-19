@@ -1,6 +1,6 @@
 # Local simulation assets
 
-Run `.cache/dimos/.venv/bin/python simulation/assets.py` to prepare the optional
+Run `.cache/dimos/.venv/bin/python robot/simulation/assets.py` to prepare the optional
 textured asset cache. Requires trimesh, NumPy, and Pillow. Scene generation never
 uses the network and falls back to procedural geometry when prepared assets are
 absent. Downloaded binaries stay in ignored `.cache/simulation-assets/`.

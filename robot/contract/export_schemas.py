@@ -3,8 +3,8 @@ import argparse
 import json
 from pathlib import Path
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app_backend'))
-from app.models import CHANNEL_MODELS, Event
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from robot.app_backend.app.models import CHANNEL_MODELS, Event
 
 path = Path(__file__).with_name('schemas.json')
 schemas = {name: model.model_json_schema() for name, model in {**CHANNEL_MODELS, 'event': Event}.items()}

@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / ".cache/simulation-assets"
 LIMIT = 200 * 1024 * 1024
 

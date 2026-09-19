@@ -126,7 +126,7 @@ def mannequin(world, location, posture, shirt):
 
 
 def cached_visuals():
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     path = root / ".cache/simulation-assets/manifest.json"
     if not path.exists():
         return {}
@@ -157,7 +157,7 @@ def cached_visuals():
 
 
 def mesh_visual(asset, world, cached, key, position, quaternion=None):
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     body = element(world, "body", name="env_" + key + "_visual", pos=position)
     if quaternion:
         body.set("quat", numbers(quaternion))
@@ -276,7 +276,7 @@ def make_scene(assets: Path, category: str, variant: int, seed: int):
             "texture",
             name="env_wood_floor",
             type="2d",
-            file=str(Path(__file__).resolve().parents[1] / cached["floor"]["texture"]),
+            file=str(Path(__file__).resolve().parents[2] / cached["floor"]["texture"]),
         )
         element(
             asset,

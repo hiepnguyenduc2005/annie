@@ -73,7 +73,7 @@ class Evidence(StrictModel):
 class Event(Versioned):
     ts: Timestamp
     event_id: UUID
-    kind: Literal['checkin_ok', 'checkin_no_reply', 'fall_suspected', 'fall_confirmed', 'reminder_due']
+    kind: Literal['checkin_ok', 'checkin_no_reply', 'checkin_audio_failed', 'fall_suspected', 'fall_confirmed', 'reminder_due']
     evidence: Evidence
     severity: Literal['info', 'warn', 'critical']
     acknowledged: bool = False

@@ -219,6 +219,7 @@ struct ProfileView: View {
     private var walk: Reminder? { state.reminders.first { $0.title.lowercased().contains("walk") } }
 
     var body: some View {
+        ScrollView {
         VStack(spacing: 20) {
             HStack(spacing: 16) {
                 Text("\u{1F415}")
@@ -238,15 +239,53 @@ struct ProfileView: View {
                 StatCard(value: "\(state.memory.count)", label: "things observed")
             }
 
+            ProfilesSectionView()
+
             ServerSettingsView()
 
             Text("Annie is a staged assistance prototype, not a medical device or emergency response.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
-            Spacer()
         }
         .padding(20)
+        }
+    }
+}
+
+/// The profiles registered on this device, and which was created first.
+struct ProfilesSectionView: View {
+    @EnvironmentObject private var profiles: ProfileState
+    @State private var confirmRemove = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Profiles")
+                .font(.headline)
+            ForEach(profiles.profiles) { profile in
+                HStack(spacing: 12) {
+                    Image(systemName: profile.kind == .dogUser ? "pawprint.fill" : "person.crop.circle")
+                        .font(.title3)
+                        .foregroundStyle(.orange)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(profile.name)
+                        Text("\(profile.kind.label) \u{00b7} created \(profile.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+            }
+            if let first = profiles.profiles.createdFirst {
+                Text("Created first: \(first.kind.label). Stored on this device only.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Button("Remove profiles", role: .destructive) { confirmRemove = true }
+                .font(.callout)
+                .confirmationDialog("Remove the profiles on this device?", isPresented: $confirmRemove) {
+                    Button("Remove profiles", role: .destructive) { profiles.reset() }
+                }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

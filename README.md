@@ -14,6 +14,8 @@ filled in as work takes shape.
 | [docs/TODO.md](docs/TODO.md) | Prioritized, actionable work and completion conditions. |
 | [docs/BRAINSTORM.md](docs/BRAINSTORM.md) | Uncommitted ideas, alternatives, and experiments. |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Consequential decisions and their rationale. |
+| [docs/hackmit-2026/NOTES.md](docs/hackmit-2026/NOTES.md) | Team notes, demo direction, ownership, hardware, and source history. |
+| [docs/hackmit-2026/SPONSORS.md](docs/hackmit-2026/SPONSORS.md) | All supplied sponsor resources, credits, links, and unresolved details. |
 | [backend/README.md](backend/README.md) | Setup and local development for the existing backend starter. |
 
 ## Development

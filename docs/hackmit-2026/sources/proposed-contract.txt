@@ -1,0 +1,74 @@
+Two corrections from the credits doc before the contract:
+- 20 Go2s + 10 Anvil OpenYAM arms via the hardware booth. Robot access isn't a risk; go check one out now. The arms are a distraction in 10 hours; ignore them unless someone's idle at hour 8.
+- GX10s come with Nemotron pre-installed. Use it for the VLM tick rather than fighting a vLLM install. NVIDIA's Nemotron Nano VL variants do image input; test one frame in the first 30 minutes.
+On "guide dog is basic; add LiDAR/Cartesian mapping": the reviewer is right, and dimOS gives it to you almost free. The Go2 has a LiDAR, dimOS runs SLAM and A* with dynamic obstacle avoidance, and it exposes the map and pose. So: on first run Annie maps the flat (a real occupancy grid on the app), every memory is stored with (x, y, t) from that map, and queries become spatiotemporal ("where was grandma at 2pm?" → a point on the map, a frame, a caption). That's your "4D spatiotemporal KG" with no custom SLAM, and it's the technical depth the feedback asked for. Don't write any mapping code yourself.
+Must ship:
+1. Dog maps the room (dimOS), patrols 3 waypoints on a loop.
+2. Brain on GX10: VLM tick → person | person_down | none with confidence; rule: lying on the bed = OK, lying anywhere else = alert.
+3. Alert → family app card + SMS/iMessage via Linq + live frame.
+4. Two-way voice: dog asks "Grandma, are you OK?", Deepgram hears the answer, ElevenLabs speaks; family can push a message to the dog.
+5. Memory: every tick's caption + (x,y,t) into Elastic; app query returns answer + cited frame + map pin.
+Stretch (only after 1–5 work end to end): reminders (time-based, spoken by the dog), routine drift ("hasn't been to the kitchen since 9am").
+Cut: two floors, user profiles beyond one, hospital dashboard, air-quality sensing, anything Arduino, the arm, fine-tuning.
+Local-first claim (ASUS, healthcare PII): frames never leave the GX10; only captions, events and one alert crop go to the app. Say it on the slide, and make it true by design.
+Transport: one Redis instance on the dimOS laptop; Pub/Sub channels below. App backend is FastAPI on the same laptop, exposing REST + one WebSocket to the phone. All timestamps unix ms, all coordinates in the dimOS map frame (metres).
+Channels (Redis Pub/Sub)
+dog.frame — Body → Brain, 2 Hz
+{"ts":0,"frame_id":"uuid","jpeg_b64":"...","w":640,"h":480,"pose":{"x":0,"y":0,"yaw":0}}
+
+dog.status — Body → all, on change
+{"ts":0,"state":"idle|patrolling|paused|estop|lowbatt","battery_pct":0,"waypoint":"kitchen","pose":{"x":0,"y":0,"yaw":0}}
+
+dog.map — Body → App, on map update (every 30 s)
+{"ts":0,"png_b64":"...","origin":{"x":0,"y":0},"resolution_m":0.05,"waypoints":[{"id":"kitchen","x":0,"y":0}]}
+
+dog.cmd — Brain/App → Body
+{"ts":0,"cmd":"goto|stop|resume|look","waypoint":"kitchen","pose":{"x":0,"y":0}}
+
+brain.perception — Brain → all, per tick
+{"ts":0,"frame_id":"uuid","person":true,"posture":"standing|sitting|lying","location":"bed|floor|chair|unknown","confidence":0.0,"caption":"...","pose":{"x":0,"y":0}}
+
+brain.event — Brain → App/Voice
+{"ts":0,"event_id":"uuid","kind":"checkin_ok|checkin_no_reply|fall_suspected|fall_confirmed|reminder_due","evidence":{"frame_id":"uuid","crop_b64":"...","pose":{"x":0,"y":0}},"severity":"info|warn|critical"}
+
+voice.say — Brain/App → Voice
+{"ts":0,"text":"...","priority":"critical|info","cache_key":"are_you_ok|null"}
+
+voice.heard — Voice → Brain/App
+{"ts":0,"text":"...","confidence":0.0,"speaker":"resident"}
+
+memory.write — Brain → Memory service
+{"ts":0,"frame_id":"uuid","caption":"...","entities":["person","cup"],"pose":{"x":0,"y":0},"room":"kitchen"}
+
+REST (FastAPI, app backend)
+- GET /status → latest dog.status + latest brain.perception
+- GET /map → latest dog.map
+- GET /events?since=ts → list of brain.event
+- 
+```
+POST /events/{event_id}/ack {by:"family"}
+```
+1. POST /say {text} → publishes voice.say (family speaks through the dog)
+2. POST /query {text} → {answer, answerable, citations:[{frame_id, ts, pose, crop_url}]} (Elastic retrieval; if no hit above threshold, answerable:false, answer "I wasn't there for that")
+3. GET /frames/{frame_id} → jpeg (crop only; full frames stay on GX10)
+4. POST /reminders {time, text} (stretch)
+5. WS /live → streams brain.event, dog.status, brain.perception (no frames)
+Alert path: fall_suspected → Voice says are_you_ok → 8 s window for voice.heard → no reply or "help" → fall_confirmed → App card + Linq SMS to family with crop + map pin + POST /say shortcut.
+Debounce rules (Brain-owned): lying + location != bed on two consecutive ticks → fall_suspected. VLM timeout > 3 s → skip tick, never alert on a timeout.
+annie/
+  body/      dimOS blueprint, waypoints, map publisher
+  brain/     gx10 vlm client, tick loop, rules, memory writer
+  voice/     deepgram pts, elevenlabs, cached lines
+  backend/   fastapi, redis bridge, elastic, linq
+  app/       react native (or a web page if RN slips)
+  contract/  this file + json schemas
+  logs/
+
+
+- Body: dimOS map + 3-waypoint patrol + publishers. Gate: dog.map and dog.frame on the bus by hour 2.
+- Brain (you): Nemotron on GX10 returning the brain.perception schema; the bed/floor rule; memory writes. Gate: valid JSON on a webcam frame by hour 1.5.
+- Voice + backend: Deepgram/ElevenLabs loop; FastAPI + Redis bridge + Linq; /query over Elastic. Gate: /status and /events live by hour 3.
+- App + demo: RN or web page hitting the REST/WS; the set; the script; the video. Gate: event card renders from a mocked brain.event by hour 3.
+Everyone codes against mocks published to Redis until the gates pass. First full end-to-end target: hour 5. Feature freeze: hour 8. Two hours for video, README, submission fields, three rehearsals.
+Name is fine. "Welcome to grandma's house" is the opening line; the phone rings 60 seconds later.
+

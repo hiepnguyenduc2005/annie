@@ -24,6 +24,25 @@
 - Report what changed, what was verified, and any remaining blockers. Never claim an unrun check passed.
 - Mark a task complete only when its stated completion condition is satisfied.
 
+## Engineering and collaboration
+
+- Prefer the smallest complete user workflow. Keep transport, perception, policy, persistence, and presentation separate where their failure modes differ.
+- Define typed contracts at boundaries. Validate external input; use stable IDs, explicit units and timestamps, bounded timeouts, and idempotent handling of retried events.
+- Preserve backward compatibility when teammates depend on a contract. Change the producer, consumer, examples, and checks together; document breaking changes.
+- Test meaningful behavior and failure paths, especially duplicate/stale events, disconnected services, authentication, and privacy boundaries. Mock paid APIs and hardware in routine tests.
+- Keep credentials in ignored environment files, with names and safe defaults in `.env.example`. Do not log tokens, resident media, or raw provider responses.
+- Distinguish simulated, queued, acknowledged, and executed behavior. Never describe a software stop as a hardware emergency stop, or a perception estimate as a diagnosis or calibrated measurement.
+- Assign bounded work and distinct writable paths to parallel agents. Supply the contract and acceptance check; the integrating owner reviews their changes and runs the combined checks. Do not let workers commit another worker's unfinished files.
+- Add dependencies only for a concrete need; prefer maintained libraries and reproducible installation. Avoid speculative abstractions and unrelated cleanup.
+
+## Commits, reviews, and PRs
+
+- Push verified, coherent milestones frequently. Inspect the staged diff and stage intended paths explicitly; never include another contributor's unfinished changes or `.env` contents.
+- Fetch before pushing. If teammates advanced the branch, integrate their work and rerun affected checks; do not rewrite shared history.
+- For PR-based work, use a focused branch and a title describing the resulting behavior. The description should explain the problem, change, validation, and material limitations; link related requirements.
+- Keep PRs reviewable. Review correctness, failure behavior, data exposure, maintainability, and user-visible claims. Resolve actionable feedback with evidence and regression coverage when warranted.
+- Follow the team's current delivery flow: this hackathon currently authorizes small direct pushes to `main`. Do not invent an approval gate, open a PR, or merge someone else's work merely because a template exists.
+
 ## Maintaining these instructions
 
 - Edit `AGENTS.md` directly. `CLAUDE.md` is a relative symlink to this file.

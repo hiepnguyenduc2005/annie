@@ -68,6 +68,61 @@ def test_last_seen_reports_latest_match_with_time():
     assert '2023-11-14' in result['answer']
 
 
+def test_person_last_seen_ignores_newer_negative_capture():
+    positive = frame('positive', BASE, 'A person stands in the hallway', x=2, y=2)
+    negative = {**frame('negative', BASE + 1000, 'No person visible', x=6, y=2),
+                'person': False}
+    result = memory([positive, negative]).ask('where was the person last seen')
+    assert result['answerable'] and result['kind'] == 'last_seen'
+    assert [c['frame_id'] for c in result['citations']] == ['positive']
+    assert result['citations'][0]['ts'] == positive['ts']
+    assert result['citations'][0]['pose'] == positive['pose']
+    assert 'No person visible' not in result['answer']
+
+
+def test_person_last_seen_refuses_when_only_negative_captures_exist():
+    negative = {**frame('negative', BASE, 'No person visible'), 'person': False}
+    result = memory([negative]).ask('where was the person last seen')
+    assert not result['answerable']
+    assert result['kind'] == 'no_evidence'
+    assert result['citations'] == []
+
+
+def test_person_last_seen_uses_positive_flag_without_literal_person_caption():
+    positive = frame('human', BASE, 'A human stands nearby')
+    result = memory([positive]).ask('where was the person last seen')
+    assert result['answerable']
+    assert [c['frame_id'] for c in result['citations']] == ['human']
+
+
+def test_person_query_retains_waypoint_and_caption_constraints():
+    frames = [
+        frame('bedroom-standing', BASE, 'A human standing beside the bed', x=6, y=2),
+        frame('bedroom-sitting', BASE + 1000, 'A human sitting on the bed', x=6, y=2),
+        frame('living-standing', BASE + 2000, 'A human standing nearby', x=2, y=2),
+        frame('old-map-standing', BASE + 3000, 'A human standing nearby',
+              x=6, y=2, map_id='demo-home-old'),
+    ]
+    result = memory(frames).ask('where was the standing person last seen near the bedroom')
+    assert result['answerable']
+    assert [c['frame_id'] for c in result['citations']] == ['bedroom-standing']
+
+
+def test_person_query_retains_time_window():
+    result = memory([frame('old-human', BASE, 'A human stands nearby')]).ask(
+        'person in the last 30 minutes')
+    assert not result['answerable']
+    assert result['citations'] == []
+
+
+def test_object_query_still_retrieves_frames_without_people():
+    negative = {**frame('mug', BASE, 'A blue mug on the table; no person visible'),
+                'person': False}
+    result = memory([negative]).ask('where was the blue mug')
+    assert result['answerable']
+    assert [c['frame_id'] for c in result['citations']] == ['mug']
+
+
 def test_duration_spans_first_to_last_observation():
     frames = [frame(uuid4(), BASE, 'glasses on the bedside table'),
               frame(uuid4(), BASE + 600_000, 'glasses on the bedside table')]

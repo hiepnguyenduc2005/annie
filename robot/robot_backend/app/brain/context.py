@@ -13,11 +13,16 @@ CONTEXT_BYTES=12000
 def pack_context(request, *, max_bytes=CONTEXT_BYTES):
     data=request.model_dump(mode='json') if hasattr(request,'model_dump') else request
     frame=data['observation']
+    progress=dict(data.get('progress',{}))
+    sighting=progress.get('last_person_sighting')
+    if sighting and (sighting['pose']['map_id'] != frame['pose']['map_id']
+                     or sighting['ts'] > frame['ts']):
+        progress['last_person_sighting']=None
     context={'goal':data['goal'],
              'current_observation':{k:frame[k] for k in ('frame_id','ts','pose')},
              'admissible_waypoints':data.get('waypoints',[]),
              'execution_feedback':data.get('recent_outcomes',[]),
-             'progress':data.get('progress',{}),
+             'progress':progress,
              'memories':[]}
     waypoints=data.get('waypoints',[])
     if waypoints:

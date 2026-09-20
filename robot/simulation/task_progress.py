@@ -19,7 +19,7 @@ def execution_outcomes(state):
     return outcomes
 
 
-def task_progress(state, *, episode_active=False, events=(), now_ms):
+def task_progress(state, *, episode_active=False, events=(), last_person_sighting=None, now_ms):
     nav = state.get('navigation') or {}
     known = {w['id'] for w in nav.get('waypoints', [])}
     visits = {}
@@ -34,9 +34,14 @@ def task_progress(state, *, episode_active=False, events=(), now_ms):
         pose = (event.get('evidence') or {}).get('pose') or {}
         if pose.get('map_id') == state.get('map_id') and 0 <= event.get('ts', -1) <= now_ms:
             incident_events.append({k: event[k] for k in ('event_id', 'kind', 'ts')})
+    sighting = last_person_sighting
+    if sighting and (sighting.get('pose', {}).get('map_id') != state.get('map_id')
+                     or not 0 <= sighting.get('ts', -1) <= now_ms):
+        sighting = None
     return {'navigation_state': nav.get('state', 'unknown'),
             'active_waypoint': nav.get('waypoint'),
             'completed_visits': list(visits.values())[-30:],
             'unvisited_waypoints': sorted(known - visits.keys()),
             'incident_episode_active': bool(episode_active),
-            'recent_events': incident_events[-6:]}
+            'recent_events': incident_events[-6:],
+            'last_person_sighting': sighting}

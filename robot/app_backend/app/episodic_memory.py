@@ -85,10 +85,16 @@ class EpisodicMemory:
         content = (tokens - STOP - waypoint_tokens - TIME_TOKENS - QUESTION_WORDS
                    - {t for t in tokens if t.isdigit()} - duration_words)
         required = {_single(token) for token in content}
+        positive_person = 'person' in required and not {'no', 'not', 'without'} & tokens
+        caption_required = required - {'person'} if positive_person else required
         scored = []
         for item in frames:
+            # Negated captions contain the word "person" too. Presence queries
+            # must agree with the stored perception, not a lexical overlap.
+            if positive_person and item.get('person') is not True:
+                continue
             caption_tokens = {_single(token) for token in re.findall(r'\w+', item['caption'].lower())}
-            if required and required - caption_tokens:
+            if caption_required and caption_required - caption_tokens:
                 # Every meaningful content token must match. Partial overlaps
                 # ("blue umbrella" vs "blue cup") are false hits, not answers.
                 continue

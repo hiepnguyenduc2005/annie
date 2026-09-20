@@ -25,8 +25,15 @@ Stair traversal is unsupported by the current walking controller.
 
 ## Memory and cost bounds
 
-The default retrieval uses SQLite observations. It retrieves recent person
-sightings and spatially diverse views before acquiring the current image.
+The default retrieval uses SQLite observations. Goal-conditioned `/recall`
+retrieves relevant captions (embeddings when configured, lexical fallback
+otherwise), alongside recent person sightings and spatially diverse views,
+before acquiring the current image. A separate typed `last_person_sighting`
+preserves the newest accepted positive observation beyond the six-frame working
+window. It can be recovered from SQLite after a bridge restart. Person queries
+require stored `person=true`; the phrase “No person visible” is not a sighting.
+Later empty views cannot erase positive historical evidence. This preserves
+evidence in context; model statements still require live verification.
 The optional Elastic adapter remains separately configured. Captions keep
 their capture ID, timestamp, and pose; cross-map and future captures are
 excluded. Completed destinations are recovered from the viewer's retained

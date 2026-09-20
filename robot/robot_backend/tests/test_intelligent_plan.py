@@ -20,7 +20,7 @@ def test_progress_is_model_context_and_cost_settles_once(tmp_path):
     with client(handle, config(usage_path=str(ledger))) as api:
         assert api.post('/plan', json=payload).status_code == 200
     text = seen[0]['messages'][1]['content'][0]['text']
-    assert json.loads(text)['progress'] == payload['progress']
+    assert json.loads(text)['progress'] == {**payload['progress'], 'last_person_sighting': None}
     state = json.loads(ledger.read_text())
     assert state['total_reserved_usd'] == .001  # Exact successful wire-reported cost.
     assert state['pending_reservations'] == {}

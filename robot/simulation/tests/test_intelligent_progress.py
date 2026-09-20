@@ -1,10 +1,70 @@
 """Progress comes from receipts; incident completion restores model decisions."""
 import asyncio
+import json
+import httpx
 from types import SimpleNamespace
 
 from robot.simulation.bridge import Bridge
 from robot.simulation.navigation import Navigator
 from robot.simulation.task_progress import task_progress, execution_outcomes
+
+
+def test_memory_retrieval_uses_operator_goal_and_preserves_relevant_citation():
+    async def check():
+        requests = []
+        cited = {'frame_id': 'glasses', 'ts': 900, 'caption': 'Glasses on a table',
+                 'pose': {'x': 0., 'y': 0., 'yaw': 0., 'map_id': 'home'}}
+        def handler(request):
+            requests.append((request.url.path, json.loads(request.content)))
+            return httpx.Response(200, json={'citations': [cited] if request.url.path == '/recall' else [],
+                                            'provider': 'lexical_fallback'})
+        async with httpx.AsyncClient(base_url='http://app', transport=httpx.MockTransport(handler)) as app:
+            bridge = Bridge(None, app, None, clock=lambda: 1.)
+            assert await bridge.retrieve_memories('Find the glasses', 'home') == [cited]
+            assert next(body for path, body in requests if path == '/recall')['goal'] == 'Find the glasses'
+            assert bridge.memory_state['retrieval'] == 'lexical_fallback'
+    asyncio.run(check())
+
+
+def test_positive_sighting_survives_empty_retrieval_and_preserves_capture_identity():
+    async def check():
+        positive = {'frame_id': 'seen', 'ts': 500, 'caption': 'A human stands nearby',
+                    'pose': {'x': 2., 'y': 4., 'yaw': 1., 'map_id': 'home'}}
+        empty = {**positive, 'frame_id': 'empty', 'ts': 900, 'caption': 'Empty room'}
+        replies = [[positive], []]
+        def handler(request):
+            is_person = json.loads(request.content).get('text') == 'where was the person last seen'
+            return httpx.Response(200, json={'citations': replies.pop(0) if is_person else [empty]})
+        async with httpx.AsyncClient(base_url='http://app', transport=httpx.MockTransport(handler)) as app:
+            bridge = Bridge(None, app, None, clock=lambda: 1.)
+            await bridge.retrieve_memories('Find resident', 'home')
+            await bridge.retrieve_memories('Find resident', 'home')
+            assert bridge.last_person_sighting == positive
+            # The small rolling observation window can be full of empty views.
+            bridge.agent_memory = [empty] * 6
+            for bad in ({**positive, 'ts': 499}, {**positive, 'ts': 1001},
+                        {**positive, 'pose': {**positive['pose'], 'map_id': 'old'}}):
+                bridge.remember_person(bad, 'home')
+            assert bridge.last_person_sighting == positive
+            progress = task_progress({'map_id': 'home'}, last_person_sighting=bridge.last_person_sighting, now_ms=1000)
+            from robot.robot_backend.app.brain.planner import TaskProgress
+            assert TaskProgress.model_validate(progress).last_person_sighting.model_dump() == positive
+            assert task_progress({'map_id': 'new'}, last_person_sighting=positive, now_ms=1000)['last_person_sighting'] is None
+            assert task_progress({'map_id': 'home'}, last_person_sighting=positive, now_ms=400)['last_person_sighting'] is None
+    asyncio.run(check())
+
+
+def test_packed_context_excludes_cross_map_and_future_sighting_without_mutating_source():
+    from robot.robot_backend.app.brain.context import pack_context
+    pose = {'x': 0., 'y': 0., 'yaw': 0., 'map_id': 'home'}
+    citation = {'frame_id': 'seen', 'ts': 500, 'caption': 'Person visible', 'pose': pose}
+    request = {'goal': 'Find resident', 'observation': {'frame_id': 'now', 'ts': 1000, 'pose': pose},
+               'progress': {'last_person_sighting': citation}}
+    assert json.loads(pack_context(request)[0])['progress']['last_person_sighting'] == citation
+    for invalid in ({**citation, 'ts': 1001}, {**citation, 'pose': {**pose, 'map_id': 'old'}}):
+        request['progress']['last_person_sighting'] = invalid
+        assert json.loads(pack_context(request)[0])['progress']['last_person_sighting'] is None
+        assert request['progress']['last_person_sighting'] == invalid
 
 
 def test_completed_speech_without_cmd_still_produces_valid_planner_feedback():

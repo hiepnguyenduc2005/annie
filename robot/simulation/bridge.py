@@ -66,6 +66,19 @@ class Bridge:
         self.incident_episode_active = False
         self.recent_events = []
         self.progress = {}
+        self.last_person_sighting = None
+
+    def remember_person(self, citation, map_id):
+        """Retain accepted positive evidence; an empty view cannot erase it."""
+        from robot.robot_backend.app.brain.planner import Memory
+        if (citation.get('pose', {}).get('map_id') != map_id
+                or not 0 <= citation.get('ts', -1) <= self.clock() * 1000):
+            return
+        sighting = Memory.model_validate({k: citation[k] for k in ('caption', 'frame_id', 'ts', 'pose')}).model_dump()
+        previous = self.last_person_sighting
+        if (not previous or previous['pose']['map_id'] != map_id
+                or sighting['ts'] > previous['ts']):
+            self.last_person_sighting = sighting
 
     @property
     def limit_reached(self):
@@ -75,11 +88,25 @@ class Bridge:
         """Retrieve durable evidence before capturing the current image."""
         from robot.robot_backend.app.brain.planner import Memory
         try:
+            retrieval = 'elastic' if self.memory else 'lexical'
+            try:
+                result = await self.request(self.app, 'POST', '/query', json={'text':'where was the person last seen'})
+                person_items = result.get('citations', [])
+            except httpx.HTTPError:
+                person_items = []
+            for item in person_items:
+                self.remember_person(item, map_id)
             if self.memory:
                 items = await self.memory.search(goal, map_id, ts_to=int(self.clock()*1000))
             else:
-                result = await self.request(self.app, 'POST', '/query', json={'text':'where was the person last seen'})
-                items = result.get('citations', [])
+                try:
+                    recalled = await self.request(self.app, 'POST', '/recall', json={
+                        'goal': goal, 'map_id': map_id, 'ts_to': int(self.clock()*1000), 'limit': 6})
+                    goal_items = recalled.get('citations', [])
+                    retrieval = recalled.get('provider', 'goal_recall')
+                except httpx.HTTPError:
+                    goal_items = []
+                items = person_items
                 # Retrieve one recent view per known waypoint, so the last
                 # room does not crowd all earlier exploration out of context.
                 responses = await asyncio.gather(*(self.request(self.app, 'POST', '/query',
@@ -87,7 +114,7 @@ class Bridge:
                     for w in list(waypoints)[:8]), return_exceptions=True)
                 diverse = [r['citations'][0] for r in responses
                            if isinstance(r, dict) and r.get('citations')]
-                items = items[:2] + diverse + items[2:]
+                items = goal_items[:2] + items[:2] + diverse + goal_items[2:] + items[2:]
             cited = []
             seen = set()
             for item in items:
@@ -99,6 +126,7 @@ class Bridge:
                 if len(cited) >= 6: break
             self.memory_state = {'provider':'elastic' if self.memory else 'local_sqlite',
                                  'retrieved':len(cited), 'status':'connected',
+                                 'retrieval':retrieval,
                                  'citations':cited[:3]}
             return cited
         except Exception as exc:
@@ -217,6 +245,7 @@ class Bridge:
             self.auto_commands.clear()
             self.agent_memory.clear()
             self.agent_feedback.clear()
+            self.last_person_sighting = None
             self.pending_agent_command = None
             self.recent_events = []
             self.incident_episode_active = False
@@ -245,7 +274,7 @@ class Bridge:
             self.incident_episode_active = status.get('incident_episode_active', False)
         from robot.simulation.task_progress import task_progress
         self.progress = task_progress(state, episode_active=self.incident_episode_active,
-                                      events=self.recent_events, now_ms=ts)
+                                      events=self.recent_events, last_person_sighting=self.last_person_sighting, now_ms=ts)
         if state.get('autonomy_mode') not in (None,'paused') and self.perception != 'agent':
             await self.coordinate(state)
         if self.perception == "ground-truth":
@@ -404,7 +433,8 @@ class Bridge:
             self.recent_events = await self.request(self.app, 'GET', '/events')
             from robot.simulation.task_progress import task_progress
             self.progress = task_progress(initial_state, episode_active=self.incident_episode_active,
-                events=self.recent_events, now_ms=int(self.clock()*1000))
+                events=self.recent_events, last_person_sighting=self.last_person_sighting,
+                now_ms=int(self.clock()*1000))
             observation = await self.request(self.viewer,'GET','/observation')
             if not 0 <= self.clock()*1000-observation['ts'] <= 5000:
                 raise ValueError('Camera is not fresh')
@@ -438,6 +468,8 @@ class Bridge:
             response=await self.ingest('brain.perception',perception)
             self.ingest_accepted=response.get('accepted')
             if self.ingest_accepted:
+                if perception['person']:
+                    self.remember_person(perception, frame['pose']['map_id'])
                 self.agent_memory=(self.agent_memory+[{'caption':perception['caption'],'frame_id':frame['frame_id'],
                     'ts':frame['ts'],'pose':frame['pose']}])[-6:]
                 if self.memory and (self.memory_task is None or self.memory_task.done()):

@@ -228,12 +228,17 @@ def listen_blocking(max_s: float) -> dict:
     """Host microphone -> utterance (Silero VAD) -> transcript (Deepgram when configured, else local Whisper)."""
     from robot.dog.voice import devices as devices_mod
     from robot.simulation.live_listener import capture_utterance, pcm16_to_wav, silero_vad
+    lis = LISTENER
+    if lis is not None:
+        lis.mute(max_s + 1.5)  # this call owns the reply; the always-on listener must not answer it too
     recorder = devices_mod.shared().recorder()  # the selected microphone (AirPods, Mac, phone app...)
     try:
         utterance = capture_utterance(recorder, silero_vad(), max_ms=int(max_s * 1000))
     finally:
         with contextlib.suppress(Exception):
             recorder.close()
+        if lis is not None:
+            lis.muted_until = 0.0
     if utterance["outcome"] != "speech":
         return {"transcript": None, "heard": False, "speech_ms": 0}
     text = voice().transcribe(pcm16_to_wav(utterance["pcm"]))
@@ -305,6 +310,7 @@ def telemetry_snapshot(view) -> dict:
         state = json.loads(json.dumps(view.state))
     report = getattr(view, "report", None) or {}
     out = {"state": state, "connected": (report.get("connection") or {}).get("status") == "connected",
+           "source": report.get("source") or "hardware",
            "reason": report.get("reason"), "elapsed_s": report.get("elapsed_s"),
            "brain": {"enabled": bool((report.get("brain") or {}).get("enabled")), "period_s": getattr(view, "brain_period_s", None),
                      "decisions": list((report.get("brain") or {}).get("decisions") or [])[-8:]},
@@ -629,7 +635,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                            planner=None, stall=None, lidar=True, firmware_avoid=False, lidar_stale_s=2.0,
                            stop_on_checkin=False, idle_trick_s=45.0, view=None, no_motion=False, diag_every_s=5.0,
                            imgsz=352, voxel_min_interval_s=0.25, brain=None, brain_period_s=4.0, memory=None,
-                           voice=None, bandit=None, identifier=None, recorder=None, frontier_planner="auto"):
+                           voice=None, bandit=None, identifier=None, recorder=None, frontier_planner="auto",
+                           source="hardware"):
     loop = asyncio.get_running_loop()
     view = view or LiveView(port=0)
     view_url = view.start()
@@ -641,7 +648,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         view.log(text)
         _status(text)
 
-    report = {"script": SCRIPT_VERSION, "source": "hardware", "target_ip": ip, "connection": {"status": "not_started"},
+    report = {"script": SCRIPT_VERSION, "source": source, "target_ip": ip, "connection": {"status": "not_started"},
               "battery_soc_start": None, "frames": 0, "moves_sent": 0, "greetings": [], "checkins": [],
               "collisions": [], "modes": {}, "lidar": {"maps": 0, "first_ranges": None, "stale_ticks": 0},
               "firmware_avoid": None, "elapsed_s": 0.0, "max_distance_from_origin_m": 0.0, "reason": None,
@@ -871,7 +878,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
     view.situation = build_situation
 
     def line_inference():
-        """A short-timeout client for spoken lines (greetings, remarks); None when the provider is not configured."""
+        """A short-timeout client for spoken lines (greetings, remarks); None when the provider is not configured,
+        and None under the fake dog (tests never call a model)."""
+        if conn_factory is not None or os.environ.get("ANNIE_LLM_PROVIDER", "").lower() in ("off", "none"):
+            return None
         try:
             from robot.dog.inference import Inference
             return Inference(timeout_s=4.0)
@@ -1740,10 +1750,19 @@ def main(argv=None):
     parser.add_argument("--target", default=os.environ.get("ANNIE_TARGET", "Jeanine:red"),
                         help="NAME:COLOUR of the person to recognise by shirt colour; empty disables")
     parser.add_argument("--output")
+    parser.add_argument("--sim", nargs="?", const="seated", choices=("seated", "floor", "empty"), default=None,
+                        help="no robot: drive the simulated dog in the MuJoCo apartment (docs/SIM_DOG.md); report source = simulation")
     args = parser.parse_args(argv)
     if not 0.05 <= args.speed <= 0.45:
         parser.error("--speed must be 0.05-0.45")
-    if MOTION_INHIBIT_PATH.exists():
+    sim_conn_factory = None
+    if args.sim:
+        from robot.dog.sim import SimDog
+        sim_conn_factory = SimDog.from_cli(args.sim).connect_factory()
+        for name in ("memory_file", "spacetime_file"):  # simulated sightings never land in the hardware recordings
+            if getattr(args, name) == parser.get_default(name):
+                setattr(args, name, getattr(args, name).replace(".data/hardware/", ".data/sim/"))
+    if MOTION_INHIBIT_PATH.exists() and not args.sim:
         _say("physical motion inhibited by the active hardware task")
         return 2
     for key in [k for k in os.environ if k.lower() in ("http_proxy", "https_proxy", "all_proxy")]:
@@ -1759,6 +1778,7 @@ def main(argv=None):
     logging.disable(logging.CRITICAL)
     try:
         report = asyncio.run(run_patrol_greet(ip=args.ip, aes_key=os.environ.get("UNITREE_AES_128_KEY"),
+                                              conn_factory=sim_conn_factory, source="simulation" if args.sim else "hardware",
                                               duration_s=args.duration, speed_mps=args.speed, boundary_m=args.boundary,
                                               lidar=not args.no_lidar, firmware_avoid=args.firmware_avoid,
                                               stop_on_checkin=args.stop_on_checkin, idle_trick_s=args.idle_trick,

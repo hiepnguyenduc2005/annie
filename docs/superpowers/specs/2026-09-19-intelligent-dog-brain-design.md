@@ -143,3 +143,50 @@ window every time.
 Each step ships with pure tests, mocked-HTTP bridge tests, and the documented
 checks (`docs/ACCEPTANCE.md` §14). The teammate's uncommitted planner/bridge work
 is built on, not replaced, and is committed only with their agreement.
+
+## Survey results (2026-09-19, seven specialist searches, verified live)
+
+These change the plan in four places. Full per-source notes are in the
+session transcript; the decisive items are listed here with links.
+
+1. **Vision latency is the runtime, not the model.** The recorded Qwen3-VL 2B
+   best case is 0.62 s on this M1 Max, so the 3.8 s mean is Ollama overhead
+   (open Qwen3-VL slowness issues: ollama/ollama#12854, #12882, #14548). Path to
+   sub-second: `mlx-vlm` server with capped image tokens and a ~10-token JSON
+   answer. Candidates to benchmark in order: LFM2.5-VL-450M (LFM Open License,
+   242 ms at 512² on Jetson Orin), Qwen3.5-2B (Apache-2.0, thinking off),
+   Gemma 4 E2B (Apache-2.0, 70-140 image tokens), Moondream 2. FastVLM has the
+   best published TTFT (166 ms on an M1) but its weights are research-only, so
+   it is demo-only and must be recorded for compliance.
+2. **Fall decision.** No published Go2 fall-response work exists. Zero-shot
+   8B VLMs score F1 ≈ 0.3 on the *fallen state* (OmniFall, arXiv 2505.19889),
+   so the VLM cannot tell "fell" from "lying down"; the signals that can are
+   location (floor vs bed/sofa from the map) and a verbal check-in. Omobot
+   (arXiv 2408.05315) measured that COCO-pose accuracy drops at a 0.15 m camera
+   and hand-written rules beat an MLP: our posture rule is the right shape, and
+   the Go2's ~0.4 m camera needs testing on its own footage. E-FPDS
+   (gram.web.uah.es/data/datasets/fpds) is the only robot-viewpoint fallen-person
+   dataset; use it for evaluation and, later, fine-tuning. Responsiveness is
+   reported on the ACVPU scale as answered / unclear / no response after N
+   prompts, never "unconscious".
+3. **Speech stack.** silero-vad → Moonshine v2 Small (MIT, 148 ms on an M3)
+   A/B parakeet-mlx → rule-based intent → Kokoro-82M (Apache-2.0) with fixed
+   lines pre-rendered, macOS `say` as fallback; ~0.75-0.95 s end-of-speech to
+   reply. Whisper hallucinates on silence (arXiv 2505.12969), so STT is gated
+   by VAD with a minimum speech duration and an empty reply escalates.
+   faster-whisper is CPU-only on a Mac; fine on the GX10.
+4. **Memory.** Keep the sqlite caption/pose/time table (it is ReMEmbR's schema
+   minus embeddings); add a text embedding and, later, a MobileCLIP image
+   embedding per keyframe via sqlite-vec. All open-vocabulary 3D mappers need
+   posed RGB-D and CUDA; skip for the hackathon, evaluate DualMap on the GX10.
+   ReMEmbR's code is NVIDIA non-commercial: copy the design only.
+
+Confirmed choices: DimOS + `unitree_webrtc_connect` over WebRTC is the only
+Go2 path without ROS 2, Ubuntu or an EDU unit; only one WebRTC client can be
+connected at a time (an open phone app yields `RobotBusyError`); general VLAs
+(OpenVLA, GR00T, π0) emit arm actions and do not apply; navigation VLAs
+(NaVILA, InternVLA-N1, OmniVLA) are GX10-later work. The planner loop stays a
+ReAct-style tool loop with typed actions and Inner-Monologue feedback; KnowNo's
+multiple-choice shape ({fallen, resting, sitting, no person, unsure}) with
+escalation on anything but a confident single answer is adopted for the
+incident question.

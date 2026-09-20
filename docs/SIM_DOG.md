@@ -76,6 +76,15 @@ family reminder from the Reminders screen: find Jeanine, deliver “charge your
 phone,” listen, and display “okay thank you.” The real HTTP run took 29.8 seconds;
 camera perception was rendered, while speech and the resident reply were mocked.
 
+After the final reminder/Pause backend and paused-telemetry changes, a fresh
+stack passed all 19 live HTTP checks in `robot/verify_sim.py`. Its family run
+`29db0ae9-25b3-483b-adfe-b0a18c7f7018` recorded navigation, arrival, speaking,
+listening, the mocked reply, and completion. The full robot suites passed
+545 tests (5 skipped) in `.venv` and 550 tests (1 skipped) in the dimOS
+environment before the final small telemetry/probe fixes; those fixes then
+passed 7 focused runtime tests and 28 launcher/probe tests in each environment
+for the latter suite. Contract exports and JavaScript syntax checks passed.
+
 The repeatable virtual sweep is:
 
 ```bash

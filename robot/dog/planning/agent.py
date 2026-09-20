@@ -16,6 +16,9 @@ import math
 import re
 import time
 
+from robot.dog.planning import care_skills
+from robot.dog.perception.reid import spoken_name
+
 # Steps the agent may plan. Every name/arg is re-validated by `robot.dog.runtime.body.validate_command`.
 SKILLS = {
     "find_person": "find_person(name?: string, approach?: bool, timeout_s?: number) - search for and walk up to a person; "
@@ -123,6 +126,8 @@ SYSTEM_PROMPT = (
     "situation and one instruction from a family member or operator. Reply with JSON only: "
     '{"reply": "<one short sentence Annie says or reports>", "steps": [{"name": "...", "args": {...}}, ...]}. '
     "Available steps:\n" + "\n".join(f"- {v}" for v in SKILLS.values()) +
+    "\nCare skills (each one is a ready-made sequence of the steps above; prefer one when it fits the instruction):\n"
+    + care_skills.skills_prompt() +
     "\nRules: at most 8 steps; use the situation (bearings, who was seen where and when) instead of guessing; "
     "'behind you' means turn about 180 degrees first; greet = find_person then hello then say; never invent people; "
     "for a place or thing that is not listed in the situation (door, window, kitchen, table) use look_for, not guessed turns; "
@@ -130,6 +135,23 @@ SYSTEM_PROMPT = (
 )
 
 _NAMES = {"jeanine": "Jeanine", "grandma": "Jeanine", "granny": "Jeanine", "nana": "Jeanine", "gran": "Jeanine"}
+
+
+_IS_OK = re.compile(r"\bis ([A-Za-z]+) (?:ok|okay|alright|all right|doing (?:ok|okay|alright|well))\b", re.I)
+_NOT_A_PERSON = {"not", "it", "that", "this", "everything", "all", "there", "what", "which", "nothing", "something"}
+
+
+def _person(word: str):
+    """A spoken word as the name the dog knows someone by: an alias, a capitalised name, else None (= nearest person)."""
+    return _NAMES.get(word.lower(), word if word[:1].isupper() else None)
+
+
+def _care(skill: str, args: dict, sit) -> list:
+    """A care skill as primitive steps for the keyword rules; bad args give no steps (the rules never raise)."""
+    try:
+        return care_skills.expand(skill, args, sit, _NAMES)
+    except ValueError:
+        return []
 
 
 def _first_name(text: str):
@@ -169,11 +191,19 @@ def rule_plan(text: str, sit: dict | None = None) -> dict:
         steps.append({"name": "sit", "args": {}})
     elif re.search(r"\b(stand|stand up|get up)\b", low):
         steps.append({"name": "stand", "args": {}})
-    if re.search(r"\b(check|are you (ok|okay|alright)|how (is|are))\b", low):
-        who = name or "there"
-        steps += [{"name": "find_person", "args": {"name": name}}, {"name": "say", "args": {"text": f"Hi {who}, are you alright?"}},
-                  {"name": "listen", "args": {"max_s": 8}}]
-        reply = f"Checking on {who}."
+    ok_m = _IS_OK.search(t)  # "is Grandma ok?"; not "my hip is not ok" said inside a conversation
+    ok_who = ok_m.group(1) if ok_m and ok_m.group(1).lower() not in _NOT_A_PERSON else None
+    if re.search(r"\bwave (?:at|to) (?:everyone|everybody|all of (?:them|us|you))\b|\b(?:greet|say (?:hi|hello) to) (?:everyone|everybody)\b", low):
+        steps += _care("wave_at_everyone", {}, sit)
+        reply = "Going to wave at everyone."
+    elif re.search(r"\b(check|are you (ok|okay|alright)|how (is|are))\b", low) or ok_who:
+        name = name or (_person(ok_who) if ok_who else None)
+        steps += _care("check_on", {"person": name}, sit)
+        reply = f"Checking on {name or 'there'}."
+    elif (m := re.search(r"\bremind\s+(\w+)\s+(?:to\s+|that\s+|about\s+)?(.+)", t, re.I)) and _person(m.group(1)):
+        target, msg = _person(m.group(1)), m.group(2).strip().rstrip(".")
+        steps += _care("remind", {"person": target, "text": msg[:240]}, sit)
+        reply = f"Reminding {target}: {msg}."
     elif m := re.search(r"\b(?:tell|say to|remind)\s+(\w+)\s+(?:to\s+|that\s+)?(.+)", t, re.I):
         target = _NAMES.get(m.group(1).lower(), m.group(1) if m.group(1)[0].isupper() else None)
         msg = m.group(2).strip().rstrip(".")
@@ -223,7 +253,12 @@ def validate_steps(steps, validate_command) -> tuple[list, list]:
         if not isinstance(step, dict) or not isinstance(step.get("name"), str):
             rejected.append("step is not an object with a name")
             continue
-        name, args = step["name"], step.get("args") or {}
+        name, args = step["name"], step.get("args", {})
+        if args is None:
+            args = {}
+        if not isinstance(args, dict):
+            rejected.append(f"{name}: args must be an object")
+            continue
         if name == "turn":
             deg = args.get("degrees")
             if not isinstance(deg, (int, float)) or isinstance(deg, bool) or not math.isfinite(deg) or not 0 < abs(deg) <= 360:
@@ -244,6 +279,12 @@ def validate_steps(steps, validate_command) -> tuple[list, list]:
                 rejected.append("walk: metres must be a non-zero number in [-1, 3]")
                 continue
             kept.append({"name": "walk", "args": {"metres": float(m)}})
+            continue
+        if name in care_skills.CARE_SKILLS:  # a composition: `care_skills.expand_steps` turns it into the steps above
+            try:
+                kept.append({"name": name, "args": care_skills.clean_args(name, args, _NAMES)})
+            except ValueError as exc:
+                rejected.append(f"{name}: {exc}")
             continue
         try:
             _, vname, vargs = validate_command({"name": name, "args": args})
@@ -274,6 +315,7 @@ def plan_instruction(text: str, sit: dict, *, inference=None, validate_command=N
             out = None
     if out is None:
         out = rule_plan(text, sit)
+    out["steps"] = care_skills.expand_steps(out["steps"], sit, _NAMES)  # care skills -> primitives, before the body validator
     rejected = []
     if validate_command is not None:
         out["steps"], rejected = validate_steps(out["steps"], validate_command)
@@ -312,10 +354,13 @@ def parse_spot(text: str) -> dict:
         d = json.loads(m.group(0)) if m else {}
     except ValueError:
         d = {}
+    if not isinstance(d, dict):
+        return {"seen": False, "where": None}
     seen = d.get("seen") is True or (isinstance(d.get("seen"), str) and d["seen"].strip().lower() == "true")
     where = str(d.get("where") or "").strip().lower().replace("center", "centre").replace("middle", "centre")
     if where not in ("left", "centre", "right"):
-        where = "centre" if seen else None
+        # An unlocated detection cannot authorize walking straight ahead.
+        return {"seen": False, "where": None}
     return {"seen": bool(seen), "where": where, "note": str(d.get("note") or "")[:60]}
 
 
@@ -358,8 +403,9 @@ def greeting_decision(track, sit: dict, *, now, recent_s=300.0) -> dict:
             if math.hypot(o["x"] - track["world"][0], o["y"] - track["world"][1]) < 1.0:
                 near_obj = o["name"]
                 break
-    if ident:
-        text = f"Hi {ident}!" + (f" Sitting by the {near_obj}?" if near_obj else "")
+    name = spoken_name(track.get("identity"))
+    if name:
+        text = f"Hi {name}!" + (f" Sitting by the {near_obj}?" if near_obj else "")
     else:
         text = "Hello there, lovely to see you." + (f" I see you by the {near_obj}." if near_obj else "") + " How are you doing?"
     return {"greet": True, "text": text, "reason": "new to me here"}
@@ -374,7 +420,7 @@ LINE_PROMPT = (
 
 
 _BAD_LINE = re.compile(r"\b(about to|going to say|say hello|i see you\b|i can see you|detect|process|robot|camera|sensor|track|"
-                       r"as an ai|language model|hello there!?$|greet(ing)? you)\b", re.I)
+                       r"as an ai|language model|guest\s+\d+|hello there!?$|greet(ing)? you)\b", re.I)
 
 
 def line_ok(text: str, *, name: str | None = None) -> bool:
@@ -425,7 +471,7 @@ def classify_reply(heard: str | None) -> str:
 
 def reply_fallback(kind: str, who: str | None) -> str:
     name = who or "dear"
-    return {"concern": f"I'm right here with you, {name}. I'm letting the family know now.",
+    return {"concern": f"I'm right here with you, {name}. Please call for someone nearby to help.",
             "fine": f"That's lovely to hear, {name}. I'll be nearby if you need anything.",
             "other": f"Thank you for telling me, {name}. I'm listening.",
             "none": ""}[kind]

@@ -4,6 +4,11 @@ picks the updated face index up without a restart.
 Photos are used once for the embedding and never stored; only `.data/faces/index.json` (embeddings, 0600)
 persists. `PeopleDirectory.identify_shirt()` keeps the demo's shirt-colour identity next to the face index so
 "Jeanine = red shirt" and "Jeanine = this face" both greet by name.
+
+`reid()` is the per-frame identifier bound to this directory (`reid.PersonReid`): face first, a clothing
+signature as the bridge across tracker-id churn, the shirt-colour rule, and numbered guests for unknown
+regulars. Guests are clothing vectors only (`.data/faces/guests.json`, no images, no faces, expiring); they are
+listed with `"guest": True` and `forget` removes them like anyone else.
 """
 from __future__ import annotations
 
@@ -23,6 +28,8 @@ class PeopleDirectory:
         self.meta_path = self.faces_dir / "people.json"  # names, relation, notes (no images)
         self._index_factory = index_factory
         self._index = None
+        self._reid = None
+        self._reid_lock = threading.Lock()
         self.tracker = tracker
         self.lock = threading.Lock()
         self.meta = self._load_meta()
@@ -66,8 +73,27 @@ class PeopleDirectory:
             m = self.meta.get(name, {})
             out.append({"name": name, "relation": m.get("relation"), "shirt": m.get("shirt"), "notes": m.get("notes"),
                         "faces": len(getattr(idx, "_people", {}).get(name, [])) if idx is not None else 0,
-                        "added_at": m.get("added_at")})
+                        "added_at": m.get("added_at"), "guest": False})
+        for g in self.guests():
+            out.append({"name": g["name"], "relation": None, "shirt": None, "notes": None, "faces": 0,
+                        "added_at": g["added_at"], "guest": True, "sightings": g["sightings"], "last_seen": g["last_seen"]})
         return out
+
+    def reid(self, **options):
+        """The identifier for the perception pipeline, created once (options apply to that first call only)."""
+        if self._reid is None:
+            from robot.dog.perception.reid import PersonReid
+            with self._reid_lock:  # the tracker thread and an HTTP /people request can both get here first
+                if self._reid is None:
+                    self._reid = PersonReid(self, **options)
+        return self._reid
+
+    def guests(self) -> list[dict]:
+        """Unknown regulars the dog numbered from their clothing; never a face, never an image."""
+        try:
+            return self.reid().guests()
+        except Exception:
+            return []
 
     def enroll(self, name: str, images: list[bytes], *, relation=None, shirt=None, notes=None) -> dict:
         """Add a person: metadata always, face embeddings when the images show a usable face."""
@@ -111,7 +137,11 @@ class PeopleDirectory:
                 self._save_meta()
                 removed = True
             self._push_to_tracker()
-            return removed
+        try:
+            removed = self.reid().forget(name) or removed  # their clothing signature, or a whole guest
+        except Exception:
+            pass
+        return removed
 
     def _push_to_tracker(self):
         """The live tracker identifies with the same index object; a fresh index after a change is enough."""

@@ -24,6 +24,7 @@ import time
 from urllib.parse import urlsplit
 
 PROVIDERS = {
+    "off": {"base_url": "", "key_env": None, "model": "disabled"},
     "local": {"base_url": os.environ.get("ANNIE_LLM_BASE_URL", "http://127.0.0.1:11434/v1"), "key_env": None,
               "model": os.environ.get("ANNIE_LLM_MODEL", "qwen3-vl:2b-instruct")},
     "openrouter": {"base_url": "https://openrouter.ai/api/v1", "key_env": "OPENROUTER_API_KEY",
@@ -45,6 +46,8 @@ class Inference:
     def __init__(self, provider=None, *, model=None, base_url=None, api_key=None, timeout_s=12.0, allow_cloud_vision=None,
                  post=None):
         self.provider = (provider or os.environ.get("ANNIE_LLM_PROVIDER") or "local").lower()
+        if self.provider == "none":
+            self.provider = "off"
         if self.provider not in PROVIDERS:
             raise ValueError(f"unknown provider {self.provider!r}; choose from {sorted(PROVIDERS)}")
         cfg = PROVIDERS[self.provider]
@@ -67,6 +70,9 @@ class Inference:
 
     def chat(self, messages: list[dict], *, images: list[bytes] | None = None, max_tokens=120, temperature=0.2) -> dict:
         """Returns {"ok", "text", "latency_ms", "provider", "model"} and never raises."""
+        if self.provider == "off":
+            return {"ok": False, "text": "", "error": "inference disabled", "provider": "off",
+                    "model": self.model, "latency_ms": 0}
         images = images or []
         if images and not self.is_local and not self.allow_cloud_vision:
             self.stats["refused_vision"] += 1

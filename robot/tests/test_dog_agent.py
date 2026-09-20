@@ -83,6 +83,20 @@ def test_model_failure_falls_back_to_rules():
     assert plan["steps"][0]["name"] == "find_person" and plan["source"] == "rules"
 
 
+def test_malformed_model_arguments_are_rejected_without_crashing():
+    import json
+    for args in ([], [1], "forward", True, 5):
+        inf = FakeInference(json.dumps({"steps": [{"name": "walk", "args": args}]}))
+        plan = agent.plan_instruction("dance", {}, inference=inf, validate_command=validate_command)
+        assert plan["steps"] == [{"name": "dance", "args": {}}]
+        assert any("args must be an object" in reason for reason in plan["rejected"])
+
+
+def test_spot_requires_a_valid_direction_before_approaching():
+    for response in ('{"seen": true}', '{"seen": true, "where": "unknown"}', '{"seen": true, "where": 17}'):
+        assert agent.parse_spot(response) == {"seen": False, "where": None}
+
+
 def test_greeting_decision_remembers_people_and_places():
     sit = agent.situation(now=NOW, pose_xy=(0, 0), yaw=0, entities=_entities(),
                           greeted=[{"t": NOW - 60, "name": "Jeanine", "x": 2.0, "y": 0.0}, {"t": NOW - 30, "name": None, "x": -1.5, "y": 0.1}])
@@ -106,6 +120,17 @@ def test_compose_line_uses_model_or_fallback():
     assert out["text"] == "Hi Jeanine!" and out["source"] == "rules"
     out = agent.compose_line("greet", sit, inference=None, fallback="Hi!")
     assert out["text"] == "Hi!"
+
+
+def test_guest_identity_is_remembered_but_never_spoken_as_a_name():
+    guest = {"identity": {"name": "Guest 2", "method": "guest"}, "world": (2, 0)}
+    decision = agent.greeting_decision(guest, {}, now=NOW)
+    assert decision["greet"] and "Guest" not in decision["text"]
+    remembered = {"recent_greetings": [{"name": "Guest 2", "t": NOW - 10}]}
+    assert not agent.greeting_decision(guest, remembered, now=NOW)["greet"]
+    reply = agent.compose_line("greet", {}, inference=FakeInference("Hello Guest 2, how are you today?"),
+                               fallback="Hello, how are you today?")
+    assert reply["source"] == "rules" and "Guest" not in reply["text"]
 
 
 def test_narrator_rate_limits_and_never_repeats():
@@ -143,7 +168,8 @@ def test_conversation_replies_and_concern_is_never_softened():
         def chat(self, messages, **kw):
             return {"ok": True, "text": "No worries at all, everything is great!", "latency_ms": 5, "provider": "local", "model": "m"}
     r = converse_reply("help, I fell", {"people": [], "objects": [], "sentences": []}, who="Jeanine", inference=Flattering())
-    assert r["kind"] == "concern" and "letting the family know" in r["text"] and r["source"] == "rules"
+    assert r["kind"] == "concern" and "help" in r["text"] and r["source"] == "rules"
+    assert "letting the family know" not in r["text"]  # telemetry is not notification delivery
     r = converse_reply("I'm fine", {"people": [], "objects": [], "sentences": []}, who="Jeanine", inference=Flattering())
     assert r["kind"] == "fine" and r["text"].startswith("No worries")
     assert not line_ok("I see you, and I'm just about to say hello.") and not line_ok("Hello there!")

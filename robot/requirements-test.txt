@@ -1,0 +1,5 @@
+# Add to the repo backend .venv for the pixel re-identification and MCP suites.
+# Keep the separate dimOS environment's own OpenCV distribution unchanged.
+mcp==2.2.0
+numpy==2.5.3
+opencv-python-headless==5.0.0.93

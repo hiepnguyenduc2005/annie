@@ -130,7 +130,7 @@ class MissionBoard:
             if self.current is parent:
                 self.current = None
             if not steps:
-                self._finish_parent(result={"reply": reply, "steps": 0, "source": source})
+                self._finish_parent(error=reply or "No executable steps were found for this instruction.")
 
     def executing(self) -> dict | None:
         with self.lock:

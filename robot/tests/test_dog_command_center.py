@@ -10,6 +10,18 @@ from robot.dog.planning.missions import MissionBoard  # noqa: E402
 from robot.dog.runtime.patrol import COMMAND_CENTER_PATH, LiveView, telemetry_snapshot  # noqa: E402
 
 
+def test_unsupported_instruction_is_not_reported_as_completed():
+    board = MissionBoard()
+    code, receipt = board.submit({"name": "instruct", "args": {"text": "do a backflip"}})
+    assert code == 202
+    parent = board.take()
+    board.chain(parent, [], reply="That action is unavailable.", source="rules")
+    finished = board.get(receipt["command_id"])
+    assert finished["state"] == "failed"
+    assert finished["error"] == "That action is unavailable."
+    assert board.executing() is None
+
+
 def _get(url):
     with urllib.request.urlopen(url, timeout=5) as r:
         return r.status, r.headers.get("Content-Type", ""), r.read()

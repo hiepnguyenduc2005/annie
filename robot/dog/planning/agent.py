@@ -26,6 +26,8 @@ SKILLS = {
     "walk": "walk(metres: number) - walk straight, -1 to 3 m (negative = back up); stops early at obstacles",
     "hello": "hello() - wave a paw", "dance": "dance() - short dance", "stretch": "stretch()", "heart": "heart() - a heart gesture",
     "sit": "sit()", "stand": "stand()",
+    "look_for": "look_for(thing: string) - scan the room with the camera for something not in the situation (a door, "
+                "a window, the kitchen, a red cup) and walk toward it if seen; reports found/not found",
     "patrol": "patrol(duration_s: number) - explore on its own for a while",
     "go_home": "go_home() - walk back to where the patrol started (takes up to 90 s)",
     "stop": "stop() - stop moving",
@@ -109,13 +111,21 @@ def describe(sit: dict) -> str:
 # ---------------------------------------------------------------------------------------------------------------
 # instructions -> steps
 # ---------------------------------------------------------------------------------------------------------------
+PERSONA = (
+    "Annie is a small robot dog who lives with Jeanine, an older woman, and looks after her for the family. Annie is "
+    "caring, warm and unhurried: she notices how people seem (tired, cheerful, unsteady), asks gently, uses first names, "
+    "remembers what she saw earlier and mentions it naturally, keeps sentences short and kind, and never sounds like a "
+    "machine (no 'processing', 'detected', 'command', 'task'). She is honest when she cannot do or find something."
+)
+
 SYSTEM_PROMPT = (
-    "You control Annie, a small quadruped home-companion robot for an older resident (Jeanine). You get the current "
+    PERSONA + "\nYou control Annie. You get the current "
     "situation and one instruction from a family member or operator. Reply with JSON only: "
     '{"reply": "<one short sentence Annie says or reports>", "steps": [{"name": "...", "args": {...}}, ...]}. '
     "Available steps:\n" + "\n".join(f"- {v}" for v in SKILLS.values()) +
     "\nRules: at most 8 steps; use the situation (bearings, who was seen where and when) instead of guessing; "
     "'behind you' means turn about 180 degrees first; greet = find_person then hello then say; never invent people; "
+    "for a place or thing that is not listed in the situation (door, window, kitchen, table) use look_for, not guessed turns; "
     "if the instruction is unclear or unsafe, reply with an empty steps list and say why in reply."
 )
 
@@ -148,8 +158,13 @@ def rule_plan(text: str, sit: dict | None = None) -> dict:
         return {"reply": "Stopping.", "steps": [{"name": "stop", "args": {}}], "source": "rules"}
     if re.search(r"\b(go|come|walk|head) (back )?home\b|\bhome base\b", low):
         return {"reply": "Heading home.", "steps": steps + [{"name": "go_home", "args": {}}], "source": "rules"}
+    if m := re.search(r"\b(?:go|walk|head|move) (?:to|towards|toward|through|into|over to) (?:the |a |my )?([a-z][a-z ]{1,40}?)(?:[.!,]| and\b|$)", low):
+        thing = m.group(1).strip()
+        if thing not in ("me", "you", "us", "him", "her", "them") and not _NAMES.get(thing) and thing != "home":
+            steps.append({"name": "look_for", "args": {"thing": thing}})
+            reply = f"Looking for the {thing}."
     if re.search(r"\b(explore|patrol|look around|wander)\b", low):
-        return {"reply": "Exploring.", "steps": steps + [{"name": "patrol", "args": {"duration_s": 60}}], "source": "rules"}
+        return {"reply": reply or "Exploring.", "steps": steps + [{"name": "patrol", "args": {"duration_s": 60}}], "source": "rules"}
     if re.search(r"\b(sit|sit down)\b", low):
         steps.append({"name": "sit", "args": {}})
     elif re.search(r"\b(stand|stand up|get up)\b", low):
@@ -168,7 +183,7 @@ def rule_plan(text: str, sit: dict | None = None) -> dict:
     elif re.search(r"\b(greet|say hi|say hello|wave|hello)\b", low):
         who = name or "the person"
         steps += [{"name": "find_person", "args": {"name": name}}, {"name": "hello", "args": {}},
-                  {"name": "say", "args": {"text": f"Hi {name}!" if name else "Hello there!"}}]
+                  {"name": "say", "args": {"text": f"Hi {name}, lovely to see you. How are you feeling?" if name else "Hello there, lovely to see you. How are you doing?"}}]
         reply = f"Going to greet {who}."
     elif re.search(r"\bdance\b", low):
         steps.append({"name": "dance", "args": {}})
@@ -215,6 +230,13 @@ def validate_steps(steps, validate_command) -> tuple[list, list]:
                 rejected.append("turn: degrees must be a non-zero number up to 360")
                 continue
             kept.append({"name": "turn", "args": {"degrees": float(deg)}})
+            continue
+        if name == "look_for":
+            thing = args.get("thing")
+            if not isinstance(thing, str) or not 1 <= len(thing.strip()) <= 60:
+                rejected.append("look_for: thing must be 1-60 characters")
+                continue
+            kept.append({"name": "look_for", "args": {"thing": thing.strip()}})
             continue
         if name == "walk":
             m = args.get("metres")
@@ -274,6 +296,48 @@ def plan_instruction(text: str, sit: dict, *, inference=None, validate_command=N
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# look_for: ask the vision model about one picture
+# ---------------------------------------------------------------------------------------------------------------
+SPOT_PROMPT = ("You look through a small robot dog's camera, low to the floor. Answer in JSON only: "
+               '{"seen": true|false, "where": "left"|"centre"|"right", "note": "<5 words>"}. '
+               "seen is true only if the thing is clearly visible in this picture.")
+
+
+def parse_spot(text: str) -> dict:
+    """{"seen": bool, "where": left|centre|right|None} from the model's reply; anything odd = not seen."""
+    if not isinstance(text, str):
+        return {"seen": False, "where": None}
+    m = re.search(r"\{.*\}", text, re.S)
+    try:
+        d = json.loads(m.group(0)) if m else {}
+    except ValueError:
+        d = {}
+    seen = d.get("seen") is True or (isinstance(d.get("seen"), str) and d["seen"].strip().lower() == "true")
+    where = str(d.get("where") or "").strip().lower().replace("center", "centre").replace("middle", "centre")
+    if where not in ("left", "centre", "right"):
+        where = "centre" if seen else None
+    return {"seen": bool(seen), "where": where, "note": str(d.get("note") or "")[:60]}
+
+
+def spot(thing: str, jpeg: bytes | None, *, inference=None) -> dict:
+    """Is `thing` in this picture, and where? Uses the shared (local by default) vision client; never raises."""
+    if not jpeg:
+        return {"seen": False, "where": None, "error": "no frame"}
+    try:
+        if inference is None:
+            from robot.dog.inference import shared
+            inference = shared()
+        resp = inference.chat([{"role": "system", "content": SPOT_PROMPT},
+                               {"role": "user", "content": f"Is there a {thing} in this picture? JSON only."}],
+                              images=[jpeg], max_tokens=60, temperature=0.0)
+    except Exception as exc:
+        return {"seen": False, "where": None, "error": type(exc).__name__}
+    if not resp.get("ok"):
+        return {"seen": False, "where": None, "error": resp.get("error"), "latency_ms": resp.get("latency_ms")}
+    return {**parse_spot(resp.get("text", "")), "latency_ms": resp.get("latency_ms")}
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # greeting with memory, and remarks about the scene
 # ---------------------------------------------------------------------------------------------------------------
 def greeting_decision(track, sit: dict, *, now, recent_s=300.0) -> dict:
@@ -297,14 +361,14 @@ def greeting_decision(track, sit: dict, *, now, recent_s=300.0) -> dict:
     if ident:
         text = f"Hi {ident}!" + (f" Sitting by the {near_obj}?" if near_obj else "")
     else:
-        text = "Hello there!" + (f" I see you by the {near_obj}." if near_obj else "")
+        text = "Hello there, lovely to see you." + (f" I see you by the {near_obj}." if near_obj else "") + " How are you doing?"
     return {"greet": True, "text": text, "reason": "new to me here"}
 
 
 LINE_PROMPT = (
-    "You are Annie, a small home-companion robot dog. Write ONE short, warm, natural sentence (max 18 words) that Annie "
-    "says out loud right now. Use the situation: the person's name if known, where they are, an object next to them, "
-    "when you last saw them, what you have been doing. Never mention robots, sensors, tracks, ids or confidence. "
+    PERSONA + "\nWrite ONE short, natural sentence (max 18 words) that Annie says out loud right now, in her voice. "
+    "Use the situation: the person's name if known, where they are, an object next to them, when you last saw them, "
+    "how they seem, what you have been doing. Never mention robots, sensors, tracks, ids or confidence. "
     "Plain text only, no quotes, no emoji."
 )
 

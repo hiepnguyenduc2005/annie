@@ -49,11 +49,14 @@ def parse_command(transcript: str | None, *, require_wake=True) -> dict | None:
             break
     if require_wake and wake is None:
         return None
+    raw = text
     text = re.sub(r"^(please|can you|could you|now|go|just)\s+", "", text).strip()
     for intent, phrases in COMMANDS:
         for phrase in sorted(phrases, key=len, reverse=True):
             if text == phrase or text.startswith(phrase + " ") or text.endswith(" " + phrase) or f" {phrase} " in f" {text} ":
                 return {"intent": intent, "phrase": phrase, "wake": wake}
+    if wake is not None and len(raw.split()) >= 2:  # addressed to the dog but not a fixed phrase: a free instruction
+        return {"intent": "instruct", "phrase": raw[:300], "wake": wake}
     return None
 
 

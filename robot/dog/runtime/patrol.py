@@ -143,7 +143,7 @@ class GreetPolicy:
     def greeting_text(track) -> str:
         identity = track.get("identity") or {}
         name = identity.get("name")
-        return f"Hi {name}!" if name else "Hello there!"
+        return f"Hi {name}, lovely to see you. How are you feeling today?" if name else "Hello there, lovely to see you. How are you doing?"
 
 
 def _default_conn_factory(ip, aes_key):
@@ -965,10 +965,15 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 brain_state["busy"] = False
 
         def on_voice(cmd, text):
-            voice_state["intent"], voice_state["until"] = cmd["intent"], loop.time() + 12.0
             voice_state["count"] += 1
             report["voice"]["commands"].append({"t_s": round(loop.time() - start, 1), "intent": cmd["intent"],
                                                 "text": text[:80]})
+            if cmd["intent"] == "instruct":  # free speech after the wake word: the situated agent plans it
+                code, receipt = missions.submit({"name": "instruct", "args": {"text": cmd["phrase"]}})
+                status(f"voice instruction -> {code}: {cmd['phrase'][:80]!r}")
+                speak("On it." if code == 202 else "One moment, I'm still busy.")
+                return
+            voice_state["intent"], voice_state["until"] = cmd["intent"], loop.time() + 12.0
             speak(f"Okay, {cmd['intent'].replace('_', ' ')}.")
 
         if voice is not None:
@@ -1078,6 +1083,55 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     send_move(0.0, 0.0)
                     err = math.degrees(wrap_angle(target - tel["yaw"]))
                     missions.finish(new_mission, result={"turned_deg": round(margs["degrees"] - err, 1), "remaining_deg": round(err, 1)})
+                    continue
+                if name == "look_for":
+                    # Scan in 60-degree stops; at each stop ask the local vision model whether the thing is in view and
+                    # where (left/centre/right). Then face it and walk up to it with the LiDAR guard. Pure camera + VLM:
+                    # this is how "the door" gets a bearing although no detector class exists for it.
+                    thing = margs["thing"]
+                    seen_at, answers = None, []
+                    for stop in range(6):
+                        if missions.consume_stop():
+                            break
+                        jpeg = view.jpeg if view.port else None
+                        ans = await loop.run_in_executor(None, lambda j=jpeg: agent_mod.spot(thing, j))
+                        answers.append({"stop": stop, **{k: ans.get(k) for k in ("seen", "where", "latency_ms", "error")}})
+                        status(f"t={now-start:5.1f}s look_for {thing!r}: stop {stop} -> {ans.get('where') if ans.get('seen') else 'not here'} ({ans.get('latency_ms', '?')} ms)")
+                        if ans.get("seen"):
+                            seen_at = ans
+                            break
+                        target = wrap_angle(tel["yaw"] + math.radians(60))
+                        deadline = loop.time() + 4.0
+                        while loop.time() < deadline and abs(wrap_angle(target - tel["yaw"])) > 0.12:
+                            send_move(0.0, 0.9)
+                            await asyncio.sleep(0.1)
+                        send_move(0.0, 0.0)
+                        await asyncio.sleep(0.4)  # let the stream catch up before the next picture
+                    if seen_at is None:
+                        missions.finish(new_mission, result={"found": False, "thing": thing, "stops": answers})
+                        continue
+                    nudge = {"left": 35.0, "centre": 0.0, "right": -35.0}.get(seen_at.get("where"), 0.0)
+                    if nudge:
+                        target = wrap_angle(tel["yaw"] + math.radians(nudge))
+                        deadline = loop.time() + 3.0
+                        while loop.time() < deadline and abs(wrap_angle(target - tel["yaw"])) > 0.12:
+                            send_move(0.0, math.copysign(0.9, nudge))
+                            await asyncio.sleep(0.1)
+                        send_move(0.0, 0.0)
+                    p0, stopped_by, deadline = tel["pose"], None, loop.time() + 12.0
+                    while loop.time() < deadline and not missions.consume_stop():
+                        fr = (tel["ranges"] or {}).get("front", float("inf"))
+                        if fr < 0.6:
+                            stopped_by = f"something {fr:.2f} m ahead"
+                            break
+                        if math.dist(p0, tel["pose"]) >= 2.5:
+                            stopped_by = "walked 2.5 m; look again"
+                            break
+                        send_move(0.3, 0.0)
+                        await asyncio.sleep(0.1)
+                    send_move(0.0, 0.0)
+                    missions.finish(new_mission, result={"found": True, "thing": thing, "where": seen_at.get("where"),
+                                                          "walked_m": round(math.dist(p0, tel["pose"]), 2), "stopped_by": stopped_by, "stops": answers})
                     continue
                 if name == "walk":
                     p0, want, forward = tel["pose"], abs(margs["metres"]), margs["metres"] > 0

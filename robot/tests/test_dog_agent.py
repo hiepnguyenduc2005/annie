@@ -114,3 +114,21 @@ def test_narrator_rate_limits_and_never_repeats():
     assert "backpack" in n.remark(sit, now=NOW)
     assert n.remark(sit, now=NOW + 10) is None
     assert n.remark(sit, now=NOW + 50) is None  # same backpack: said already
+
+
+def test_look_for_rule_and_spot_parsing():
+    from robot.dog.planning.agent import parse_spot, rule_plan, spot, validate_steps
+    from robot.dog.runtime.body import validate_command
+    plan = rule_plan("go towards the door and through it!")
+    assert plan["steps"] == [{"name": "look_for", "args": {"thing": "door"}}]
+    kept, rejected = validate_steps([{"name": "look_for", "args": {"thing": " window "}}, {"name": "look_for", "args": {}}], validate_command)
+    assert kept == [{"name": "look_for", "args": {"thing": "window"}}] and rejected
+    assert parse_spot('{"seen": true, "where": "Right", "note": "wooden door"}') == {"seen": True, "where": "right", "note": "wooden door"}
+    assert parse_spot("Sure! {\"seen\": false}")["seen"] is False and parse_spot("nonsense")["where"] is None
+
+    class FakeInference:
+        def chat(self, messages, *, images=None, **kw):
+            assert images and b"jpeg" in images[0] and "door" in messages[-1]["content"]
+            return {"ok": True, "text": '{"seen": true, "where": "left"}', "latency_ms": 12}
+    assert spot("door", b"jpeg-bytes", inference=FakeInference()) == {"seen": True, "where": "left", "note": "", "latency_ms": 12}
+    assert spot("door", None)["error"] == "no frame"

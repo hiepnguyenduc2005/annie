@@ -21,7 +21,29 @@ Everything is on one LAN: the iPhone Personal Hotspot ("Henry's iPhone",
 over USB tethering so its own Wi-Fi association never changes (AGENTS.md rule).
 The phone app reaches `app_backend` at the Mac's hotspot address.
 
-## Wiring the GX10 (about ten minutes once it is on the hotspot)
+## The GX10 as handed over (2026-09-19 23:20)
+
+- Reachable by SSH as `asus@100.112.123.40` (a Tailscale address; the password
+  is in the ignored `.cache/go2-private/gx10.json`, never in this repo). That
+  address is on a **different tailnet** from the operator's Mac (not a peer of
+  `henrys-macbook-pro`), so until the node is shared to `qinglun.qin@`, the Mac
+  logs into that tailnet, or the GX10 joins the phone hotspot, nothing here can
+  reach it.
+- Working directory `~/robot-dog`. It is **not a git repository**: run
+  `git init && git add -A && git commit -m "baseline"` there before changing
+  anything, so every edit is recoverable.
+- Local inference already up, loopback-only on the GX10: an OpenAI-compatible
+  server at `http://127.0.0.1:8091/v1` serving `Qwen/Qwen2.5-Omni-3B`
+  (text; `"modalities": ["text"]`). Smoke test from inside the GX10:
+  ```sh
+  curl -s http://127.0.0.1:8091/v1/chat/completions -H "Content-Type: application/json" \
+    -d '{"model":"Qwen/Qwen2.5-Omni-3B","messages":[{"role":"user","content":"Hello! In one sentence, tell me what you can do."}],"modalities":["text"],"max_tokens":100}' | jq
+  ```
+  With Tailscale between the two machines, the tunnel below is
+  `ssh -N -L 8091:127.0.0.1:8091 asus@100.112.123.40` and the brain's model is
+  `Qwen/Qwen2.5-Omni-3B` at `http://127.0.0.1:8091/v1`.
+
+## Wiring the GX10 (about ten minutes once it is reachable)
 
 1. Join the GX10 to the phone hotspot; note its address (`ip -4 addr`), e.g. `172.20.10.11`.
 2. On the Mac, body + app backend:

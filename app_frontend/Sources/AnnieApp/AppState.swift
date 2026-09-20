@@ -10,15 +10,37 @@
 import AVFoundation
 import SwiftUI
 
+/// The fallback text both `app_backend`'s `CompanionService.ask` and the demo
+/// data use, verbatim, when nothing matches. Not `@MainActor`-isolated so
+/// `AskTurn.hasNoAnswer` can read it from any context.
+let annieNoAnswerFallback = "I don't have anything on that yet, but I'm keeping watch."
+
+/// One turn of asking Annie something. Answered instantly from what Annie
+/// already remembers — never dispatches the robot. Client-side only, like
+/// the backend's own lexical recall: nothing here is persisted or synced.
+struct AskTurn: Identifiable, Equatable {
+    let id = UUID()
+    let question: String
+    let at: Int
+    var answer: String?
+
+    /// True once Annie has answered and the answer is the "nothing on that
+    /// yet" fallback — the signal that this needs an in-person check instead
+    /// of a lookup.
+    var hasNoAnswer: Bool { answer == annieNoAnswerFallback }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var live = false
     @Published var reminders: [Reminder] = []
     @Published var memory: [MemoryFact] = []
-    @Published var answer: String?
-    @Published var asking = false
 
-    // Messages to Annie
+    // Ask Annie: instant, local, never moves the robot.
+    @Published var askTurns: [AskTurn] = []
+
+    // Messages to Annie: dispatches the robot to Jeanine in person, with
+    // live progress. Escalating an unanswered ask turn also goes through this.
     @Published var thread: [ThreadMessage] = []
     @Published var runs: [String: FamilyRun] = [:]
     @Published var sending = false
@@ -122,21 +144,25 @@ final class AppState: ObservableObject {
     // MARK: Ask Annie
 
     func ask(_ question: String) async {
-        asking = true
-        defer { asking = false }
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let turn = AskTurn(question: trimmed, at: Int(Date().timeIntervalSince1970 * 1000))
+        askTurns.append(turn)
+        let index = askTurns.count - 1
+
         guard live else {
-            answer = Self.demoAnswer(question, reminders: reminders)
+            askTurns[index].answer = Self.demoAnswer(trimmed, reminders: reminders)
             return
         }
         do {
-            answer = try await api.ask(question)
+            askTurns[index].answer = try await api.ask(trimmed)
         } catch {
-            answer = Self.demoAnswer(question, reminders: reminders)
+            askTurns[index].answer = Self.demoAnswer(trimmed, reminders: reminders)
             live = false
         }
     }
 
-    // MARK: Family messages
+    // MARK: Messages to Annie
 
     /// Hand the message to the backend and start watching the run it created.
     /// This returns as soon as the backend accepts it — the dog's errand takes
@@ -251,6 +277,6 @@ final class AppState: ObservableObject {
         if q.contains("visit") || q.contains("anyone") {
             return "Yes \u{2014} front door opened. Maya's visit was logged."
         }
-        return "I don't have anything on that yet, but I'm keeping watch."
+        return annieNoAnswerFallback
     }
 }

@@ -2,8 +2,9 @@
 //  Views.swift
 //  AnnieApp
 //
-//  Reminders (with today's routine), Ask Annie, the activity feed, and the
-//  profile card. Sending messages to Annie lives in FamilyViews.swift.
+//  Reminders (with today's routine), the activity feed, and the profile
+//  card. Asking and messaging Annie are merged into one screen in
+//  FamilyViews.swift.
 //
 
 import SwiftUI
@@ -108,74 +109,6 @@ struct AddReminderView: View {
             await state.add(time: hhmm, title: trimmed)
             dismiss()
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Ask Annie
-// ---------------------------------------------------------------------------
-
-struct AskView: View {
-    @EnvironmentObject private var state: AppState
-    @State private var question = ""
-
-    private let suggestions = [
-        "Where are her glasses?",
-        "Did she take her medication?",
-        "When is her walk?",
-        "Did anyone visit today?",
-    ]
-
-    var body: some View {
-        VStack(spacing: 16) {
-            if let answer = state.answer {
-                HStack(alignment: .top, spacing: 12) {
-                    Text(answer)
-                        .font(.title3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Button {
-                        state.speak(answer)
-                    } label: {
-                        Label("Read aloud", systemImage: "speaker.wave.2")
-                    }
-                    .help("Speak the answer with system speech synthesis")
-                }
-                .padding(16)
-                .background(Palette.mist.opacity(0.30), in: RoundedRectangle(cornerRadius: 12))
-            } else {
-                Text("Ask Annie anything about Jeanine \u{2014} she'll answer from what she's seen today.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxHeight: .infinity)
-            }
-
-            HStack {
-                TextField("Ask Annie\u{2026}", text: $question)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(ask)
-                Button("Ask", action: ask)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(state.asking || question.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-
-            // Wraps onto extra rows on a narrow phone screen.
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
-                ForEach(suggestions, id: \.self) { suggestion in
-                    Button(suggestion) {
-                        question = suggestion
-                        ask()
-                    }
-                    .buttonStyle(.bordered)
-                    .font(.callout)
-                }
-            }
-        }
-        .padding(20)
-    }
-
-    private func ask() {
-        let q = question.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return }
-        Task { await state.ask(q) }
     }
 }
 

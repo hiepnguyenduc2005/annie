@@ -81,12 +81,10 @@ struct ContentView: View {
             TabView {
                 RemindersView()
                     .tabItem { Label("Reminders", systemImage: "checklist") }
-                AskView()
+                AskAnnieView()
                     .tabItem { Label("Ask Annie", systemImage: "pawprint.fill") }
                 ActivityView()
                     .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
-                FamilyView()
-                    .tabItem { Label("Message Annie", systemImage: "bubble.left.and.bubble.right.fill") }
                 ProfileView()
                     .tabItem { Label("Profile", systemImage: "person.crop.circle") }
             }

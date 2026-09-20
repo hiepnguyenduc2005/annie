@@ -159,6 +159,47 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
   medication?") instead of the first person ("Did I take my medication?"),
   matching who is actually asking.
 
+## DEC-012: Ask Annie and Message Annie merged; escalation is explicit, not inferred
+
+- Date: 2026-09-20.
+- Status: Adopted following explicit user direction; revisable.
+- Context: The user wants one place in the toolbar where a family member can
+  either ask Annie a question that's answered from what she's already seen
+  ("did she take her medication?") or ask her to go do something in person
+  ("check if the door is shut"), instead of two separate tabs. `POST
+  /api/ask` (`CompanionService.ask`, `app_backend/app/companion.py`) is
+  lexical recall only — instant, no robot involved. `POST /api/messages`
+  (`FamilyService`, `app_backend/app/family.py`) always runs the full
+  navigate/speak/listen/recall/speak errand — it physically sends the robot
+  to Jeanine and has it speak to her. Nothing in the app or `app_backend`
+  classifies free text into "question" vs "task"; the Subconscious advisory
+  team (REQ-009) is explicitly scoped to no robot or messaging authority, so
+  routing a physical dispatch through it would cross that boundary.
+- Decision: Merge the "Ask Annie" and "Message Annie" tabs into one ("Ask
+  Annie"). Every submission goes through the instant `/api/ask` lookup first
+  and is shown as an immediate answer. If the answer is the fallback (nothing
+  matched — which is also what an imperative like "check the door" or "tell
+  her I'll call" gets, since neither matches anything either), that answer
+  carries one explicit button, "Have Annie check with Jeanine in person,"
+  which then dispatches the same text as a real message/run (REQ-010),
+  reported live in the same scrolling conversation. No text is ever
+  classified or auto-dispatched; the family member always makes the explicit
+  second choice to physically involve the robot.
+- Alternatives: Client- or server-side keyword/LLM classification to decide
+  automatically whether to look up or dispatch; rejected as unreliable
+  without a real intent model, and as an implicit trigger for something with
+  real-world effect on Jeanine (the robot speaking to her), which the app
+  should never guess into doing. An explicit "Ask" vs "Send" mode toggle on
+  one composer; rejected as extra UI for the same result the fallback answer
+  already signals for free.
+- Consequences: A question phrased as a statement ("tell her...") always
+  round-trips through an unhelpful instant "I don't know that yet" before the
+  escalation button appears; this is a known rough edge, not a bug. Backend
+  `MessageIn`/`CompanionService` are unchanged — this is UI-only. Ask turns
+  are still client-local and not persisted (unchanged from before); a message
+  and its run remain the only persisted, cross-device-visible record of Annie
+  actually doing something.
+
 ## Future entries
 
 Use the next `DEC-NNN` ID. Include date, status, context, decision, alternatives,

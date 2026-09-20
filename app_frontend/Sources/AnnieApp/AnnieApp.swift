@@ -84,7 +84,7 @@ struct ContentView: View {
                 AskAnnieView()
                     .tabItem { Label("Ask Annie", systemImage: "pawprint.fill") }
                 ActivityView()
-                    .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
+                    .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
                 ProfileView()
                     .tabItem { Label("Profile", systemImage: "person.crop.circle") }
             }

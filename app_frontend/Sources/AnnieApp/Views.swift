@@ -146,36 +146,9 @@ struct ActivityView: View {
 // ---------------------------------------------------------------------------
 
 struct ProfileView: View {
-    @EnvironmentObject private var state: AppState
-    @EnvironmentObject private var profiles: ProfileState
-
-    private var meds: [Reminder] { state.reminders.filter { $0.title.lowercased().contains("medication") } }
-    private var walk: Reminder? { state.reminders.first { $0.title.lowercased().contains("walk") } }
-
     var body: some View {
         ScrollView {
         VStack(spacing: 20) {
-            HStack(spacing: 16) {
-                AnnieMark(height: 40)
-                    .foregroundStyle(Palette.slate)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(profiles.profile.map { "Hi, \($0.member.displayName)" } ?? "Hi")
-                        .font(.title2.bold())
-                    Text("Keeping an eye on Jeanine, together with Annie")
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-
-            Text("Jeanine, today")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 16) {
-                StatCard(value: "\(meds.filter(\.done).count) of \(meds.count)", label: "medications taken")
-                StatCard(value: walk.map { $0.done ? "done" : "due \(fmtClock($0.time))" } ?? "\u{2013}", label: "walk status")
-                StatCard(value: "\(state.memory.count)", label: "things observed")
-            }
-
             AccountSectionView()
 
             ServerSettingsView()
@@ -284,25 +257,3 @@ struct ServerSettingsView: View {
     }
 }
 
-struct StatCard: View {
-    let value: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.title.bold())
-                .foregroundStyle(Palette.slate)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(.horizontal, 4)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(Palette.mist.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
-    }
-}

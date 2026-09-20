@@ -45,7 +45,11 @@ struct AnnieAPI {
         return data
     }
 
-    private func send(_ path: String, method: String, body: some Encodable) async throws -> Data {
+    /// Deliberately NOT an overload of `send`. `Data` is itself `Encodable`, so
+    /// a same-named generic sibling resolves its own encoded body back to
+    /// itself and recurses forever — and because async frames live on the
+    /// heap, it spins silently instead of crashing.
+    private func sendJSON(_ path: String, method: String, body: some Encodable) async throws -> Data {
         try await send(path, method: method, body: try JSONEncoder().encode(body))
     }
 
@@ -56,7 +60,7 @@ struct AnnieAPI {
     }
 
     func addReminder(_ new: NewReminder) async throws -> Reminder {
-        try JSONDecoder().decode(Reminder.self, from: try await send("api/reminders", method: "POST", body: new))
+        try JSONDecoder().decode(Reminder.self, from: try await sendJSON("api/reminders", method: "POST", body: new))
     }
 
     func toggleReminder(id: Int) async throws -> Reminder {
@@ -72,7 +76,7 @@ struct AnnieAPI {
     // MARK: Ask Annie
 
     func ask(_ question: String) async throws -> String {
-        try JSONDecoder().decode(AskResponse.self, from: try await send("api/ask", method: "POST", body: AskRequest(question: question))).answer
+        try JSONDecoder().decode(AskResponse.self, from: try await sendJSON("api/ask", method: "POST", body: AskRequest(question: question))).answer
     }
 
     // MARK: Family messages
@@ -82,7 +86,7 @@ struct AnnieAPI {
 
     func sendMessage(authorID: String, text: String) async throws -> DispatchAck {
         let body = NewMessage(author_id: authorID, text: text)
-        return try JSONDecoder().decode(DispatchAck.self, from: try await send("api/messages", method: "POST", body: body))
+        return try JSONDecoder().decode(DispatchAck.self, from: try await sendJSON("api/messages", method: "POST", body: body))
     }
 
     func thread() async throws -> [ThreadMessage] {

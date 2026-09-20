@@ -70,6 +70,8 @@ class Bridge:
         self.goal_completion = None
         self.agent_goal_scope = None
         self.issued_speech = []
+        from robot.simulation.goal_completion import SpeechReceiptCache
+        self.speech_receipts = SpeechReceiptCache()
 
     def remember_person(self, citation, map_id):
         """Retain accepted positive evidence; an empty view cannot erase it."""
@@ -266,6 +268,7 @@ class Bridge:
             self.goal_completion = None
             self.agent_goal_scope = None
             self.issued_speech.clear()
+            self.speech_receipts.clear()
             self.pending_agent_command = None
             self.recent_events = []
             self.incident_episode_active = False
@@ -287,7 +290,7 @@ class Bridge:
                     "patrolling" if nav["state"] == "moving" else "idle")
         await self.ingest("dog.status", {"ts": ts, "state": activity,
             "battery_pct": 100, "waypoint": nav.get("waypoint"), "pose": pose})
-        await self.process_commands(nav)
+        await self.process_commands(nav, speech_clips=state.get('speech', []))
         if self.perception == 'agent':
             status = await self.request(self.app,'GET','/status')
             self.pending_checkin = status.get('pending_checkin')
@@ -317,8 +320,11 @@ class Bridge:
                 self.ingest_accepted = response.get("accepted") if isinstance(response.get("accepted"), bool) else None
                 self.last_error = None
 
-    async def process_commands(self, nav):
+    async def process_commands(self, nav, *, speech_clips=()):
         queued = await self.request(self.app, "GET", "/commands")
+        if self.agent_goal_scope:
+            self.speech_receipts.merge(self.issued_speech, queued, speech_clips,
+                map_id=self.agent_goal_scope[0], goal_revision=self.agent_goal_scope[1])
         self.command_statuses = {item['command_id']: item['status'] for item in queued}
         if self.pending_agent_command and self.command_statuses.get(self.pending_agent_command) in TERMINAL:
             self.pending_agent_command = None
@@ -451,6 +457,7 @@ class Bridge:
         if self.agent_goal_scope != scope:
             self.agent_goal_scope = scope
             self.issued_speech.clear()
+            self.speech_receipts.clear()
             self.goal_completion = None
             self.agent_state = None
             self.agent_feedback.clear()
@@ -516,7 +523,10 @@ class Bridge:
             if not state.get('intelligence_enabled') or state.get('intelligence_revision')!=initial_state.get('intelligence_revision'):
                 command,detail=None,'Goal was paused or changed while the model was thinking'
             completed = action['action'] == 'finish' and detail == 'Model completed the goal'
-            delivery = goal_speech_completion(self.issued_speech, outstanding, state.get('speech', []),
+            delivery_receipts = self.speech_receipts.merge(self.issued_speech, outstanding,
+                state.get('speech', []), map_id=state['map_id'],
+                goal_revision=state.get('intelligence_revision', 0))
+            delivery = goal_speech_completion(self.issued_speech, delivery_receipts, state.get('speech', []),
                 map_id=state['map_id'], goal_revision=state.get('intelligence_revision', 0),
                 require_speech=state.get('intelligence_require_speech', False))
             if completed and not delivery.allows_completion:

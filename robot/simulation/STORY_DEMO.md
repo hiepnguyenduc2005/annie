@@ -42,6 +42,12 @@ failed playback, missing receipt, or speech from an older goal cannot complete
 this delivery requirement. Observation-only custom goals can omit it. This
 checks execution; the model still chooses its route, words, and actions.
 
+Verified current-goal speech receipts are retained after the app's 100-command
+history evicts them. Frequent body synchronization records them between model
+turns. A newer conflicting command or playback result invalidates success;
+missing receipts that were never observed remain unverified. The cache clears
+when the map or goal changes and retains no message text.
+
 ## Phone-memory prelude
 
 The house contains a life-size smartphone on the chair. Before Zach's message,

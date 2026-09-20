@@ -15,6 +15,51 @@ class IssuedSpeech:
     goal_revision: int
 
 
+class SpeechReceiptCache:
+    """Keep observed delivery results for issued speech beyond app pagination.
+
+    Only current-goal IDs are retained, and only a verified app completion or
+    observed failure survives eviction. A contradictory pending snapshot
+    invalidates earlier success; absence alone never creates success.
+    """
+
+    def __init__(self):
+        self.scope = None
+        self.receipts = {}
+
+    def clear(self):
+        self.scope = None
+        self.receipts.clear()
+
+    def merge(self, issued_speech, command_receipts, speech_clips=(), *, map_id, goal_revision):
+        scope = (map_id, goal_revision)
+        if self.scope != scope:
+            self.clear()
+            self.scope = scope
+        issued = {item.command_id: item for item in issued_speech
+                  if (item.map_id, item.goal_revision) == scope}
+        self.receipts = {cid: item for cid, item in self.receipts.items() if cid in issued}
+        commands, clips = tuple(command_receipts), tuple(speech_clips)
+        for cid, owner in issued.items():
+            latest = [item for item in commands if item.get('command_id') == cid]
+            cached = self.receipts.get(cid)
+            evidence = latest or ([cached] if cached else [])
+            # A failed required delivery cannot become a success merely because
+            # a later snapshot changes; a new goal establishes new requirements.
+            if latest and cached and cached['status'] == 'failed':
+                evidence = latest + [cached]
+            result = goal_speech_completion([owner], evidence, clips,
+                map_id=map_id, goal_revision=goal_revision)
+            if result.state in ('completed', 'failed'):
+                self.receipts[cid] = {'command_id': cid, 'cmd': 'say', 'status': result.state}
+            else:
+                self.receipts.pop(cid, None)
+        # Include all current duplicates: cache normalization must not hide a
+        # pending, failed, or wrong-command row in the authoritative snapshot.
+        return [dict(item) for item in self.receipts.values()] + [
+            item for item in commands if item.get('command_id') in issued]
+
+
 @dataclass(frozen=True)
 class GoalSpeechCompletion:
     state: Literal["not_required", "pending", "failed", "completed"]

@@ -60,7 +60,7 @@ def test_paused_autonomy_does_not_cancel_manual_patrol():
                'running':True,'autonomy_mode':'paused',
                'navigation':{'state':'moving','waypoint':'living-room','waypoints':[],'commands':[]}}
         async def ingest(*args): return {}
-        async def commands(*args): pass
+        async def commands(*args, **kwargs): pass
         async def coordinate(*args): raise AssertionError('Paused autonomy must not send a stop')
         bridge.ingest=ingest;bridge.process_commands=commands;bridge.coordinate=coordinate
         await bridge.body(state)

@@ -234,7 +234,7 @@ def speak_blocking(text: str) -> bool:
         lis.mute(2.0 + 0.4 * len(text.split()))
     ok = voice().speak(text)
     if lis is not None:
-        lis.muted_until = 0.0
+        lis.mute(1.0)  # Discard the speaker's tail rather than hearing our own acknowledgment.
         lis.open_conversation(45.0)
     return ok
 
@@ -317,6 +317,26 @@ COMMAND_CENTER_PATH = Path(__file__).resolve().parents[1] / "view" / "command_ce
 SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12), (11, 13), (13, 15), (12, 14), (14, 16)]
 
 
+class DemoEveryoneGrandma:
+    """Explicit stage casting, never identity recognition or enrollment."""
+
+    def apply(self, img, tracks):
+        for track in tracks:
+            track["identity"] = {"name": "Jeanine", "method": "demo_role", "demo": True}
+        return tracks
+
+
+def grandma_selection_status(view) -> dict:
+    enabled = bool(getattr(view, "require_grandma_selection", False))
+    empty = {"enabled": enabled, "name": None, "guest": None, "state": "unselected", "needs_selection": True}
+    if not enabled:
+        return empty
+    try:
+        return {**view.people.reid().selection_status(), "enabled": True}
+    except Exception:
+        return {**empty, "state": "unavailable"}
+
+
 def telemetry_snapshot(view) -> dict:
     """Everything the command-center page shows in one bounded JSON: live state, the last brain decisions and
     voice commands, greetings/check-ins/collisions, mission receipts, the frontier goal and the graph's sentences.
@@ -343,7 +363,12 @@ def telemetry_snapshot(view) -> dict:
            "concerns": list(report.get("concerns") or [])[-4:],
            "remarks": list(report.get("remarks") or [])[-6:],
            "missions": [], "frontier": {"available": False, "goal": None}, "graph_sentences": [], "places": 0, "objects": [],
-           "map": getattr(view, "map_geometry", None)}
+           "map": getattr(view, "map_geometry", None), "grandma_selection": grandma_selection_status(view),
+           "demo_everyone_grandma": bool(getattr(view, "demo_everyone_grandma", False))}
+    inf = getattr(view, "planning_inference", None)
+    out["inference"] = {"enabled": bool(inf and inf.provider != "off"),
+                        "provider": getattr(inf, "provider", "off"), "model": getattr(inf, "model", None),
+                        "stats": dict(getattr(inf, "stats", {}))}
     board = getattr(view, "missions", None)
     if board is not None:
         with contextlib.suppress(Exception):
@@ -507,6 +532,25 @@ class LiveView:
                     code, receipt = board.submit({"name": "stop", **({"command_id": payload["command_id"]} if "command_id" in payload else {})})
                     return self._send(code, json.dumps({**receipt, "cancelled": bool(receipt.get("stop_requested")),
                                                        "note": "Stop requested; poll /command/{command_id} for software acknowledgment."}).encode(), "application/json")
+                if self.path == "/people/assign":
+                    if not getattr(view, "require_grandma_selection", False):
+                        return self._send(409, b'{"error":"Clothing selection is not enabled for this run."}', "application/json")
+                    report = getattr(view, "report", {})
+                    if (report.get("connection") or {}).get("status") != "connected":
+                        return self._send(503, b'{"error":"Robot is not connected."}', "application/json")
+                    if not report.get("paused") or (board is not None and board.executing() is not None):
+                        return self._send(409, b'{"error":"Pause Annie before selecting Grandma."}', "application/json")
+                    try:
+                        payload = json.loads(raw.decode() or "{}")
+                        if not isinstance(payload, dict) or set(payload) != {"guest"} or not isinstance(payload["guest"], str):
+                            raise ValueError("Choose a visible Guest from the camera.")
+                        result = view.people.reid().assign_guest(payload["guest"], name="Jeanine")
+                    except (ValueError, TypeError) as exc:
+                        return self._send(409, json.dumps({"error": str(exc)}).encode(), "application/json")
+                    except AttributeError:
+                        return self._send(503, b'{"error":"Clothing tracker is unavailable."}', "application/json")
+                    view.log("Grandma selected for this demo using clothing; no face enrolled")
+                    return self._send(200, json.dumps({**result, "enabled": True}).encode(), "application/json")
                 if self.path.startswith("/people"):
                     people = getattr(view, "people", None)
                     if people is None:
@@ -729,7 +773,14 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                            stop_on_checkin=False, idle_trick_s=45.0, view=None, no_motion=False, diag_every_s=5.0,
                            imgsz=352, voxel_min_interval_s=0.25, brain=None, brain_period_s=4.0, memory=None,
                            voice=None, bandit=None, identifier=None, recorder=None, frontier_planner="auto",
-                           source="hardware", audio=None, faces_dir=None, start_paused=False, manual_control=False):
+                           source="hardware", audio=None, faces_dir=None, start_paused=False, manual_control=False,
+                           require_grandma_selection=False, demo_everyone_grandma=False, autonomous_demo=False):
+    if require_grandma_selection and demo_everyone_grandma:
+        raise ValueError("Choose clothing selection or everyone-as-Grandma demo mode, not both")
+    if autonomous_demo and (not demo_everyone_grandma or manual_control or start_paused):
+        raise ValueError("Autonomous demo requires everyone-as-Grandma mode without manual or paused startup")
+    if demo_everyone_grandma and not autonomous_demo:
+        manual_control = True
     start_paused = bool(start_paused or manual_control)
     if audio is not None and getattr(audio, "source", None) == "simulation" and source != "simulation":
         raise ValueError("mock audio requires simulation")
@@ -741,6 +792,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
     audio_where = "simulation mock" if audio is not None and getattr(audio, "source", None) == "simulation" else None
     loop = asyncio.get_running_loop()
     view = view or LiveView(port=0)
+    view.require_grandma_selection = bool(require_grandma_selection)
+    view.demo_everyone_grandma = bool(demo_everyone_grandma)
     original_speak, original_blocking_speak, original_listen = speak, blocking_speak, blocking_listen
 
     def spoken(text):
@@ -958,6 +1011,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             perception.identifier = view.people.reid(
                 shirt_rules=lambda: [(identifier.name, identifier.colour)] if isinstance(identifier, TargetIdentifier) else [],
                 pose_source=lambda: tel["pose"])
+    if demo_everyone_grandma:
+        perception.identifier = DemoEveryoneGrandma()
     view.recorder = recorder
     missions = MissionBoard()
     view.missions = missions
@@ -1003,6 +1058,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         sit = agent_mod.situation(now=now_wall, pose_xy=pose, yaw=tel["yaw"], entities=entities, graph_sentences=sentences, overhead=over,
                                   greeted=[g for g in report["greetings"] if "t" in g], tracks=tracks, ranges=ranges, home_m=home_m,
                                   battery=battery, mode=mode)
+        sit["demo_everyone_grandma"] = bool(demo_everyone_grandma)
         situation_cache.update(t=now_wall, sit=sit)
         return sit
     view.situation = build_situation
@@ -1018,6 +1074,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         except Exception:
             return None
     chat_client = line_inference()
+    if conn_factory is None:
+        with contextlib.suppress(Exception):
+            from robot.dog.inference import shared as _shared
+            view.planning_inference = _shared()
 
     def plan_instruct(receipt, sit, plan_slot):
         """Runs in a thread: instruction -> steps through the shared inference client (or the rules), then chain."""
@@ -1026,6 +1086,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             with contextlib.suppress(Exception):
                 from robot.dog.inference import shared as _shared
                 inf = _shared()
+                view.planning_inference = inf
             from robot.dog.runtime.body import validate_command as _validate
             plan = agent_mod.plan_instruction(receipt["args"]["text"], sit, inference=inf, validate_command=_validate)
         except Exception as exc:
@@ -1418,13 +1479,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             voice_state["count"] += 1
             report["voice"]["commands"].append({"t_s": round(loop.time() - start, 1), "intent": cmd["intent"],
                                                 "text": text[:80]})
-            if cmd["intent"] == "converse":  # inside a conversation window: a command if it reads like one, else a reply
-                plan = agent_mod.rule_plan(cmd["phrase"])
-                if plan.get("steps"):
-                    code, receipt = missions.submit({"name": "instruct", "args": {"text": cmd["phrase"]}})
-                    status(f"conversation -> instruction ({code}): {cmd['phrase'][:80]!r}")
-                    speak(plan.get("reply") or "On it.")
-                    return
+            if cmd["intent"] == "converse":  # Unaddressed conversation has no movement authority.
                 sit = build_situation(time.time(), tracks=perception.latest().get("tracks", []), ranges=tel["ranges"],
                                       home_m=math.dist(origin, tel["pose"]) if tel["pose"] else 0.0, battery=tel["soc"], mode=mode)
                 who = next((name for t in perception.latest().get("tracks", []) if (name := spoken_name(t.get("identity")))), None)
@@ -1550,8 +1605,23 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 front_now = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
                 current_places, current_radii = _person_places(tracks, fw or 640, fh or 480, tel["pose"], tel["yaw"], front_now)
                 policy.observe(tracks, current_places, now_s=now)
+                active_before_take = missions.executing()
+                allow_social_policy = not mission_paused and (active_before_take is None or
+                    (navigation_state.get("receipt") is active_before_take and navigation_state.get("name") == "patrol"))
                 action, tid = policy.step(tracks, fw or 640, fh or 480, now_s=now, front_m=front_now,
-                                          place_by_tid=current_places, radius_by_tid=current_radii) if fw else ("patrol", None)
+                                          place_by_tid=current_places, radius_by_tid=current_radii) if fw and allow_social_policy else ("patrol", None)
+                # A clothing selection is demo authorization, not a permanent identity.
+                # Losing it cancels the current plan and requires a new explicit selection.
+                selection = grandma_selection_status(view)
+                selection_blocked = selection["enabled"] and selection["needs_selection"]
+                if selection_blocked:
+                    if not mission_paused:
+                        send_move(0.0, 0.0)
+                        missions.submit({"name": "stop"})
+                        view.log("Movement held: select Grandma again (" + selection["state"] + ")")
+                    mission_paused = True
+                    report["paused"] = True
+                    voice_state.update(intent=None, until=0.0, resume_requested=False)
                 # ---- missions from the family app (body-command shape); they pre-empt greeting and idle tricks
                 if missions.stop_requested:
                     mission_paused = True
@@ -1590,6 +1660,11 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 if new_mission is not None:
                     name, margs = new_mission["name"], new_mission["args"]
                     wants_motion = name in ("turn", "walk", "look_for", "move", "patrol", "go_home", "hello", "dance", "heart", "stretch", "sit", "stand") or (name == "find_person" and margs.get("approach", False))
+                    if selection_blocked and wants_motion:
+                        missions.finish(new_mission, error="Select Grandma in the camera before moving: " + selection["state"])
+                        mission_paused = True
+                        report["paused"] = True
+                        continue
                     if no_motion and wants_motion:
                         missions.finish(new_mission, error="no_motion: movement disabled")
                         mission_paused = True
@@ -1746,7 +1821,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                             mission_paused = True
                             report["paused"] = True
                         continue
-                    action, tid = "patrol", None
+                    if going_home:
+                        action, tid = "patrol", None
                 if mission is not None and mission_state.get("receipt") is mission:
                     if now > mission_state["deadline"]:
                         missions.finish(mission, error="find_person timeout: target not reached", result={"found": False, "track_id": None, "identity": None, "matched_name": False,
@@ -1786,10 +1862,12 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     send_move(0.0, 0.0)
                     await asyncio.sleep(tick)
                     continue
-                if (mission is not None or now < mission_hold_until[0]) and action in ("greet", "checkin"):
+                social_patrol = (mission is not None and navigation_state.get("receipt") is mission
+                                 and navigation_state.get("name") == "patrol")
+                if ((mission is not None and not social_patrol) or now < mission_hold_until[0]) and action in ("greet", "checkin"):
                     action = "follow" if tid is not None else "patrol"  # no tricks or questions while on / just after a mission
-                if now < mission_hold_until[0] and action == "patrol" and not tracks:
-                    send_move(0.0, 0.0)  # stay put by the person the errand is talking to instead of wandering off
+                if now < mission_hold_until[0] and mission is None:
+                    send_move(0.0, 0.0)  # Hold between the errand's approach, speech and listening commands.
                     await asyncio.sleep(tick)
                     continue
                 if action in ("follow", "greet") and not bandit_state["rewarded"] and bandit.current is not None:
@@ -1921,6 +1999,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                             reason = "lidar_far" if front_m > 1.1 else "lidar_near"
                     if 0.0 < vx < 0.2:
                         vx = 0.2  # walking deadband: either walk properly or hold
+                    if ranges and ranges["front"] < 0.4 and reason != "lidar_far":
+                        vx = min(vx, 0.0)
+                    vx, wz = guarded_velocity(vx, wz)
                     last_seen.update(tid=tid, t=now, side=1.0 if cx < 0.5 else -1.0)
                     holding = reason in ("centered", "too_close") or abs(vx) < 0.05
                     if holding and follow_hold["tid"] == tid and follow_hold["since"] is not None:
@@ -1936,9 +2017,6 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                         follow_hold.update(tid=tid, since=now)
                     else:
                         follow_hold.update(tid=tid, since=None)
-                    if ranges and ranges["front"] < 0.4 and reason != "lidar_far":
-                        vx = min(vx, 0.0)  # LiDAR says something is right there: turn, do not push
-                    vx, wz = guarded_velocity(vx, wz)
                     stalled = stall.update(now_s=now, pose_xy=tel["pose"], commanded_vx=max(vx, 0.0))
                     if stalled:
                         report["collisions"].append({"t_s": round(now - start, 1), "mode": "follow", "front_m": None})
@@ -2139,6 +2217,9 @@ def main(argv=None):
                         "and ANNIE_VIEW_HOSTS (comma list of this machine's addresses the page may be opened on)")
     parser.add_argument("--start-paused", "--manual-on-demand", action="store_true", help="wait for an explicit command; do not stand or patrol at startup")
     parser.add_argument("--manual-control", action="store_true", help="start held and stay held between explicit missions; no automatic roaming or greeting")
+    parser.add_argument("--require-grandma-selection", action="store_true", help="hold motion until the operator selects Grandma's live clothing appearance; hold again if lost or ambiguous")
+    parser.add_argument("--demo-everyone-grandma", action="store_true", help="staged demo only: treat every visible person as Grandma; starts held in manual control")
+    parser.add_argument("--autonomous-demo", action="store_true", help="with --demo-everyone-grandma, explicitly allow idle patrol, greetings and occasional gestures; Pause still holds")
     parser.add_argument("--no-motion", action="store_true", help="perception-only: never move or perform tricks")
     parser.add_argument("--imgsz", type=int, default=320, help="tracker inference size (multiple of 32); 320 keeps up with the 14 fps stream on this Mac")
     parser.add_argument("--diag-every", type=float, default=5.0, help="seconds between diagnostic lines")
@@ -2155,6 +2236,14 @@ def main(argv=None):
     parser.add_argument("--mock-audio", action="store_true", help="simulation only: scripted audio, no mic/speaker/providers")
     parser.add_argument("--mock-transcript", default="I'm doing well, thank you.")
     args = parser.parse_args(argv)
+    if args.require_grandma_selection and args.demo_everyone_grandma:
+        parser.error("Choose either --require-grandma-selection or --demo-everyone-grandma")
+    if args.autonomous_demo and (not args.demo_everyone_grandma or args.manual_control or args.start_paused):
+        parser.error("--autonomous-demo requires --demo-everyone-grandma without manual or paused startup")
+    if args.require_grandma_selection or args.demo_everyone_grandma:
+        args.target = ""
+        if not args.autonomous_demo:
+            args.manual_control, args.start_paused = True, True
     if args.mock_audio and (not args.sim or args.voice):
         parser.error("--mock-audio requires --sim and cannot be combined with --voice")
     mock_audio = None
@@ -2201,6 +2290,9 @@ def main(argv=None):
                                               lidar=not args.no_lidar, firmware_avoid=args.firmware_avoid,
                                               stop_on_checkin=args.stop_on_checkin, idle_trick_s=args.idle_trick,
                                               view=LiveView(port=args.view_port, host=args.view_host), no_motion=args.no_motion, start_paused=args.start_paused, manual_control=args.manual_control,
+                                              require_grandma_selection=args.require_grandma_selection,
+                                              demo_everyone_grandma=args.demo_everyone_grandma,
+                                              autonomous_demo=args.autonomous_demo,
                                               imgsz=args.imgsz, diag_every_s=args.diag_every,
                                               brain=VisionBrain() if args.brain else None, brain_period_s=args.brain_period,
                                               memory=SightingMemory(args.memory_file),

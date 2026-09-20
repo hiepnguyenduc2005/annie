@@ -78,6 +78,14 @@
   form.say { display:flex; gap:8px; flex:1; min-width:240px; }
   input[type=text] { flex:1; font:14px -apple-system, sans-serif; padding:10px 14px; border-radius:20px; border:1px solid var(--line); background:var(--white); }
   .toast { font-size:12px; color:var(--muted); min-width:120px; }
+  .grandma { margin-top:12px; padding:10px 14px; border:1px solid var(--line); border-radius:14px; background:var(--soft); display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; }
+  .grandma[hidden] { display:none; }
+  .grandma .who { font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--green); flex:none; }
+  .grandma .state { font-size:10px; letter-spacing:1px; text-transform:uppercase; color:var(--muted); }
+  .grandma .state.tracking { color:var(--green); font-weight:700; }
+  .grandma .state.lost, .grandma .state.ambiguous { color:var(--alert); font-weight:700; }
+  .grandma .guest { display:flex; align-items:center; gap:6px; font-size:12px; }
+  .grandma .guest button { padding:5px 10px; font-size:10px; }
   footer { font-size:11px; color:var(--muted); margin-top:18px; display:flex; gap:16px; flex-wrap:wrap; }
   footer a { color:var(--green); }
   #c3d { touch-action:pan-y; } /* one finger up/down scrolls the page; sideways drag orbits; two fingers pan/zoom */
@@ -151,6 +159,14 @@
     <span class="sub" id="say-status"></span>
     <span class="toast" id="toast"></span>
   </div>
+
+  <div class="grandma" id="grandma-panel" hidden>
+    <span class="who">Grandma for this demo</span>
+    <span class="sub" id="grandma-hint">Select the visible person wearing a beige jacket and blue jeans. Annie will track that clothing sample for this session.</span>
+    <span class="state" id="grandma-state" hidden></span>
+    <span id="grandma-guests" class="guest-list" style="display:contents"></span>
+  </div>
+  <div class="grandma" id="demo-role-panel" hidden><strong>Demo mode: everyone visible is Grandma.</strong><span>The nearest visible person receives the message. No identity recognition.</span></div>
 
   <section class="card" style="margin-top:16px">
     <div class="chat-head"><div><p class="eyebrow">Agent</p><h2>What Annie is thinking</h2></div><span class="sub" id="brainstate">brain off</span></div>
@@ -242,6 +258,55 @@
     opts.signal = c.signal;
     return fetch(url, opts).finally(function () { clearTimeout(t); });
   }
+  // "Grandma for this demo": the operator points at the right live track by clothing
+  // (beige jacket + blue jeans). The POST body carries the track's guest name only;
+  // clothing stays an operator instruction, never an automatic classifier.
+  var GUEST_RE = /^Guest ([1-9]\d*)$/;
+  var grandmaBusy = null, grandmaError = "", lastGrandmaState = null;
+  function guestOf(x) { // only tracker-assigned "Guest N" identities are selectable; named or untracked people are not
+    var n = x && x.identity && x.identity.method === "guest" ? x.identity.name : null;
+    return n && GUEST_RE.test(n) ? n : null;
+  }
+  function setGrandmaMsg(text, cls) { var st = document.getElementById("grandma-state"); st.hidden = !text; st.className = "state" + (cls ? " " + cls : ""); st.textContent = text; }
+  window.assignGrandma = function (suffix) { // suffix is the validated numeric part of "Guest N"
+    if (grandmaBusy != null) return;
+    var guest = "Guest " + suffix;
+    grandmaBusy = suffix;
+    grandmaError = "";
+    setGrandmaMsg("assigning " + guest + "…", "");
+    fetchBounded("/people/assign", { method: "POST", headers: headers, body: JSON.stringify({ guest: guest }) })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          if (!(r.status >= 200 && r.status < 300)) grandmaError = "assignment refused" + (j && j.error ? ": " + j.error : " (" + r.status + ")") + " — choose again";
+        }).catch(function () { if (!r.ok) grandmaError = "assignment refused (" + r.status + ") — choose again"; });
+      })
+      .catch(function () { grandmaError = "assignment failed: connection problem — choose again"; })
+      .finally(function () { grandmaBusy = null; renderGrandma(lastTracks); });
+  };
+  var lastTracks = [];
+  function renderGrandma(tracks) {
+    lastTracks = tracks || [];
+    var sel = window.__telemetry && window.__telemetry.grandma_selection;
+    document.getElementById("demo-role-panel").hidden = !(window.__telemetry && window.__telemetry.demo_everyone_grandma);
+    document.getElementById("grandma-panel").hidden = !(sel && sel.enabled === true);
+    var guests = document.getElementById("grandma-guests");
+    guests.innerHTML = lastTracks.map(function (x) {
+      var guest = guestOf(x), inFlight = grandmaBusy != null && "Guest " + grandmaBusy === guest;
+      return '<span class="guest">track #' + esc(x.track_id) + (guest ? " · " + guest : "")
+        + (guest ? '<button onclick="assignGrandma(' + guest.slice(6) + ', this)"' + (grandmaBusy != null ? " disabled" : "") + ">"
+          + (inFlight ? "assigning…" : "Use as Grandma") + "</button>" : "") + "</span>";
+    }).join("") || '<span class="sub">no one visible</span>';
+    if (!sel || sel.enabled !== true || grandmaBusy != null) return; // keep the assigning label until the POST settles
+    var st = sel.state;
+    if (st !== lastGrandmaState) { grandmaError = ""; lastGrandmaState = st; } // a poll transition clears a sticky error
+    if (grandmaError) { setGrandmaMsg(grandmaError, "ambiguous"); return; }
+    if (st === "tracking") setGrandmaMsg("Grandma selected (clothing only)", "tracking");
+    else if (st === "lost") setGrandmaMsg((sel.name || "Grandma") + " not visible — choose again", "lost");
+    else if (st === "ambiguous") setGrandmaMsg("several people match — choose again", "ambiguous");
+    else if (st === "unselected") setGrandmaMsg("Select Grandma before moving", "ambiguous");
+    else setGrandmaMsg("Grandma selection unavailable", "ambiguous");
+  }
+
   // Terminal poll: server receipt, or "unknown" on 404/401/403 (receipt gone / bad token), 5xx, or ~120 s
   // of network errors. The command may still run server-side; we stop claiming we know.
   function pollReceipt(cid, onDone, t0) {
@@ -592,7 +657,9 @@
     $("clock").textContent = "t " + fmtT(s.t_s);
     $("fps").textContent = (s.fps || 0).toFixed(1) + " fps";
     var tracks = s.tracks || [], lying = tracks.some(function (x) { return x.posture === "lying"; });
+    window.__telemetry = t;
     $("people").textContent = tracks.length + (tracks.length === 1 ? " person" : " people") + (tracks.length ? ": " + tracks.map(function (x) { return (x.identity && x.identity.name) || ("#" + x.track_id); }).join(", ") : "");
+    renderGrandma(tracks);
     $("lying").hidden = !lying;
     var ob = $("objects"); ob.hidden = !(t.objects && t.objects.length); ob.textContent = (t.objects || []).join(", ");
     var r = s.ranges || {}; $("r-front").innerHTML = fmtRange(r.front); $("r-left").innerHTML = fmtRange(r.left); $("r-right").innerHTML = fmtRange(r.right);
@@ -608,7 +675,7 @@
     if (t.map && !mapMeta) { mapMeta = t.map; if (window.THREE) setFloor(mapMeta); }
     var fr = t.frontier || {}; $("goal").textContent = fr.goal ? fr.goal[0].toFixed(1) + ", " + fr.goal[1].toFixed(1) : (fr.available ? "none" : "off");
     $("places").textContent = t.places != null ? t.places : 0;
-    $("brainstate").textContent = t.brain && t.brain.enabled ? "local VLM every " + (t.brain.period_s || 0) + " s" : "rule-based planner";
+    $("brainstate").textContent = t.inference && t.inference.enabled ? (t.inference.provider + " · " + t.inference.model) : (t.brain && t.brain.enabled ? "local VLM every " + (t.brain.period_s || 0) + " s" : "rule-based planner");
     var sp = $("srcpill"); sp.hidden = t.source !== "simulation"; sp.textContent = "SIMULATION";
     var cm = $("controlmode");
     if (t.control_mode) { cm.hidden = false; cm.textContent = t.control_mode === "manual" ? "MANUAL" : "AUTONOMOUS"; cm.className = "pill" + (t.control_mode === "manual" ? "" : " on"); } else { cm.hidden = true; }

@@ -356,3 +356,84 @@ def test_place_prior_relaxes_the_clothing_match_only_near_and_recently(tmp_path)
     from_source.clock = lambda: (T0 + 30_000) / 1000
     from_source.apply(faded, tracks)
     assert tracks[0]["identity"]["name"] == "Tom"
+
+
+def selection_reid(tmp_path):
+    return PersonReid(path=tmp_path / "guests.json", guest_min_sightings=1,
+                      clock=lambda: T0 / 1000)
+
+
+def test_operator_assignment_is_face_free_and_survives_turn_and_track_churn(tmp_path):
+    reid = selection_reid(tmp_path)
+    assert reid.selection_status() == {"name": None, "guest": None, "state": "unselected", "needs_selection": True}
+    see(reid, frame((KHAKI, BOX_A, DENIM)), [track(1)], T0)
+    # Neither assignment nor clothing-only tracking needs a face provider.
+    class NoFaces:
+        def index(self):
+            raise AssertionError("No face operation allowed")
+    reid.directory = NoFaces()
+    result = reid.assign_guest("Guest 1")
+    assert result == {"name": "Jeanine", "guest": "Guest 1", "state": "tracking", "needs_selection": False}
+    result["state"] = "changed"
+    assert reid.selection_status()["state"] == "tracking"
+    assert reid.guests() == [] and not reid._tracks
+    out = see(reid, frame((KHAKI, BOX_B, DENIM)), [track(42, BOX_B)], T0 + 1000)
+    assert out[0]["identity"] == {"name": "Jeanine", "score": 1.0, "method": "clothing"}
+    reid.save()
+    assert "Jeanine" not in json.loads(reid.path.read_text())["known"]
+    assert selection_reid(tmp_path).selection_status()["state"] == "unselected"
+
+
+def test_assignment_rejects_invalid_absent_stale_and_no_longer_visible_guests(tmp_path):
+    reid = selection_reid(tmp_path)
+    for guest in (None, "Jeanine", "Guest 99"):
+        with pytest.raises(ValueError):
+            reid.assign_guest(guest)
+    see(reid, frame((KHAKI, BOX_A)), [track(1)], T0)
+    with pytest.raises(ValueError, match="stale"):
+        reid.assign_guest("Guest 1", now_s=T0 / 1000 + 2.001)
+    see(reid, frame(), [], T0 + 100)
+    with pytest.raises(ValueError, match="visible"):
+        reid.assign_guest("Guest 1", now_s=T0 / 1000 + .1)
+
+
+def test_assignment_requires_current_lower_body_signature(tmp_path):
+    reid = selection_reid(tmp_path)
+    cropped = track(1, (100, 200, 180, 700))
+    img = paint(np.full((360, 480, 3), 200, np.uint8), KHAKI, (100, 200, 180, 360))
+    see(reid, img, [cropped], T0)
+    assert reid.guests()[0]["name"] == "Guest 1"
+    with pytest.raises(ValueError, match="lower"):
+        reid.assign_guest("Guest 1")
+
+
+def test_duplicate_clothing_invalidates_selection_and_requires_reselection(tmp_path):
+    reid = selection_reid(tmp_path)
+    see(reid, frame((KHAKI, BOX_A)), [track(1)], T0)
+    reid.assign_guest("Guest 1")
+    twins = see(reid, frame((KHAKI, BOX_A), (KHAKI, BOX_B)), [track(1), track(2, BOX_B)], T0 + 100)
+    assert all(t["identity"] is None or t["identity"]["name"] != "Jeanine" for t in twins)
+    assert reid.selection_status()["state"] == "ambiguous"
+    assert reid.selection_status()["needs_selection"] is True
+    lone = see(reid, frame((KHAKI, BOX_B)), [track(3, BOX_B)], T0 + 200)[0]
+    assert lone["identity"]["name"] != "Jeanine"
+    assert reid.selection_status()["state"] == "ambiguous"
+    reid.assign_guest(lone["identity"]["name"], now_s=T0 / 1000 + .2)
+    assert reid.selection_status()["state"] == "tracking"
+    assert see(reid, frame((KHAKI, BOX_B)), [track(4, BOX_B)], T0 + 300)[0]["identity"]["name"] == "Jeanine"
+
+
+def test_lost_selection_is_sticky_and_clock_expiry_clears_cached_identity(tmp_path):
+    reid = selection_reid(tmp_path)
+    see(reid, frame((KHAKI, BOX_A)), [track(1)], T0)
+    reid.assign_guest("Guest 1")
+    see(reid, frame((KHAKI, BOX_A)), [track(1)], T0 + 100)
+    reid.clock = lambda: T0 / 1000 + 2.101
+    assert reid.selection_status()["state"] == "lost"
+    assert all(t["name"] != "Jeanine" for t in reid._tracks.values())
+    out = see(reid, frame((KHAKI, BOX_A)), [track(1)], T0 + 2200)[0]
+    assert out["identity"]["name"] != "Jeanine"
+    assert reid.selection_status()["needs_selection"] is True
+    reid.assign_guest(out["identity"]["name"], now_s=T0 / 1000 + 2.2)
+    assert reid.forget("Jeanine") is True
+    assert reid.selection_status()["state"] == "lost"

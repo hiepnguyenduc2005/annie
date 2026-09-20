@@ -1927,7 +1927,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                         d0 = fr if fr is not None and fr != float("inf") else 1.0
                         world = (tel["pose"][0] + d0 * math.cos(tel["yaw"]), tel["pose"][1] + d0 * math.sin(tel["yaw"]))
                     sit = build_situation(wall, tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode)
-                    decision = agent_mod.greeting_decision(dict(track, world=world), sit, now=wall)
+                    # ANNIE_GREET_REPEAT_S: how long a name or a spot counts as "already greeted" (300 s at home;
+                    # a crowd demo wants it shorter so the dog keeps saying hi)
+                    decision = agent_mod.greeting_decision(dict(track, world=world), sit, now=wall,
+                                                           recent_s=float(os.environ.get("ANNIE_GREET_REPEAT_S", "300")))
                     if not decision["greet"]:
                         policy.greeted[tid] = now  # known already: no repeat greeting, keep exploring
                         status(f"t={now-start:5.1f}s person (track {tid}) ahead: not greeting again ({decision['reason']})")

@@ -39,6 +39,23 @@ struct MessageRouterChecks {
         expect(MessageRouter.route("Ask Jeanine if she needs anything"), .familyMessage, "Ask Jeanine if she needs anything")
         expect(MessageRouter.route("ask her where the phone is"), .familyMessage, "ask her where the phone is")
 
+        for input in [
+            "Hey Annie, my message hasn’t delivered to Grandma in the past two days, could you make sure she’s okay and ask her to plug in her phone?",
+            "Could you check on Grandma?", "Annie, please remind her to plug in her phone.",
+            "Can you ask Jeanine to charge her phone?", "Please check in on Grandma",
+            "I haven't heard from her. Would you please see if she is okay?",
+            "Tell Grandma to plug in her phone?"
+        ] { expect(MessageRouter.route(input), .familyMessage, input) }
+
+        for input in [
+            "Where is Grandma?", "Hey Annie, where is Grandma?", "Is she okay?",
+            "Could you tell me where Grandma is?", "Did you ask her to charge her phone?",
+            "What if Annie could remind Grandma to charge her phone?",
+            "Could you not ask her to charge her phone?", "What happened, could you ask Grandma?"
+        ] {
+            expect(MessageRouter.route(input), .question, input)
+        }
+
         // Motion and operator instructions stay direct to the dog.
         expect(MessageRouter.route("Go wave at Grandma"), .directInstruction, "Go wave at Grandma")
         expect(MessageRouter.route("go explore"), .directInstruction, "go explore")

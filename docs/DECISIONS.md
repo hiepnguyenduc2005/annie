@@ -241,3 +241,10 @@ superseded with a link. Link implementation details instead of duplicating them.
 - Context: The user explicitly requested that all simulator-related code, including its frontend, app backend, robot backend, and contract, live under `robot/`.
 - Decision: Move the working simulator/demo stack to `robot/{simulation,frontend,app_backend,robot_backend,contract}` and use qualified `robot.*` Python imports. Keep the existing top-level team health scaffolds and Swift app independent. This supersedes DEC-003's placement of the demo in the top-level app backend.
 - Consequences: Run commands from the repository root using the new paths. Local URLs remain port 8766 for the simulator and port 8000 for the family demo. Root `.env`, ignored caches, datasets, and runtime databases retain their locations. The relocated demo has one incident engine; no second policy engine was added.
+
+## DEC-014: Explicit polite delivery requests dispatch from the composer
+
+- Date: 2026-09-20.
+- Context: The user's demo message ended with a question mark, so the native app answered from memory instead of carrying out its explicit request to visit Grandma.
+- Decision: The shared native router recognizes bounded polite resident-delivery requests before question punctuation. Observation, historical, and capability questions remain read-only. This updates DEC-012's earlier lookup-first behavior for explicit requests; no backend interface changes.
+- Validation: The production Swift router checks include the exact demo message and negative question cases. The simulator build passed.

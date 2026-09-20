@@ -216,6 +216,20 @@ def _negated_action_plan(text: str) -> dict | None:
     return None
 
 
+_STEP_COUNT_REPLY = "I can move by distance, but I cannot count footsteps. Try “walk forward 1 m”."
+_STEP_UNIT = re.compile(r"\b(?:foot\s?steps?|steps?|paces?|strides?)\b", re.I)
+_STEP_COUNT_MOVE = re.compile(
+    r"\b(?:walk|go|move|step|take|come|head)\b|\b(?:forward|ahead|back|backwards?)\b", re.I)
+
+
+def _step_count_plan(text: str) -> dict | None:
+    # The body walks by metres only, and no steps-to-metres conversion is
+    # honest. Reject the request before any model sees it; never partly run it.
+    if _STEP_UNIT.search(text) and _STEP_COUNT_MOVE.search(text):
+        return {"reply": _STEP_COUNT_REPLY, "steps": [], "source": "rules"}
+    return None
+
+
 def rule_plan(text: str, sit: dict | None = None) -> dict:
     """Keyword fallback: a handful of instructions that must work without any model."""
     t = text.strip()
@@ -228,6 +242,9 @@ def rule_plan(text: str, sit: dict | None = None) -> dict:
     negated = _negated_action_plan(t)
     if negated is not None:
         return negated
+    step_reject = _step_count_plan(t)
+    if step_reject is not None:
+        return step_reject
     low = t.lower()
     name = _first_name(t)
     steps, reply = [], ""
@@ -368,6 +385,8 @@ def plan_instruction(text: str, sit: dict, *, inference=None, validate_command=N
     out = rule_plan(text, sit) if conversation is not None else _direct_speech_plan(text)
     if out is None:
         out = _negated_action_plan(text)
+    if out is None:
+        out = _step_count_plan(text)
     latency = None
     if inference is not None and out is None:
         try:

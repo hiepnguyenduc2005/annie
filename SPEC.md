@@ -60,6 +60,13 @@ See [the story and acceptance checks](robot/simulation/STORY_DEMO.md).
 
 ## Scope boundaries
 
+The current demo narration uses a Mac as the compute host. Describe the active
+transport and audio configuration accurately; the family relay's lost-phone
+memory follow-up remains unconnected. See [the recording script](docs/DEMO_SCRIPT.md).
+In the native composer, explicit resident delivery requests such as "could you
+ask Grandma to plug in her phone?" dispatch a family run despite question
+punctuation. Questions about existing observations remain read-only (DEC-014).
+
 The current requested deployment profile runs all runtime services locally,
 including Elasticsearch when selected. Use local vision, Whisper/macOS speech,
 and Graphiti or self-hosted Elastic; cloud audio and advisory agents remain off.
@@ -159,6 +166,7 @@ Stop Audio still finalizes and retains a summary locally. Delivery requires
   before waving so the face is in frame. Greetings are a wave only; idle tricks are off (exploration instead).
 - The dog remarks on new objects/people it just placed in the graph (rate limited, never repeats).
 - `turn(degrees)` and `walk(metres)` are odometry-closed steps; `walk` stops at obstacles (< 0.45 m).
+  Footstep counts are not supported and must not silently become a default metre-distance walk.
   A requested `dance` is refused when something is closer than 0.5 m ahead.
 - Turn-in-place commands never go below 0.8 rad/s and reverses never below 0.2 m/s (Go2 deadbands).
 

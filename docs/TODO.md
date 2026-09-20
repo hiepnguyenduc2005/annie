@@ -59,6 +59,8 @@ as work progresses and record a reason for blocked work.
 
 ## Done
 
+- [x] Corrected native routing for the exact polite demo request; question punctuation no longer suppresses an explicit resident delivery. Added a distance-only movement guard for unsupported footstep requests. Mac-based recording script and the unconnected lost-phone follow-up are documented in [DEMO_SCRIPT.md](DEMO_SCRIPT.md).
+
 - [x] Adversarial control review: typed stop bypasses planning, cancelled plans cannot replace a new request,
   manual simulation holds between missions, and navigation/audio receipts describe actual outcomes.
   Native iOS buttons verified reminder delivery, exploration, Pause, conversation, and fresh delivery after Pause;

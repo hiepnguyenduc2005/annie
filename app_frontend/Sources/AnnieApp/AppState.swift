@@ -270,9 +270,8 @@ final class AppState: ObservableObject {
 
     // MARK: One composer, two paths
 
-    /// Whatever was typed, spoken, or tapped on a chip. A question is answered
-    /// instantly from what Annie remembers and never moves the dog. Anything
-    /// else is an instruction. An explicit delivery ask (tell/remind/check on/
+    /// Whatever was typed, spoken, or tapped on a chip. An observation question
+    /// is answered from memory. An explicit delivery ask (tell/remind/check on/
     /// ask someone) is a family message, because only a family run records the
     /// outcome — the resident's reply, a reminder done, an emergency. A motion
     /// or operator instruction goes straight to the dog's agent when she is
@@ -280,11 +279,12 @@ final class AppState: ObservableObject {
     func submit(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        if Self.isQuestion(trimmed) {
+        let intent = MessageRouter.route(trimmed)
+        if intent == .question {
             await ask(trimmed)
             return
         }
-        if MessageRouter.route(trimmed) == .familyMessage {
+        if intent == .familyMessage {
             if live, dog == nil { await refreshDog() }   // asked before the first status came back
             await send(trimmed, insteadOfDog: live && dog?.available != true)
             return
@@ -295,17 +295,6 @@ final class AppState: ObservableObject {
         } else {
             await send(trimmed, insteadOfDog: live)
         }
-    }
-
-    /// Ends in "?" or opens with a question word. Deliberately conservative:
-    /// "Check on Grandma" and "Tell Grandma..." are instructions.
-    static func isQuestion(_ text: String) -> Bool {
-        let lowered = text.lowercased()
-        if lowered.hasSuffix("?") { return true }
-        let openers = ["where", "what", "when", "who", "why", "how", "which", "did", "does", "do", "is", "are",
-                       "was", "were", "has", "have", "had", "can", "could", "will", "would", "should"]
-        guard let first = lowered.split(whereSeparator: { !$0.isLetter }).first else { return false }
-        return openers.contains(String(first))
     }
 
     // MARK: Messages to Annie

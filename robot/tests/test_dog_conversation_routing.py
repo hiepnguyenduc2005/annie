@@ -87,3 +87,35 @@ def test_negation_inside_spoken_message_stays_speech(text):
     assert [step["name"] for step in plan["steps"]] == expected
     assert any("not" in step["args"].get("text", "") or "don't" in step["args"].get("text", "")
                for step in plan["steps"])
+
+
+@pytest.mark.parametrize("text", ["walk forward 3 steps", "walk forward three steps", "take 3 steps forward",
+                                  "take three steps forward", "walk back 2 steps", "walk backwards two footsteps",
+                                  "go forward 5 paces", "move forward a few strides", "walk forward 3 steps and sit",
+                                  "turn around and take 3 steps", "walk forward a step", "walk forward eleven steps"])
+def test_step_count_motion_is_rejected_without_model(text):
+    model = Model([{"name": "walk", "args": {"metres": 1}}])
+    plan = agent.plan_instruction(text, {}, inference=model, validate_command=validate_command)
+    assert plan["steps"] == []
+    assert "cannot count footsteps" in plan["reply"]
+    assert "walk forward 1 m" in plan["reply"]
+    assert model.calls == 0
+    assert agent.rule_plan(text, {})["steps"] == []
+
+
+@pytest.mark.parametrize("text,expected", [("say walk forward 3 steps", [{"name": "say", "args": {"text": "walk forward 3 steps"}}]),
+                                           ("tell grandma to walk forward 3 steps", None)])
+def test_step_count_inside_speech_stays_speech(text, expected):
+    plan = agent.plan_instruction(text, {}, validate_command=validate_command)
+    if expected is not None:
+        assert plan["steps"] == expected
+    else:
+        assert [step["name"] for step in plan["steps"]] == ["find_person", "say", "listen"]
+        assert any("3 steps" in step["args"].get("text", "") for step in plan["steps"])
+
+
+@pytest.mark.parametrize("text,metres", [("walk forward", 1.0), ("walk forward 3 m", 3.0),
+                                         ("walk back 1 m", -1.0), ("go ahead 2.5 m", 2.5)])
+def test_distance_walking_is_unchanged(text, metres):
+    plan = agent.plan_instruction(text, {}, validate_command=validate_command)
+    assert plan["steps"] == [{"name": "walk", "args": {"metres": metres}}]

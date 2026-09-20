@@ -43,6 +43,25 @@ The phone app reaches `app_backend` at the Mac's hotspot address.
   `ssh -N -L 8091:127.0.0.1:8091 asus@100.112.123.40` and the brain's model is
   `Qwen/Qwen2.5-Omni-3B` at `http://127.0.0.1:8091/v1`.
 
+## Cold start on the GX10 (script)
+
+`robot/gx10_setup.sh` does the whole cold start idempotently: baseline-commits the
+existing `~/robot-dog` folder, installs system packages (PortAudio, OpenGL libs),
+`uv` + a Python 3.12 venv with the errand/app/brain requirements, creates `.env`
+from the template pointing the vision provider at the GX10's own `:8091`
+Qwen2.5-Omni server (loopback, so the privacy guard holds), checks the LLM server
+and GPU, and writes `robot/gx10_start.sh` (errand on `:8010`, robot_backend brain on
+`:8004`). It never touches the running LLM server, networks, or the dog.
+
+```sh
+# on the GX10, from a clone (or `bash gx10_setup.sh --clone` to clone first)
+bash robot/gx10_setup.sh
+MAC=<mac address> ANNIE_INTERNAL_SECRET=<same as the Mac> robot/gx10_start.sh
+```
+
+Written on the Mac on 2026-09-20 and **not yet executed on a GX10**; expect small
+fixes on the first run (package names, the brain's own requirements).
+
 ## Wiring the GX10 (about ten minutes once it is reachable)
 
 1. Join the GX10 to the phone hotspot; note its address (`ip -4 addr`), e.g. `172.20.10.11`.

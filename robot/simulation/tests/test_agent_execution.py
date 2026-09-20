@@ -188,3 +188,15 @@ def test_speech_cooldown_and_queued_audio_gate_say():
     assert gate({"action": "say", "text": "   "})[0] is None
     assert gate({"action": "say", "text": 5})[0] is None
     assert gate({"action": "say", "text": "x" * 501})[0] is None
+
+
+def test_trick_uses_motion_and_incident_gates():
+    action = {'action': 'trick', 'trick': 'spin'}
+    assert gate(action)[0] == {'cmd': 'trick', 'trick': 'spin'}
+    assert gate(action, status={'pending_checkin': {'event_id': 'e'}})[0] is None
+    assert gate(action, state=base_state(person_safety={'ready': False}))[0] is None
+    assert gate(action, frame=frame(ts=1))[0] is None
+    assert gate({'action': 'trick', 'trick': 'jump'})[0] is None
+    for kind in ('goto', 'look', 'trick', 'finish'):
+        assert gate({'action': kind, 'trick': 'spin', 'waypoint_id': 'home'},
+                    state=base_state(navigation={'state': 'tricking'}))[0] is None

@@ -1,5 +1,94 @@
 # Live integration evidence
 
+## One-command local showcases
+
+From the repository root, with the existing app/brain `.venv`, simulator
+`.cache/dimos/.venv`, scene catalog, locomotion policy and YOLO assets prepared
+as described in [simulation setup](../robot/simulation/README.md):
+
+```sh
+.venv/bin/python robot/demo.py
+```
+
+Keep that terminal open. The launcher starts the app on `:8000`, the viewer on
+`:8766`, the local brain on `:8004`, and one agent bridge. It waits for app and
+brain `/health`, viewer `/state`, the `grandmas-house` scene and person detector, and a fresh bridge
+status for that map. The viewer uses locomotion, advisory person detection and
+native audio. It prints `http://127.0.0.1:8000/app/` and
+`http://127.0.0.1:8766/`. Ctrl-C stops its process groups, including on partial
+startup failure. An occupied service port is refused with its PID; existing
+services are never stopped. Logs go under `.data/simulation/demo-logs/`.
+
+The brain uses local Ollama `qwen3-vl:2b-instruct` at `:11434`; Ollama and that
+model must already be installed and running. Health readiness does not prove
+model inference latency or recognition quality. Root `.env` supplies auth;
+launcher overrides demo mode, requires playback receipts, and disables hosted
+memory. It enables no cloud fallback. Planning remains paused until requested.
+Do not use the viewer's bridge-start/full-house buttons alongside this launcher.
+
+In a second terminal, run one showcase at a time:
+
+```sh
+.venv/bin/python robot/showcase.py status
+.venv/bin/python robot/showcase.py patrol
+.venv/bin/python robot/showcase.py fall
+.venv/bin/python robot/showcase.py tricks
+```
+
+- `status` prints app status, viewer navigation, brain health, and bridge file
+  age/errors even if another component is unreachable; unavailable/stale status
+  returns a nonzero exit code.
+- `patrol` pauses autonomous planning, settles previous motion, then visits
+  living-room, bedroom, hallway and home. Each next step waits for the previous
+  command's identified completed receipt. A failed receipt stops the sequence.
+- `fall` requires a fresh local agent bridge, resets only a resolved demo
+  episode, stages the resident fall, and enables local camera-driven planning.
+  It prints the new incident's `fall_suspected`, its `say` command, verified
+  playback/reply window and escalation, with measured elapsed times. It does
+  not inject perception, speech receipts or replies. With no microphone input,
+  this backend reports `checkin_audio_failed: input_unavailable` before family
+  attention; this is not evidence that a resident stayed silent. Playback failure
+  or missing timeline stages fail the showcase. Planning is paused afterward.
+- `tricks` sequences spin, circle, zigzag, wiggle and figure8, waiting on each
+  receipt. An older app's HTTP 422 prints `trick command not available yet` for
+  each trick; other errors fail. This operator showcase is distinct from the
+  planner's instruction to reserve tricks for celebrating a reassured resident.
+
+Every step prints elapsed seconds. `--timeout 180` is the default per receipt or
+incident timeline; increase it explicitly if desired. The launcher has a
+separate `--timeout 90` readiness deadline. Neither script changes Wi-Fi or
+sends physical robot commands. Simulator person detection remains advisory;
+missing detector results still inhibit movement. Local Qwen has previously
+missed the five-second action/evidence freshness limit, so a full local fall
+showcase remains an acceptance task, not a promised result.
+
+### This implementation session: actual checks and limits
+
+- Ran `.venv/bin/python robot/demo.py`: correctly refused existing listeners
+  `:8000 PID 96964`, `:8766 PID 21128`, `:8004 PID 70260`; no child started.
+- Ran `.venv/bin/python robot/showcase.py status`: **0.003 s total**, reported
+  `ConnectError` for all three HTTP services in this sandbox, and read a fresh
+  bridge status file (age **0.15 s**). This is a failure-path measurement,
+  not a working-stack or inference latency result.
+- App backend suite: **185 passed in 2.38 s**. Focused planner/context/bridge/
+  execution/continuous-brain/showcase suite: **78 passed in 0.60 s**. Launcher
+  lifecycle suite: **9 passed in 0.14 s**. Combined focused and launcher run:
+  **87 passed in 0.73 s**. These checks mock HTTP and child
+  processes; they do not establish live rendering, playback or model quality.
+- Schema export `--check`, family `robot/frontend/app.js` syntax, and simulator
+  `robot/simulation/web/app.js` syntax passed.
+- A broader simulator run in `.cache/dimos/.venv` recorded **313 passed,
+  6 failed, 1 skipped in 24.64 s**. Failures were a concurrently changed
+  speech-receipt mock signature (subsequently passed in the focused run), four
+  hosted-memory CA tests (including absent `trustme`), and native `say` producing
+  a zero-duration WAV in this environment. An initial combined run in `.venv`
+  also lacked MuJoCo and hit sandbox multiprocessing restrictions; it is not
+  simulator qualification.
+- Live patrol/fall/tricks and fresh-stack startup were **not measured**:
+  listeners already existed and the coding sandbox denied localhost HTTP.
+  Git fetch and staging were also denied by the read-only `.git` boundary;
+  these changes could not be committed or pushed from this session.
+
 ## Repeatable full-house run, 2026-09-19
 
 Two complete runs passed on the same Mac: **41.864 s / 13 image inferences**

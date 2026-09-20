@@ -36,8 +36,12 @@ is a provider error (502), never executed.
 perception validates against the same strict enums as /infer and feeds the
 existing check-in policy; frame_id, ts, and pose are the verified request
 metadata echoed back. action is exactly one of goto (requires waypoint_id),
-say (requires text, 1-500 chars), wait, look, stop, finish (carry neither); every
-action carries reason (1-500 chars).
+say (requires text, 1-500 chars), trick (requires trick: spin, circle, zigzag,
+wiggle, or figure8), wait, look, stop, finish (carry no conditional fields); every
+action carries reason (1-500 chars). Conditional fields are exclusive to their
+actions. Both prompts reserve tricks for celebrating a reassured resident.
+The simulator applies the usual fresh-frame, incident and person-motion gates,
+and awaits the identified terminal receipt before another motion or finish.
 
 `finish` proposes completion; the simulation independently checks accepted
 evidence, current goal revision, and execution receipts. Simulator intelligence

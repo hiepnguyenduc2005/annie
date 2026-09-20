@@ -357,12 +357,14 @@ class Bridge:
             if not local["sent"]:
                 # Mark before sending: uncertain transport outcomes must not replay motion.
                 local["sent"] = True
-                if item["cmd"] not in {"goto", "stop", "resume", "look", "patrol", "say"}:
+                if item["cmd"] not in {"goto", "stop", "resume", "look", "patrol", "say", "trick"}:
                     local["pending"] = ("failed", "Unsupported simulation command.")
                 else:
                     payload = {"action": "mission", "cmd": item["cmd"], "command_id": cid}
                     if item["cmd"] == "goto":
                         payload["waypoint"] = item["waypoint"]
+                    if item["cmd"] == "trick":
+                        payload["trick"] = item["trick"]
                     try:
                         if item["cmd"] == "say":
                             await self.request(self.viewer, "POST", "/say",
@@ -527,9 +529,9 @@ class Bridge:
             action=result['action']
             command,detail=gate_action(action,state=state,status=status,frame=frame,
                 now_ms=int(self.clock()*1000),last_speech_ms=self.agent_last_speech_ms)
-            if command and command['cmd'] in ('goto','look') and any(
+            if command and command['cmd'] in ('goto','look','trick') and any(
                     item.get('status') not in TERMINAL and item.get('cmd') in
-                    ('goto','look','turn','patrol','resume','stop') for item in outstanding):
+                    ('goto','look','turn','patrol','resume','stop','trick') for item in outstanding):
                 command,detail=None,'An app motion command is awaiting a terminal execution receipt'
             if not state.get('intelligence_enabled') or state.get('intelligence_revision')!=initial_state.get('intelligence_revision'):
                 command,detail=None,'Goal was paused or changed while the model was thinking'

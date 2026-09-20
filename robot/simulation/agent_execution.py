@@ -22,7 +22,7 @@ def gate_action(action, *, state, status, frame, now_ms, last_speech_ms=None):
     if status.get('pending_checkin'):
         return None,'Incident check-in owns motion and speech until resolved'
     if kind=='finish':
-        if (state.get('navigation') or {}).get('state') in ('moving','scanning','turning'):
+        if (state.get('navigation') or {}).get('state') in ('moving','scanning','turning','tricking'):
             return None,'Cannot finish while current motion has no terminal execution receipt'
         if any(clip.get('status') in ('queued','playing','generated') for clip in state.get('speech',[])):
             return None,'Cannot finish while audio is pending or playing'
@@ -30,12 +30,16 @@ def gate_action(action, *, state, status, frame, now_ms, last_speech_ms=None):
         return None,'Model completed the goal'
     safety=state.get('person_safety') or {}
     resident_guard=state.get('resident_guard') or {}
-    if kind in ('goto','look'):
+    if kind in ('goto','look','trick'):
         if (not safety.get('ready') or (safety.get('enforced',True) and safety.get('blocked'))
                 or (resident_guard.get('enforced',True) and resident_guard.get('blocked'))):
             return None,'Person/stale-camera interlock holds motion; explicit operator restart required'
-        if (state.get('navigation') or {}).get('state') in ('moving','scanning','turning'):
+        if (state.get('navigation') or {}).get('state') in ('moving','scanning','turning','tricking'):
             return None,'Current motion has no terminal execution receipt yet'
+        if kind=='trick':
+            if action.get('trick') not in ('spin','circle','zigzag','wiggle','figure8'):
+                return None,'Unsupported trick'
+            return {'cmd':'trick','trick':action['trick']},'Model-selected celebration accepted'
         if kind=='look':
             return {'cmd':'look'},'Model-selected scan accepted'
         waypoint=action.get('waypoint_id')

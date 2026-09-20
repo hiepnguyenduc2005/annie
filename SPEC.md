@@ -119,3 +119,15 @@ Where older prose describes current behavior differently, acceptance target 1
 defines the intended next behavior. Existing strict wire contracts remain in
 force until producers, consumers, schemas, and tests migrate together. See the
 acceptance document's inspection baseline for the known implementation gaps.
+
+## Local showcase operation
+
+One repository command starts the simulator app, grandmas-house locomotion viewer
+with advisory person detection, local brain and agent bridge, waits for readiness,
+and tears down its child processes on Ctrl-C. Occupied service ports are refused
+with listener PIDs. Separate HTTP showcase commands run the four-stop patrol,
+stage a fall and observe its identified incident/playback/reply/escalation timeline,
+sequence the five supported tricks by execution receipts, and summarize stack
+status. Each step reports measured elapsed time and has a bounded wait. A trick
+is an optional planner action for celebrating a reassured resident; execution
+still uses the simulator's motion gates. These are simulator workflows only.

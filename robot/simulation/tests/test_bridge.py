@@ -195,3 +195,31 @@ def test_status_file_preserves_stale_result_and_omits_images(tmp_path):
             assert 'SECRET_IMAGE_BYTES' not in path.read_text()
             assert not list(path.parent.glob('.bridge-status-*'))
     asyncio.run(exercise())
+
+
+def test_trick_forwarded_once_and_waits_for_identified_terminal_receipt():
+    async def exercise():
+        cid = str(uuid4())
+        command = dict(command_id=cid, cmd='trick', trick='figure8', status='queued')
+        controls, receipts = [], []
+        def handler(request):
+            if request.url.path == '/commands':
+                return httpx.Response(200, json=[command])
+            data = json.loads(request.content)
+            if request.url.path == '/control':
+                controls.append(data)
+            else:
+                receipts.append(data['status'])
+                command['status'] = data['status']
+            return httpx.Response(200, json={})
+        async with httpx.AsyncClient(base_url='http://test', transport=httpx.MockTransport(handler)) as client:
+            bridge = Bridge(client, client, client)
+            await bridge.process_commands({'commands': []})
+            await bridge.process_commands({'commands': []})
+            assert controls == [dict(action='mission', cmd='trick', trick='figure8', command_id=cid)]
+            assert receipts == ['accepted']
+            for status in ('executing', 'completed'):
+                await bridge.process_commands({'commands': [dict(command_id=cid, status=status)]})
+            assert receipts == ['accepted', 'executing', 'completed']
+            assert len(controls) == 1
+    asyncio.run(exercise())

@@ -142,13 +142,12 @@ def _say(text):
 
 
 def _speak_host(text: str):
-    """Speak on the host speaker (macOS say); the dog itself has no verified speaker."""
-    with contextlib.suppress(Exception):
-        subprocess.Popen(["say", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    """Speak on the host speaker without blocking the control loop (ElevenLabs when configured, else say)."""
+    threading.Thread(target=lambda: speak_blocking(text), daemon=True, name="speak").start()
 
 
-def speak_blocking(text: str) -> bool:
-    """Speak on the host and wait for it to finish (text on stdin, never as an argument)."""
+def _say_blocking(text: str) -> bool:
+    """macOS `say` on the host and wait for it to finish (text on stdin, never as an argument)."""
     try:
         return subprocess.run(["say"], input=text.encode("utf-8"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                               timeout=60).returncode == 0
@@ -156,10 +155,41 @@ def speak_blocking(text: str) -> bool:
         return False
 
 
+def _whisper_transcribe(wav_bytes: bytes) -> str | None:
+    from robot.simulation.local_stt import LocalSTTAdapter
+    text = (LocalSTTAdapter().transcribe(wav_bytes).text or "").strip()
+    return text or None
+
+
+def _cloud_voice():
+    """ElevenLabs speaks / Deepgram hears when their keys are in the environment; local fallback otherwise."""
+    from go2_voice_cloud import CloudVoice
+    return CloudVoice(local_speak=_say_blocking, local_transcribe=_whisper_transcribe)
+
+
+VOICE = None  # created lazily so tests never touch the environment
+
+
+def voice():
+    global VOICE
+    if VOICE is None:
+        VOICE = _cloud_voice()
+    return VOICE
+
+
+def speak_blocking(text: str) -> bool:
+    """Speak on the host speaker (ElevenLabs voice when configured, else macOS say); blocks until done."""
+    return voice().speak(text)
+
+
 def listen_blocking(max_s: float) -> dict:
-    """Host microphone -> transcript (Silero VAD + local Whisper); same path as the body service."""
-    from go2_body import _listen_blocking
-    return _listen_blocking(max_s)
+    """Host microphone -> utterance (Silero VAD) -> transcript (Deepgram when configured, else local Whisper)."""
+    from robot.simulation.live_listener import capture_utterance, pcm16_to_wav, silero_vad, sounddevice_recorder
+    utterance = capture_utterance(sounddevice_recorder(), silero_vad(), max_ms=int(max_s * 1000))
+    if utterance["outcome"] != "speech":
+        return {"transcript": None, "heard": False, "speech_ms": 0}
+    text = voice().transcribe(pcm16_to_wav(utterance["pcm"]))
+    return {"transcript": text, "heard": bool(text), "speech_ms": utterance["speech_ms"], "stt": voice().stats}
 
 
 def _encode(frame, width=480, quality=70):
@@ -1159,6 +1189,11 @@ def main(argv=None):
     for key in [k for k in os.environ if k.lower() in ("http_proxy", "https_proxy", "all_proxy")]:
         os.environ.pop(key)
     os.environ["NO_PROXY"] = "*"
+    for line in Path(".env").read_text().splitlines() if Path(".env").exists() else []:  # voice keys only
+        if line.startswith(("ELEVENLABS_", "DEEPGRAM_")) and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"'))
+    _say(f"voice: {voice().enabled} (cloud when a key is set; local say/Whisper otherwise)")
     logging.disable(logging.CRITICAL)
     try:
         report = asyncio.run(run_patrol_greet(ip=args.ip, aes_key=os.environ.get("UNITREE_AES_128_KEY"),

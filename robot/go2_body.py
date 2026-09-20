@@ -118,24 +118,20 @@ def _log(text):
 
 
 def _speak_blocking(text: str) -> bool:
-    # Text goes in on stdin, never as an argument: a line starting with "-" must not become a `say` option.
-    try:
-        return subprocess.run(["say"], input=text.encode("utf-8"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                              timeout=60).returncode == 0
-    except Exception:
-        return False
+    """ElevenLabs voice when ELEVENLABS_API_KEY is set, else macOS say (text on stdin, never as an argument)."""
+    from go2_patrol_greet import speak_blocking
+    return speak_blocking(text)
 
 
 def _listen_blocking(max_s: float) -> dict:
     """Host microphone -> transcript via the live listener's VAD + local Whisper (real path)."""
     from robot.simulation.live_listener import capture_utterance, pcm16_to_wav, silero_vad, sounddevice_recorder
-    from robot.simulation.local_stt import LocalSTTAdapter
     utterance = capture_utterance(sounddevice_recorder(), silero_vad(), max_ms=int(max_s * 1000))
     if utterance["outcome"] != "speech":
         return {"transcript": None, "heard": False, "speech_ms": 0}
-    result = LocalSTTAdapter().transcribe(pcm16_to_wav(utterance["pcm"]))
-    text = (result.text or "").strip()
-    return {"transcript": text or None, "heard": bool(text), "speech_ms": utterance["speech_ms"]}
+    from go2_patrol_greet import voice
+    text = voice().transcribe(pcm16_to_wav(utterance["pcm"]))  # Deepgram when configured, else local Whisper
+    return {"transcript": text, "heard": bool(text), "speech_ms": utterance["speech_ms"]}
 
 
 class Body:

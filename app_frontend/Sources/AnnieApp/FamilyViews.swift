@@ -14,6 +14,7 @@ struct AskAnnieView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                RemoteMuteControl()
             }.padding(16)
             SectionError(text: state.messageError)
             ScrollViewReader { reader in
@@ -83,5 +84,76 @@ struct AskAnnieView: View {
             }.padding(12)
         }
         .onDisappear { composerFocused = false }
+    }
+}
+
+
+struct RemoteVoiceState: Decodable {
+    let muted: Bool?
+}
+
+struct RemoteVoiceUpdate: Encodable {
+    let muted: Bool
+}
+
+/// The confirmed robot/Mac speaker state; independent of conversation and microphone.
+private struct RemoteMuteControl: View {
+    @State private var muted: Bool?
+    @State private var saving = false
+    @State private var error: String?
+    @State private var revision = UUID()
+    private let api = AnnieAPI()
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Button {
+                Task { await toggle() }
+            } label: {
+                Label(saving ? "Saving…" : muted == true ? "Unmute" : muted == false ? "Mute" : "Audio unavailable",
+                      systemImage: muted == true ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minHeight: 44)
+            }
+            .disabled(saving || muted == nil)
+            .accessibilityHint("Controls robot and Mac speech; microphone stays on")
+            if let error {
+                Text(error).font(.caption).foregroundStyle(.red).frame(maxWidth: 170)
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                await refresh()
+                do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { break }
+            }
+        }
+    }
+
+    @MainActor private func refresh() async {
+        guard !saving else { return }
+        let current = revision
+        do {
+            let response = try await api.voiceSettings()
+            guard !saving, revision == current else { return }
+            muted = response.muted
+        } catch {
+            guard !saving, revision == current else { return }
+            muted = nil
+        }
+    }
+
+    @MainActor private func toggle() async {
+        guard let previous = muted, !saving else { return }
+        saving = true
+        revision = UUID()
+        error = nil
+        defer { saving = false }
+        do {
+            let response = try await api.setMuted(!previous)
+            muted = response.muted
+            if response.muted != !previous { error = "Audio change was not confirmed." }
+        } catch {
+            muted = nil
+            self.error = "Audio change was not confirmed. Please retry when available."
+        }
     }
 }

@@ -174,6 +174,13 @@ Stop Audio still finalizes and retains a summary locally. Delivery requires
   path. The speaker and microphone are chosen by name (`/voice` on the dog process, `/api/settings/voice`
   in the app): AirPods, the Mac's own devices, the iPhone Continuity mic, or the "iPhone (Annie Audio)"
   WebSocket app on :8030. The dog process mutes its own voice on the mic while speaking.
+- **Speech mute.** The family app and operator dashboard expose one shared, server-confirmed
+  mute setting through `/api/settings/voice` and `/voice`. Muting stops current Mac playback,
+  suppresses cloud and local speech, and closes the open conversation window; microphone
+  commands and robot controls remain available. A muted delivery must report that speech
+  did not play. `ANNIE_VOICE_MUTED=1` starts a session quietly. Unavailable or older servers
+  show unavailable audio controls rather than inventing a mute state. Already transmitted
+  audio on the separate iPhone audio socket cannot be stopped by this protocol.
 - **Conversation.** After a greeting (which asks how the person is) the dog listens up to 6 s, classifies
   the reply (fine / concern / other / none), answers in Annie's voice (model-composed, quality-gated) and
   for a *concern* uses fixed wording and records a `concern`. For 45 s after Annie speaks, speech needs no

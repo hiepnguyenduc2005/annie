@@ -89,6 +89,14 @@ struct AnnieAPI: AnnieServing {
         return items
     }
 
+    func voiceSettings() async throws -> RemoteVoiceState {
+        try await get("api/settings/voice")
+    }
+
+    func setMuted(_ muted: Bool) async throws -> RemoteVoiceState {
+        try await post("api/settings/voice", body: RemoteVoiceUpdate(muted: muted), key: UUID().uuidString)
+    }
+
     func users() async throws -> [AppUser] { try await all("api/app-users") }
     func residents() async throws -> [DogUser] { try await all("api/dog-users") }
 

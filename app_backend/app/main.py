@@ -20,7 +20,7 @@ from .services.messages import Messages
 from .services.notifications import Notifications
 from .services.robot import Robot
 from .scheduler import Scheduler
-from .api import users, reminders, messages, notifications, robot_callbacks, websocket
+from .api import voice, users, reminders, messages, notifications, robot_callbacks, websocket
 
 
 def create_app(settings=None, *, clock=utcnow, transport=None):
@@ -53,7 +53,7 @@ def create_app(settings=None, *, clock=utcnow, transport=None):
     app = FastAPI(title='Annie Family API', version='2.0.0', lifespan=lifespan)
     app.state.settings = settings
     app.add_middleware(LocalBoundary)
-    for module in (users, reminders, messages, notifications, robot_callbacks, websocket):
+    for module in (voice, users, reminders, messages, notifications, robot_callbacks, websocket):
         app.include_router(module.router)
 
     @app.exception_handler(TimeoutError)

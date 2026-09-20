@@ -199,6 +199,15 @@ still uses the simulator's motion gates. These are simulator workflows only.
 
 ## Demo readiness with the physical dog off
 
+The native family app must display reminder execution beside the Remind button,
+reuse identical active requests, and refresh other relatives' runs without
+reopening the app. Accepted and queued messages are not execution. Missing
+events must fail visibly within a bounded inactivity deadline. An explicit Pause
+cancels active and queued errands, preserves completed history, and distinguishes
+task cancellation from a correlated software-stop acknowledgment. New requests
+are blocked while Pause is settling; resumption requires a new explicit request.
+See [phone delivery acceptance](docs/PHONE_DELIVERY.md).
+
 The iPhone app is the product surface. A separate loopback stack must run the same
 family API, errand relay, mission board, and rendered simulated dog without using
 the physical robot, microphone, speaker, cloud providers, or real household data.

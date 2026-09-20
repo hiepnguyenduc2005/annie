@@ -35,6 +35,13 @@ home and the family's phone can be in different places.
 
 ## What is real, and what is staged
 
+Latest integration handoff: [phone delivery, Pause, screenshots, and open
+acceptance gaps](docs/PHONE_DELIVERY.md). The updated native screen displayed a
+24.909-second simulated reminder delivery with mocked audio, and the physical
+family Pause path returned a software-stop acknowledgment in 129.7 ms. Physical
+voice/movement qualification and four failing fall scenarios remain open; this
+is not a production signoff.
+
 Being precise about this matters more than the feature list.
 
 **Real:** the async message path (a message is accepted in ~30 ms and the

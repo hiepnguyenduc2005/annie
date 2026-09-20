@@ -73,7 +73,7 @@ struct RemindersView: View {
                             if !run.finished { ProgressView().controlSize(.small) }
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(run.statusLabel).font(.caption.weight(.semibold))
-                                if let event = run.events.last {
+                                if let event = run.events.last, run.status != "cancelled" {
                                     Text(event.summary).font(.caption)
                                 }
                             }

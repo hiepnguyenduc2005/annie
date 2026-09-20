@@ -358,8 +358,11 @@ final class AppState: ObservableObject {
     }
 
     func reminderRun(for reminder: Reminder) -> FamilyRun? {
+        if let latest = runs.values.filter({ $0.reminder_id == reminder.id }).max(by: { $0.created_at < $1.created_at }) {
+            return latest
+        }
         if let id = reminderRunIDs[reminder.id], let run = runs[id] { return run }
-        return runs.values.filter { $0.reminder_id == reminder.id }.max { $0.created_at < $1.created_at }
+        return nil
     }
 
     func remind(_ reminder: Reminder) async {

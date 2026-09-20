@@ -6,6 +6,11 @@ as work progresses and record a reason for blocked work.
 
 ## Now
 
+- [ ] TASK-018: Finish the physical-phone acceptance pass after unlock ([handoff](PHONE_DELIVERY.md)).
+  - Implemented and committed: inline reminder progress, shared family refresh, duplicate suppression, bounded missing-event failure, Pause, correlated firmware stop receipts, and visible ElevenLabs/Deepgram configuration.
+  - Verified: 108 family API checks, 344 robot app/backend checks, 111 errand checks, native builds and model/router checks; API-driven native simulator shows executing → cancelled → a fresh request delivered in 24.909 s with mock audio. Physical family Pause acknowledged in 129.7 ms. Updated signed app installed.
+  - Remaining: unlock the Mac/iPhone for direct native-button testing and physical app launch; real voice delivery and sustained physical operation are not established by the mock-audio demonstration.
+
 - [ ] TASK-017: Complete the Claude handoff as an iPhone demo backed by the executing simulator.
   - Scope: conversation with mocked audio, People/re-identification, MCP/care skills, app polish, isolated launch, and seeded message/fall scenarios. See [runbook](SIM_DOG.md).
   - Done when: the final verification pass succeeds, the iPhone visibly connects to the simulated dog, actual HTTP missions terminate honestly, and reviewed changes are pushed.

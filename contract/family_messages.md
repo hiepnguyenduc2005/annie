@@ -74,6 +74,12 @@ Successful ingestion returns 202 with the stored event.
 
 ## Run lifecycle
 
+`GET /api/family/snapshot` returns `{thread: [...], runs: [...]}` for the
+latest 50 messages/runs, using the same shape as the WebSocket's initial
+snapshot and normal family authentication. Native clients refresh this
+snapshot every two seconds, so another relative's requests appear without
+reopening the app. Reminders refresh alongside it after confirmed outcomes.
+
 `dispatched` (accepted by app_backend) → optional `queued` (waiting in the
 robot errand FIFO) → `running` (progress callback received) → `completed` or
 `failed`. `unreachable` means dispatch failed; `cancelled` means the operator

@@ -373,8 +373,25 @@ LINE_PROMPT = (
 )
 
 
-def compose_line(purpose: str, sit: dict, *, inference=None, fallback: str, extra: str = "", max_words=18) -> dict:
-    """A situated spoken line from the model (bounded), else `fallback`. Returns {"text", "source", "latency_ms"}."""
+_BAD_LINE = re.compile(r"\b(about to|going to say|say hello|i see you\b|i can see you|detect|process|robot|camera|sensor|track|"
+                       r"as an ai|language model|hello there!?$|greet(ing)? you)\b", re.I)
+
+
+def line_ok(text: str, *, name: str | None = None) -> bool:
+    """A model line Annie may say: no narration of her own mechanics, no meta talk, uses the name when known,
+    ends like a sentence, and is not a bare 'hello'."""
+    t = (text or "").strip()
+    if len(t.split()) < 3 or _BAD_LINE.search(t):
+        return False
+    if name and name.lower() not in t.lower():
+        return False
+    return t[-1] in ".?!" or len(t.split()) >= 5
+
+
+def compose_line(purpose: str, sit: dict, *, inference=None, fallback: str, extra: str = "", max_words=18,
+                 name: str | None = None) -> dict:
+    """A situated spoken line from the model (bounded and quality-gated by `line_ok`), else `fallback`.
+    Returns {"text", "source", "latency_ms"}."""
     if inference is not None:
         try:
             resp = inference.chat([{"role": "system", "content": LINE_PROMPT},
@@ -382,12 +399,49 @@ def compose_line(purpose: str, sit: dict, *, inference=None, fallback: str, extr
                                   max_tokens=60, temperature=0.7)
             text = (resp.get("text") or "").strip().strip('"').splitlines()[0].strip() if resp.get("ok") else ""
             words = text.split()
-            if 2 <= len(words) <= max_words + 6 and not re.search(r"[{}\[\]<>]", text):
+            if 2 <= len(words) <= max_words + 6 and not re.search(r"[{}\[\]<>]", text) and line_ok(text, name=name):
                 return {"text": " ".join(words[:max_words + 6]), "source": f"{resp.get('provider')}:{resp.get('model')}",
                         "latency_ms": resp.get("latency_ms")}
         except Exception:
             pass
     return {"text": fallback, "source": "rules", "latency_ms": None}
+
+
+_CONCERN = re.compile(r"\b(help|hurt|pain|fell|fallen|dizzy|can'?t (get up|breathe|move)|not (ok|okay|well|good|fine)|"
+                      r"sick|ill|chest|ambulance|emergency|bleeding|scared)\b", re.I)
+_FINE = re.compile(r"\b(fine|good|great|okay|ok|alright|all right|well|lovely|not bad|better)\b", re.I)
+
+
+def classify_reply(heard: str | None) -> str:
+    """'concern' | 'fine' | 'other' | 'none' from what the person said after Annie's question."""
+    if not heard or not heard.strip():
+        return "none"
+    if _CONCERN.search(heard):
+        return "concern"
+    if _FINE.search(heard):
+        return "fine"
+    return "other"
+
+
+def reply_fallback(kind: str, who: str | None) -> str:
+    name = who or "dear"
+    return {"concern": f"I'm right here with you, {name}. I'm letting the family know now.",
+            "fine": f"That's lovely to hear, {name}. I'll be nearby if you need anything.",
+            "other": f"Thank you for telling me, {name}. I'm listening.",
+            "none": ""}[kind]
+
+
+def converse_reply(heard: str | None, sit: dict, *, who: str | None, inference=None) -> dict:
+    """Annie's spoken reply to what the person said: {"text", "kind", "source"}; a concern is never softened."""
+    kind = classify_reply(heard)
+    fallback = reply_fallback(kind, who)
+    if kind == "none":
+        return {"text": "", "kind": kind, "source": "rules"}
+    if kind == "concern":
+        return {"text": fallback, "kind": kind, "source": "rules"}  # fixed wording for safety
+    line = compose_line(f"reply warmly to what {who or 'the person'} just said, in one sentence", sit, inference=inference,
+                        fallback=fallback, extra=f"They said: \"{heard.strip()[:200]}\"", name=None)
+    return {"text": line["text"], "kind": kind, "source": line["source"]}
 
 
 class Narrator:

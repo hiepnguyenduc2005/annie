@@ -132,3 +132,20 @@ def test_look_for_rule_and_spot_parsing():
             return {"ok": True, "text": '{"seen": true, "where": "left"}', "latency_ms": 12}
     assert spot("door", b"jpeg-bytes", inference=FakeInference()) == {"seen": True, "where": "left", "note": "", "latency_ms": 12}
     assert spot("door", None)["error"] == "no frame"
+
+
+def test_conversation_replies_and_concern_is_never_softened():
+    from robot.dog.planning.agent import classify_reply, converse_reply, line_ok
+    assert classify_reply("I'm fine thank you") == "fine" and classify_reply("I fell and I can't get up") == "concern"
+    assert classify_reply("") == "none" and classify_reply("the weather is nice") == "other"
+
+    class Flattering:
+        def chat(self, messages, **kw):
+            return {"ok": True, "text": "No worries at all, everything is great!", "latency_ms": 5, "provider": "local", "model": "m"}
+    r = converse_reply("help, I fell", {"people": [], "objects": [], "sentences": []}, who="Jeanine", inference=Flattering())
+    assert r["kind"] == "concern" and "letting the family know" in r["text"] and r["source"] == "rules"
+    r = converse_reply("I'm fine", {"people": [], "objects": [], "sentences": []}, who="Jeanine", inference=Flattering())
+    assert r["kind"] == "fine" and r["text"].startswith("No worries")
+    assert not line_ok("I see you, and I'm just about to say hello.") and not line_ok("Hello there!")
+    assert line_ok("Hi Jeanine, lovely to see you by the window. How are you feeling?", name="Jeanine")
+    assert not line_ok("Lovely to see you. How are you?", name="Jeanine")  # knows the name, must use it

@@ -284,6 +284,8 @@ def telemetry_snapshot(view) -> dict:
            "checkins": [{"t_s": c.get("t_s")} for c in list(report.get("checkins") or [])[-4:]],
            "collisions": [{"t_s": c.get("t_s"), "mode": c.get("mode"), "front_m": c.get("front_m")} for c in list(report.get("collisions") or [])[-4:]],
            "instructions": list(report.get("instructions") or [])[-6:],
+           "conversations": list(report.get("conversations") or [])[-6:],
+           "concerns": list(report.get("concerns") or [])[-4:],
            "remarks": list(report.get("remarks") or [])[-6:],
            "missions": [], "frontier": {"available": False, "goal": None}, "graph_sentences": [], "places": 0, "objects": [],
            "map": getattr(view, "map_geometry", None)}
@@ -1368,6 +1370,28 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                            note=((track.get("identity") or {}).get("name")) or trick_name)
                 grid["map"].mark(tel["pose"][0], tel["pose"][1], "greet")
                 code = await show(trick_name, trick_api, trick_settle, text, look_up=True)
+                # A conversation turn: the greeting asked how they are; listen, answer in character, escalate concern.
+                heard_text, reply_text, reply_kind = None, None, "none"
+                if voice is not None and not no_motion:
+                    try:
+                        heard = await loop.run_in_executor(None, lambda: listen_blocking(6.0))
+                        heard_text = heard.get("transcript")
+                    except Exception:
+                        heard_text = None
+                    if heard_text:
+                        rep = await loop.run_in_executor(None, lambda: agent_mod.converse_reply(heard_text, sit, who=who, inference=chat_client))
+                        reply_text, reply_kind = rep["text"], rep["kind"]
+                        status(f"t={now-start:5.1f}s heard {who or 'them'}: {heard_text[:80]!r} -> {reply_kind}; saying {reply_text!r} ({rep['source']})")
+                        if reply_text:
+                            await loop.run_in_executor(None, lambda: speak_blocking(reply_text))
+                        if reply_kind == "concern":
+                            report.setdefault("concerns", []).append({"t_s": round(now - start, 1), "t": wall, "name": who, "heard": heard_text[:200]})
+                            memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="concern", people=len(tracks), note=(who or "person") + ": " + heard_text[:50])
+                            with contextlib.suppress(Exception):
+                                if graph is not None:
+                                    graph.ingest_event(wall, tel["pose"][0], tel["pose"][1], "concern", heard_text[:120])
+                report.setdefault("conversations", []).append({"t_s": round(now - start, 1), "name": who, "asked": text, "heard": heard_text,
+                                                               "reply": reply_text, "kind": reply_kind})
                 report["greetings"].append({"t_s": round(now - start, 1), "t": wall, "track_id": tid, "text": text,
                                             "trick": trick_name, "hello_code": code, "identity": track.get("identity"),
                                             "name": (track.get("identity") or {}).get("name"),

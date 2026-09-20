@@ -153,7 +153,8 @@
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var token = new URLSearchParams(location.search).get("token") || "";
+  // Body token: prefer the URL fragment (#token=...), which never reaches the server or its logs; ?token= still works.
+  var token = new URLSearchParams(location.hash.replace(/^#/, "")).get("token") || new URLSearchParams(location.search).get("token") || "";
   var headers = { "Content-Type": "application/json" }; if (token) headers["X-Body-Token"] = token;
   function toast(msg, bad) { var t = $("toast"); t.textContent = msg; t.style.color = bad ? "var(--alert)" : "var(--muted)"; }
   window.act = function (a) {

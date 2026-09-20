@@ -23,18 +23,21 @@ DEEPGRAM_URL = "https://api.deepgram.com/v1/listen"
 DEFAULT_VOICE = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs "Rachel"
 
 
-def elevenlabs_tts(text: str, *, api_key: str, voice_id: str = DEFAULT_VOICE, model_id: str = "eleven_flash_v2_5",
-                   timeout_s: float = 8.0, post=None) -> bytes | None:
-    """Text -> MP3 bytes, or None on any failure (caller falls back)."""
+def elevenlabs_tts(text: str, *, api_key: str, voice_id: str = DEFAULT_VOICE, model_id: str | None = None,
+                   timeout_s: float = 10.0, post=None) -> bytes | None:
+    """Text -> MP3 bytes, or None on any failure (caller falls back). Model: ELEVENLABS_MODEL_ID, default
+    eleven_turbo_v2_5 (warmer than flash, still ~1 s); 128 kbps so it does not sound like a phone line."""
     import httpx
-    body = {"text": text[:500], "model_id": model_id, "voice_settings": {"stability": 0.45, "similarity_boost": 0.8}}
+    model_id = model_id or os.environ.get("ELEVENLABS_MODEL_ID") or "eleven_turbo_v2_5"
+    body = {"text": text[:500], "model_id": model_id,
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "style": 0.35, "use_speaker_boost": True}}
     headers = {"xi-api-key": api_key, "Accept": "audio/mpeg", "Content-Type": "application/json"}
     try:
         if post is not None:
             return post(ELEVEN_URL.format(voice=voice_id), body, headers, timeout_s)
         with httpx.Client(timeout=timeout_s, trust_env=False) as client:
             r = client.post(ELEVEN_URL.format(voice=voice_id), json=body, headers=headers,
-                            params={"output_format": "mp3_22050_32"})
+                            params={"output_format": "mp3_44100_128"})
             if r.status_code != 200 or not r.content:
                 return None
             return r.content

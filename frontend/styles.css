@@ -1,11 +1,14 @@
 :root {
-  --ink: #213b32;
-  --muted: #69796f;
-  --green: #2e5b43;
-  --cream: #f5f4ed;
-  --line: #e0e5dc;
-  --white: #fffef9;
-  --alert: #ad5332;
+  /* Black and white carry the interface; the blue-greys carry meaning. */
+  --ink: #000000;
+  --muted: #78909c;
+  --green: #455a64; /* primary accent: actions, Annie's voice */
+  --cream: #f4f6f7; /* page: a cool near-white so white cards separate */
+  --line: #cfd8dc;
+  --white: #ffffff;
+  /* Kept deliberately outside the palette: this is the only urgency signal
+     in a safety product, so it stays legible rather than blending in. */
+  --alert: #a33a2e;
 }
 * {
   box-sizing: border-box;
@@ -39,16 +42,10 @@ a {
   letter-spacing: -1.5px;
   font-weight: 700;
 }
-.brand-mark {
-  display: grid;
-  place-items: center;
-  background: var(--green);
-  color: var(--white);
-  width: 36px;
-  height: 36px;
-  border-radius: 13px 13px 13px 2px;
-  font-family: Georgia, serif;
-  font-style: italic;
+.brand-logo {
+  width: 38px;
+  height: 38px;
+  object-fit: contain;
 }
 .brand-sub {
   font-size: 9px;
@@ -66,16 +63,16 @@ a {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #bd8d50;
+  background: #78909c;
 }
 #connection-dot.online {
-  background: #679675;
+  background: #455a64;
 }
 .pill,
 .tag {
   font-size: 10px;
   letter-spacing: 1px;
-  background: #e8eddf;
+  background: #eceff1;
   padding: 5px 10px;
   border-radius: 20px;
   white-space: nowrap;
@@ -111,7 +108,7 @@ h1 {
 }
 h1 em {
   font-weight: 400;
-  color: #52735b;
+  color: #455a64;
 }
 .intro-copy {
   font-size: 14px;
@@ -119,8 +116,8 @@ h1 em {
   line-height: 1.8;
 }
 .start-card {
-  background: #e7eddf;
-  border: 1px solid #dce4d5;
+  background: #eceff1;
+  border: 1px solid #cfd8dc;
   border-radius: 22px;
   padding: 25px 30px;
   max-width: 370px;
@@ -135,7 +132,7 @@ h1 em {
 }
 .start-card p {
   font-size: 12px;
-  color: #5e715f;
+  color: #78909c;
 }
 .mini-icon {
   font-size: 28px;
@@ -151,7 +148,7 @@ button {
   font-weight: 600;
   line-height: 1.4;
   cursor: pointer;
-  border: 1px solid #cdd7c8;
+  border: 1px solid #cfd8dc;
   background: var(--white);
   color: var(--ink);
   border-radius: 9px;
@@ -161,10 +158,10 @@ button {
     transform 0.15s;
 }
 button:hover {
-  background: #e5ebdf;
+  background: #eceff1;
 }
 button.primary:hover {
-  background: #234c36;
+  background: #000000;
 }
 button:active {
   transform: translateY(1px);
@@ -180,7 +177,7 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 summary:focus-visible {
-  outline: 3px solid #92aa72;
+  outline: 3px solid #78909c;
   outline-offset: 3px;
 }
 .summary {
@@ -246,7 +243,7 @@ summary:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f1f2e9;
+  background: #f4f6f7;
   border-radius: 12px;
   overflow: hidden;
 }
@@ -330,10 +327,10 @@ textarea {
   font-family: inherit;
   font-size: 14px;
   line-height: 1.6;
-  border: 1px solid #d8dfd2;
+  border: 1px solid #cfd8dc;
   border-radius: 8px;
   padding: 11px;
-  background: #fafbf6;
+  background: #ffffff;
   color: var(--ink);
 }
 textarea {
@@ -401,12 +398,12 @@ footer span:last-child {
   border-radius: 8px;
   padding: 11px 16px;
   font-size: 12px;
-  background: #e5eddd;
+  background: #eceff1;
   margin-bottom: 20px;
 }
 #notice.error {
-  background: #f7e8de;
-  color: #943d27;
+  background: #f6e7e4;
+  color: #a33a2e;
 }
 @media (max-width: 760px) {
   header {
@@ -531,7 +528,7 @@ footer span:last-child {
   border-left: 3px solid var(--green);
 }
 .beat-resident {
-  border-left: 3px solid var(--alert);
+  border-left: 3px solid var(--muted);
 }
 .beat-who {
   font-size: 12px;

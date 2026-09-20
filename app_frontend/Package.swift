@@ -9,6 +9,10 @@ let package = Package(
     name: "AnnieApp",
     platforms: [.macOS(.v13), .iOS(.v16)],
     targets: [
-        .executableTarget(name: "AnnieApp", path: "Sources/AnnieApp"),
+        .executableTarget(
+            name: "AnnieApp",
+            path: "Sources/AnnieApp",
+            resources: [.process("Assets.xcassets")]
+        ),
     ]
 )

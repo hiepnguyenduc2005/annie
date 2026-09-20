@@ -26,7 +26,7 @@ struct RegistrationView: View {
             VStack(spacing: 20) {
                 Image(systemName: "pawprint.fill")
                     .font(.system(size: 44))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Palette.slate)
                 Text("Welcome to Annie")
                     .font(.largeTitle.bold())
                     .multilineTextAlignment(.center)
@@ -70,7 +70,7 @@ struct RegistrationView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            .background(Palette.mist.opacity(0.28), in: RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
     }

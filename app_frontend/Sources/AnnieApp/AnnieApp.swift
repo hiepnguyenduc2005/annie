@@ -38,6 +38,9 @@ struct AnnieApp: App {
             }
             .environmentObject(state)
             .environmentObject(profiles)
+            // Tab bar, pickers and other system controls follow the palette
+            // instead of the default iOS blue.
+            .tint(Palette.slate)
             .onChange(of: scenePhase) { phase in
                 if phase == .active { Task { await state.reconnectIfOffline() } }
             }
@@ -50,19 +53,22 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Label("Annie", systemImage: "pawprint.fill")
+            HStack(spacing: 10) {
+                AnnieMark(height: 30)
+                    .foregroundStyle(Palette.ink)
+                Text("Annie")
                     .font(.title2.bold())
+                    .foregroundStyle(Palette.ink)
                 Spacer()
                 Text(state.live ? "Live \u{00b7} backend connected" : "Demo data \u{00b7} backend offline")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .background(
-                        (state.live ? Color.green : Color.orange).opacity(0.15),
+                        (state.live ? Palette.slate : Palette.steel).opacity(0.15),
                         in: Capsule()
                     )
-                    .foregroundStyle(state.live ? .green : .orange)
+                    .foregroundStyle(state.live ? Palette.slate : Palette.steel)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

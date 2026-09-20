@@ -30,7 +30,7 @@ struct RemindersView: View {
                                 .font(.title2)
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(reminder.done ? .green : .secondary)
+                        .foregroundStyle(reminder.done ? Palette.slate : Palette.steel)
                         .help(reminder.done ? "Mark as not done" : "Mark as done")
 
                         Text(fmtClock(reminder.time))
@@ -141,7 +141,7 @@ struct AskView: View {
                     .help("Speak the answer with system speech synthesis")
                 }
                 .padding(16)
-                .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .background(Palette.mist.opacity(0.30), in: RoundedRectangle(cornerRadius: 12))
             } else {
                 Text("Ask me anything \u{2014} I'll answer from what I've seen today.")
                     .foregroundStyle(.secondary)
@@ -265,7 +265,7 @@ struct ProfilesSectionView: View {
                 HStack(spacing: 12) {
                     Image(systemName: profile.kind == .dogUser ? "pawprint.fill" : "person.crop.circle")
                         .font(.title3)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Palette.slate)
                         .frame(width: 28)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(profile.name)
@@ -371,7 +371,7 @@ struct StatCard: View {
         VStack(spacing: 4) {
             Text(value)
                 .font(.title.bold())
-                .foregroundStyle(.orange)
+                .foregroundStyle(Palette.slate)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
             Text(label)
@@ -382,6 +382,6 @@ struct StatCard: View {
         .padding(.horizontal, 4)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
-        .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .background(Palette.mist.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
     }
 }

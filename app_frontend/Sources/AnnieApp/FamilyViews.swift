@@ -63,7 +63,7 @@ struct FamilyView: View {
                         .font(.system(size: 30))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(canSend ? Color.orange : Color.secondary.opacity(0.4))
+                .foregroundStyle(canSend ? Palette.slate : Palette.mist)
                 .disabled(!canSend)
                 .help("Send through Annie")
             }
@@ -86,9 +86,8 @@ struct FamilyView: View {
 private struct EmptyThreadView: View {
     var body: some View {
         VStack(spacing: 10) {
-            Image(systemName: "pawprint.circle")
-                .font(.system(size: 44))
-                .foregroundStyle(.orange.opacity(0.7))
+            AnnieMark(height: 52)
+                .foregroundStyle(Palette.steel)
             Text("Send Grandma a message")
                 .font(.headline)
             Text("Annie will find her, pass it along, and tell you what she says back.")
@@ -113,7 +112,7 @@ private struct MessageThreadItem: View {
                 Text(message.text)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(.orange.opacity(0.18), in: RoundedRectangle(cornerRadius: 16))
+                    .background(Palette.slate.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
             }
 
             if let run {
@@ -131,9 +130,9 @@ private struct RunStatusChip: View {
 
     private var color: Color {
         switch run.status {
-        case "completed": return .green
+        case "completed": return Palette.slate
         case "unreachable", "failed": return .red
-        default: return .orange
+        default: return Palette.steel
         }
     }
 
@@ -157,9 +156,15 @@ private struct RunEventRow: View {
     var body: some View {
         if event.isAnnie || event.isResident {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: event.isAnnie ? "pawprint.fill" : "person.fill")
-                    .foregroundStyle(event.isAnnie ? .orange : .secondary)
-                    .frame(width: 18)
+                Group {
+                    if event.isAnnie {
+                        AnnieMark(height: 16)
+                    } else {
+                        Image(systemName: "person.fill")
+                    }
+                }
+                .foregroundStyle(event.isAnnie ? Palette.slate : Palette.steel)
+                .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(event.isAnnie ? "Annie" : "Grandma")
                         .font(.caption.weight(.semibold))
@@ -172,7 +177,7 @@ private struct RunEventRow: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(
-                (event.isAnnie ? Color.orange : Color.gray).opacity(0.10),
+                (event.isAnnie ? Palette.slate : Palette.mist).opacity(0.14),
                 in: RoundedRectangle(cornerRadius: 14)
             )
         } else {

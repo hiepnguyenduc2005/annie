@@ -17,6 +17,7 @@ import os
 import subprocess
 import tempfile
 import time
+import threading
 
 ELEVEN_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice}/stream"
 DEEPGRAM_URL = "https://api.deepgram.com/v1/listen"
@@ -83,7 +84,15 @@ class CloudVoice:
     """speak(text) and transcribe(wav) with cloud first, local fallback; counts what happened."""
 
     def __init__(self, *, eleven_key=None, eleven_voice=None, deepgram_key=None, local_speak=None, local_transcribe=None,
-                 player=play_audio_bytes, tts=elevenlabs_tts, stt=deepgram_transcribe):
+                 player=play_audio_bytes, tts=elevenlabs_tts, stt=deepgram_transcribe,
+                 muted=None, mute_handler=None, local_speak_cancellable=None):
+        self._mute_lock = threading.RLock()
+        self._generation = 0
+        self.muted = (os.environ.get("ANNIE_VOICE_MUTED", "0").lower() in {"1", "true", "yes", "on"}) if muted is None else bool(muted)
+        self._mute_handler = mute_handler
+        self.local_speak_cancellable = local_speak_cancellable
+        if mute_handler is not None:
+            mute_handler(self.muted)
         self.eleven_key = eleven_key if eleven_key is not None else os.environ.get("ELEVENLABS_API_KEY") or None
         self.eleven_voice = eleven_voice or os.environ.get("ELEVENLABS_VOICE_ID") or DEFAULT_VOICE
         self.deepgram_key = deepgram_key if deepgram_key is not None else os.environ.get("DEEPGRAM_API_KEY") or None
@@ -92,9 +101,16 @@ class CloudVoice:
         self.stats = {"tts_cloud": 0, "tts_local": 0, "stt_cloud": 0, "stt_local": 0, "tts_ms": None, "stt_ms": None}
         self.cloud = os.environ.get("ANNIE_VOICE_CLOUD", "1") != "0"  # default: ElevenLabs + Deepgram when keys exist
 
-    def configure(self, *, cloud=None, eleven_key=None, deepgram_key=None, eleven_voice=None) -> dict:
+    def configure(self, *, cloud=None, eleven_key=None, deepgram_key=None, eleven_voice=None, muted=None) -> dict:
         """Runtime settings from the family app: toggle cloud voice, replace keys (kept in memory only, never
         logged). Empty-string keys clear them. Returns `status()`."""
+        if muted is not None:
+            with self._mute_lock:
+                self.muted = bool(muted)
+                if self.muted:
+                    self._generation += 1
+                if self._mute_handler is not None:
+                    self._mute_handler(self.muted)
         if cloud is not None:
             self.cloud = bool(cloud)
         if eleven_key is not None:
@@ -107,7 +123,7 @@ class CloudVoice:
 
     def status(self) -> dict:
         en = self.enabled() if callable(self.enabled) else self.enabled
-        return {"cloud": self.cloud, **en, "speak_via": "elevenlabs" if self.cloud and self.eleven_key else "local",
+        return {"cloud": self.cloud, "muted": self.muted, **en, "speak_via": "elevenlabs" if self.cloud and self.eleven_key else "local",
                 "hear_via": "deepgram" if self.cloud and self.deepgram_key else "local", "stats": dict(self.stats)}
 
     @property
@@ -115,15 +131,40 @@ class CloudVoice:
         return {"elevenlabs": bool(self.eleven_key), "deepgram": bool(self.deepgram_key)}
 
     def speak(self, text: str) -> bool:
+        with self._mute_lock:
+            if self.muted:
+                return False
+            generation = self._generation
+
+        def cancelled():
+            # Do not acquire the cloud lock inside the device lock: configure
+            # acquires them in the opposite order. These scalar reads are atomic.
+            return self.muted or generation != self._generation
+
         if self.cloud and self.eleven_key:
             t0 = time.perf_counter()
             audio = self.tts(text, api_key=self.eleven_key, voice_id=self.eleven_voice)
             self.stats["tts_ms"] = round((time.perf_counter() - t0) * 1000)
-            if audio and self.player(audio):  # player: the selected speaker (robot.dog.voice.devices) or afplay
+            if cancelled():
+                return False
+            owner = getattr(self.player, "__self__", None)
+            guarded = getattr(owner, "play_cancellable", None)
+            played = bool(audio) and (guarded(audio, cancelled=cancelled) if guarded else self.player(audio))
+            if cancelled():
+                return False
+            if played:
                 self.stats["tts_cloud"] += 1
                 return True
+        if cancelled():
+            return False
+        if self.local_speak_cancellable:
+            played = self.local_speak_cancellable(text, cancelled=cancelled)
+        else:
+            played = self.local_speak(text) if self.local_speak else False
+        if cancelled():
+            return False
         self.stats["tts_local"] += 1
-        return bool(self.local_speak(text)) if self.local_speak else False
+        return bool(played)
 
     def transcribe(self, wav_bytes: bytes) -> str | None:
         if self.cloud and self.deepgram_key:

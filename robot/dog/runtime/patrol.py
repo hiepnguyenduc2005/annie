@@ -177,28 +177,37 @@ def _say(text):
 
 def _speak_host(text: str):
     """Speak on the host speaker without blocking the control loop (ElevenLabs when configured, else say)."""
+    if voice().status().get("muted", False):
+        return False
     threading.Thread(target=lambda: speak_blocking(text), daemon=True, name="speak").start()
 
 
+def _speech_is_muted() -> bool:
+    return bool(voice().status().get("muted", False))
+
+
 def _say_blocking(text: str) -> bool:
-    """macOS `say` (text on stdin, never as an argument), played through the selected speaker when one is
-    chosen (rendered to a temp AIFF first), else straight to the system default; waits until done."""
+    return _say_blocking_cancellable(text, cancelled=lambda: False)
+
+
+def _say_blocking_cancellable(text: str, *, cancelled) -> bool:
+    """Render local speech without playing it, then use the same cancellable speaker as cloud audio."""
     try:
         from robot.dog.voice import devices as devices_mod
         dev = devices_mod.shared()
-        if dev.output_name:
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".aiff", delete=False) as fh:
-                path = fh.name
-            try:
-                rc = subprocess.run(["say", "-o", path], input=text.encode("utf-8"), stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL, timeout=60).returncode
-                if rc == 0:
-                    return dev.play(Path(path).read_bytes(), suffix=".aiff")
-            finally:
-                Path(path).unlink(missing_ok=True)
-        return subprocess.run(["say"], input=text.encode("utf-8"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                              timeout=60).returncode == 0
+        if cancelled():
+            return False
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".aiff", delete=False) as fh:
+            path = fh.name
+        try:
+            rc = subprocess.run(["say", "-o", path], input=text.encode("utf-8"), stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=60).returncode
+            if rc == 0 and not cancelled():
+                return dev.play_cancellable(Path(path).read_bytes(), suffix=".aiff", cancelled=cancelled)
+            return False
+        finally:
+            Path(path).unlink(missing_ok=True)
     except Exception:
         return False
 
@@ -214,7 +223,9 @@ def _cloud_voice():
     Output goes through the selected speaker (AirPods, Mac speakers, the phone app...)."""
     from robot.dog.voice import devices as devices_mod
     from robot.dog.voice.cloud import CloudVoice
-    return CloudVoice(local_speak=_say_blocking, local_transcribe=_whisper_transcribe, player=devices_mod.shared().play)
+    dev = devices_mod.shared()
+    return CloudVoice(local_speak=_say_blocking, local_speak_cancellable=_say_blocking_cancellable,
+                      local_transcribe=_whisper_transcribe, player=dev.play, mute_handler=dev.set_muted)
 
 
 VOICE = None  # created lazily so tests never touch the environment
@@ -233,13 +244,16 @@ LISTENER = None  # the always-on wake-word listener of the running patrol, so sp
 def speak_blocking(text: str) -> bool:
     """Speak on the host speaker (ElevenLabs voice when configured, else macOS say); blocks until done. The
     always-on mic ignores Annie's own voice meanwhile and then listens without a wake word for a while."""
+    if voice().status().get("muted", False):
+        return False
     lis = LISTENER
     if lis is not None:
         lis.mute(2.0 + 0.4 * len(text.split()))
     ok = voice().speak(text)
     if lis is not None:
         lis.mute(1.0)  # Discard the speaker's tail rather than hearing our own acknowledgment.
-        lis.open_conversation(45.0)
+        if ok:
+            lis.open_conversation(45.0)
     return ok
 
 
@@ -595,7 +609,13 @@ class LiveView:
                     v = voice()
                     keys = {k: payload.get(k) for k in ("eleven_key", "deepgram_key", "eleven_voice") if isinstance(payload.get(k), str) and len(payload[k]) <= 200}
                     cloud = payload.get("cloud") if isinstance(payload.get("cloud"), bool) else None
-                    st = v.configure(cloud=cloud, **keys)
+                    if "muted" in payload and not isinstance(payload["muted"], bool):
+                        return self._send(400, b'{"error":"muted must be a boolean"}', "application/json")
+                    st = v.configure(cloud=cloud, muted=payload.get("muted"), **keys)
+                    if payload.get("muted") is True:
+                        listener = getattr(view, "listener", None)
+                        if listener is not None:
+                            listener.open_until = 0.0
                     from robot.dog.voice import devices as devices_mod
                     dev = {k: payload.get(k) for k in ("input_device", "output_device") if isinstance(payload.get(k), str) and len(payload[k]) <= 80}
                     if dev:
@@ -1762,8 +1782,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     if name == "say":
                         send_move(0.0, 0.0)
                         played = await guarded_await(loop.run_in_executor(None, lambda: blocking_speak(margs["text"])))
+                        muted = bool(not audio_where and _speech_is_muted())
                         missions.finish(new_mission, result={"played": bool(played), "text": margs["text"], "where": audio_where or "host speaker", "source": "simulation" if audio_where else source},
-                                        error=None if played else "speech playback failed")
+                                        error=None if played else ("Annie is muted; unmute her to deliver spoken messages" if muted else "speech playback failed"))
                         continue
                     if name == "listen":
                         send_move(0.0, 0.0)

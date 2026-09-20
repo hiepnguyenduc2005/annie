@@ -16,6 +16,7 @@ import os
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 RATE = 16000
@@ -99,6 +100,9 @@ class AudioDevices:
         self.output_name = output_name or os.environ.get("ANNIE_AUDIO_OUTPUT") or None
         self.version = 0
         self._lock = threading.Lock()
+        self.muted = False
+        self._generation = 0
+        self._outputs = {}
         self._start_phone_if_selected()
 
     def _start_phone_if_selected(self):
@@ -124,7 +128,8 @@ class AudioDevices:
         return {"input": self.input_name or "system default", "output": self.output_name or "system default",
                 "input_index": resolve(self.input_name, kind="input", devices=devs),
                 "output_index": resolve(self.output_name, kind="output", devices=devs),
-                "devices": devs, "phone": _phone_status()}
+                "devices": devs, "phone": _phone_status(), "muted": self.muted,
+                "phone_playback_stop_supported": False}
 
     def recorder(self):
         """int16 mono chunk generator from the chosen input (the same shape the wake-word listener expects)."""
@@ -134,42 +139,112 @@ class AudioDevices:
         from robot.simulation.live_listener import sounddevice_recorder
         return sounddevice_recorder(device=idx)
 
+    def set_muted(self, muted: bool):
+        """Suppress new playback and stop only output handles owned by this instance.
+
+        Phone audio has no stop command; bytes already sent may finish playing.
+        Microphone capture and the phone connection remain available.
+        """
+        with self._lock:
+            self.muted = bool(muted)
+            if self.muted:
+                self._generation += 1
+                for output, is_process in list(self._outputs.items()):
+                    try:
+                        if is_process:
+                            output.terminate()
+                        else:
+                            output.abort()
+                    except Exception:
+                        pass
+
     def play(self, data: bytes, suffix=".mp3", timeout_s=60.0) -> bool:
-        """Play encoded audio: afplay on the system default, or decode with afconvert and stream through the
-        chosen output device with sounddevice, or send it to the phone app (False when no phone is connected,
-        so the caller's local fallback speaks instead)."""
+        return self.play_cancellable(data, suffix=suffix, timeout_s=timeout_s)
+
+    def play_cancellable(self, data: bytes, suffix=".mp3", timeout_s=60.0, *, cancelled=None) -> bool:
+        """Play using owned, interruptible output; never stop unrelated host audio."""
+        with self._lock:
+            generation = self._generation
+        def stopped():
+            return self.muted or generation != self._generation or bool(cancelled and cancelled())
+        if stopped():
+            return False
         idx = resolve(self.output_name, kind="output")
         if idx == PHONE_INDEX:
             try:
-                return phone_server(start=True).play(data, suffix=suffix, timeout_s=timeout_s)
+                if stopped():
+                    return False
+                played = phone_server(start=True).play(data, suffix=suffix, timeout_s=timeout_s)
+                return bool(played) and not stopped()
             except Exception:
                 return False
         path = None
+        output = None
+        process = False
         try:
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as fh:
                 fh.write(data)
                 path = fh.name
             if idx is None:
-                rc = subprocess.run(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout_s).returncode
-                return rc == 0
+                with self._lock:
+                    if stopped():
+                        return False
+                    output = subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    process = True
+                    self._outputs[output] = process
+                deadline = time.monotonic() + timeout_s
+                while output.poll() is None:
+                    if stopped() or time.monotonic() >= deadline:
+                        output.terminate()
+                        return False
+                    time.sleep(0.02)
+                return output.returncode == 0 and not stopped()
             wav = path + ".wav"
             rc = subprocess.run(["afconvert", path, wav, "-d", "LEI16", "-f", "WAVE"], stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, timeout=timeout_s).returncode
-            if rc != 0:
+            if rc != 0 or stopped():
                 return False
-            try:
-                import soundfile as sf
-                import sounddevice as sd
-                audio, rate = sf.read(wav, dtype="int16")
-                sd.play(audio, rate, device=idx, blocking=True)
-            finally:
-                Path(wav).unlink(missing_ok=True)
-            return True
+            import soundfile as sf
+            import sounddevice as sd
+            audio, rate = sf.read(wav, dtype="int16", always_2d=True)
+            with self._lock:
+                if stopped():
+                    return False
+                output = sd.OutputStream(samplerate=rate, device=idx, channels=audio.shape[1], dtype="int16")
+                self._outputs[output] = process
+                output.start()
+            deadline = time.monotonic() + timeout_s
+            for offset in range(0, len(audio), 1024):
+                if stopped() or time.monotonic() >= deadline:
+                    return False
+                output.write(audio[offset:offset + 1024])
+            output.stop()
+            return not stopped()
         except Exception:
             return False
         finally:
+            if output is not None:
+                with self._lock:
+                    self._outputs.pop(output, None)
+                try:
+                    if process:
+                        if output.poll() is None:
+                            output.terminate()
+                        try:
+                            output.wait(timeout=0.5)
+                        except subprocess.TimeoutExpired:
+                            output.kill()
+                            output.wait(timeout=0.5)
+                    else:
+                        try:
+                            output.abort()
+                        finally:
+                            output.close()
+                except Exception:
+                    pass  # Device disappearance must not bypass temporary-file cleanup.
             if path:
                 Path(path).unlink(missing_ok=True)
+                Path(path + ".wav").unlink(missing_ok=True)
 
 
 _DEVICES: AudioDevices | None = None

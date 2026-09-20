@@ -18,6 +18,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .companion import AskRequest, CompanionService, NewReminder
 from .family import FamilyService, InternalEventIn, MessageIn
+from .schema_models import (EmergencyIn, MessageReplyIn, NewAppUser, NewDogUser, NewSchemaMessage,
+                            NewSchemaReminder, ReminderHistoryIn)
+from .schema_store import SchemaStore, StoreError
 from .models import Ack, Command, CommandReceipt, Ingest, Say, Scenario
 from .service import Service, now_ms
 from .subconscious_provider import DEFAULT_MODEL, SubconsciousAPIError, SubconsciousInputError, run_team
@@ -51,7 +54,7 @@ def same_origin(headers, scheme):
 
 
 def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service=None,
-                internal_secret=None):
+                internal_secret=None, schema_store=None):
     db_path = db_path or os.getenv('ANNIE_DB_PATH', '.data/annie.sqlite3')
     mode = mode or os.getenv('ANNIE_MODE', 'demo')
     if mode not in ('demo', 'live'):
@@ -73,6 +76,8 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
             mock=os.getenv('ANNIE_FAMILY_MOCK_ROBOT', 'false').lower() == 'true',
             recall_provider=recall_provider,
         )
+        app.state.schema = schema_store or SchemaStore()
+        await app.state.schema.connect()
         app.state.agent_lock = asyncio.Lock()
         async def ticker():
             while True:
@@ -87,6 +92,7 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
                 await task
             for background in list(app.state.family.background_tasks):
                 background.cancel()
+            await app.state.schema.close()
             app.state.service.close()
 
     app = FastAPI(title='Annie API', version='0.1.0', lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -281,6 +287,111 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
             raise HTTPException(404, 'Unknown run') from None
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
+
+    # ---- household schema: profiles, messages, reminders, history, emergencies ----
+
+    def store():
+        return app.state.schema
+
+    @router.get('/api/storage')
+    async def storage_status():
+        """Whether records are persisting to MongoDB or the in-memory fallback."""
+        return store().status()
+
+    @router.post('/api/dog-users', status_code=201)
+    async def create_dog_user(body: NewDogUser):
+        try:
+            return await store().create_dog_user(body.name, body.id)
+        except StoreError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @router.get('/api/dog-users')
+    async def list_dog_users():
+        return await store().dog_users()
+
+    @router.post('/api/app-users', status_code=201)
+    async def create_app_user(body: NewAppUser):
+        try:
+            return await store().create_app_user(body.name, body.dog_user_id)
+        except StoreError as exc:
+            raise HTTPException(422, str(exc)) from None
+
+    @router.get('/api/app-users')
+    async def list_app_users(dog_user_id: str | None = None):
+        return await store().app_users(dog_user_id)
+
+    @router.post('/api/schema/messages', status_code=201)
+    async def create_schema_message(body: NewSchemaMessage):
+        """Record a message and hand its text to robot_backend. The robot's
+        summary comes back to /internal/message-reply and joins `texts`."""
+        try:
+            message = await store().create_message(body.dog_user_id, body.app_user_id, body.text)
+        except StoreError as exc:
+            raise HTTPException(422, str(exc)) from None
+        app.state.family.dispatch_schema_message(message)
+        return message
+
+    @router.get('/api/schema/messages')
+    async def list_schema_messages(dog_user_id: str | None = None):
+        return await store().messages(dog_user_id)
+
+    @router.post('/api/schema/reminders', status_code=201)
+    async def create_schema_reminder(body: NewSchemaReminder):
+        try:
+            reminder = await store().create_reminder(body.dog_user_id, body.hour, body.item)
+        except StoreError as exc:
+            raise HTTPException(422, str(exc)) from None
+        app.state.family.dispatch_reminder(reminder)
+        return reminder
+
+    @router.get('/api/schema/reminders')
+    async def list_schema_reminders(dog_user_id: str | None = None):
+        return await store().reminders(dog_user_id)
+
+    @router.get('/api/schema/reminders/{reminder_id}/history')
+    async def list_history(reminder_id: str):
+        if not await store().reminder(reminder_id):
+            raise HTTPException(404, 'Unknown reminder')
+        return await store().history_records(reminder_id)
+
+    @router.get('/api/schema/history')
+    async def list_all_history():
+        return await store().history_records()
+
+    @router.get('/api/schema/emergencies')
+    async def list_emergencies(dog_user_id: str | None = None):
+        return await store().emergencies(dog_user_id)
+
+    # ---- inbound from robot_backend (shared secret, not the family token) ----
+
+    @internal_router.post('/internal/message-reply', status_code=202)
+    async def message_reply(body: MessageReplyIn):
+        try:
+            entry = await store().append_message_text(body.message_id, body.text, body.source)
+        except StoreError as exc:
+            raise HTTPException(404, str(exc)) from None
+        app.state.family.emit('schema_message_reply',
+                              {'message_id': body.message_id, **entry})
+        return entry
+
+    @internal_router.post('/internal/reminder-history', status_code=202)
+    async def reminder_history(body: ReminderHistoryIn):
+        try:
+            record = await store().create_history_record(body.reminder_id, body.description, body.timedate)
+        except StoreError as exc:
+            raise HTTPException(404, str(exc)) from None
+        app.state.family.emit('history_record', record)
+        return record
+
+    @internal_router.post('/internal/emergencies', status_code=202)
+    async def emergency(body: EmergencyIn):
+        try:
+            record = await store().create_emergency(body.dog_user_id, body.description, body.timestamp)
+        except StoreError as exc:
+            raise HTTPException(422, str(exc)) from None
+        # Emergencies are what the family most needs to see immediately.
+        app.state.family.emit('emergency', record)
+        return record
 
     def demo_only():
         if mode != 'demo':

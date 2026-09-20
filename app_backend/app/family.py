@@ -157,6 +157,52 @@ class FamilyService:
         task.add_done_callback(self.background_tasks.discard)
         return message, run
 
+    def _spawn(self, coroutine):
+        task = asyncio.create_task(coroutine)
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+        return task
+
+    def dispatch_schema_message(self, message):
+        """Hand a stored message's text to robot_backend. Same rules as a run
+        dispatch: never block the request, and a failure is recorded rather
+        than raised, because the message is already saved."""
+        self._spawn(self._post_to_robot('/messages', {
+            'message_id': message['id'],
+            'dog_user_id': message['dog_user_id'],
+            'app_user_id': message['app_user_id'],
+            'text': message['texts'][0]['text'],
+        }))
+
+    def dispatch_reminder(self, reminder):
+        """Send a reminder's description to robot_backend. The robot reports
+        what actually happened to /internal/reminder-history."""
+        self._spawn(self._post_to_robot('/reminders', {
+            'reminder_id': reminder['id'],
+            'dog_user_id': reminder['dog_user_id'],
+            'hour': reminder['hour'],
+            'item': reminder['item'],
+        }))
+
+    async def _post_to_robot(self, path, payload):
+        """One attempt plus one retry, then give up quietly: the record is
+        already stored, and the family app must not fail because the dog is
+        unreachable."""
+        if self.mock or not self.robot_backend_url:
+            return False
+        url = f'{self.robot_backend_url}{path}'
+        for attempt in range(2):
+            try:
+                response = await self.dispatch_fn(url, payload, self.dispatch_timeout)
+                if 200 <= response.status_code < 300:
+                    return True
+            except httpx.HTTPError:
+                pass
+            if attempt == 0:
+                await asyncio.sleep(0.5)
+        self.emit('robot_unreachable', {'path': path, 'payload_id': payload.get('message_id') or payload.get('reminder_id')})
+        return False
+
     async def _dispatch(self, run_id, author_id, text):
         if self.mock:
             await self._run_mock_sequence(run_id, text, HOUSEHOLD[author_id]['name'])

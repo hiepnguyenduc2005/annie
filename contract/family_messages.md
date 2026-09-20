@@ -123,6 +123,32 @@ curl -X POST http://<mac-lan-ip>:8000/internal/events \
        "payload":{"text":"Jeanine, Zach asked me to find you."},"at":1789800002500}'
 ```
 
+## Household records: three more calls each way
+
+Added 2026-09-19 alongside the persistent household schema (profiles,
+messages, reminders, reminder history, emergencies). These are separate from
+the run/event flow above: runs carry live progress, these carry the record.
+
+app_backend → robot_backend, same timeout and single retry as `/dispatch`,
+but failures are recorded rather than raised, because the record is already
+stored:
+
+| Call | Body |
+| --- | --- |
+| `POST {ROBOT_BACKEND_URL}/messages` | `{message_id, dog_user_id, app_user_id, text}` |
+| `POST {ROBOT_BACKEND_URL}/reminders` | `{reminder_id, dog_user_id, hour, item}` |
+
+robot_backend → app_backend, all requiring `X-Internal-Secret`:
+
+| Call | Body | Effect |
+| --- | --- | --- |
+| `POST /internal/message-reply` | `{message_id, text, source?}` | Appends the dog's action summary, or the resident's spoken response, to that message's `texts`. `source` is `robot` (default) or `resident`. 404 if the message is unknown. |
+| `POST /internal/reminder-history` | `{reminder_id, description, timedate?}` | Records what actually happened, e.g. "grandma took her pills". 404 if the reminder is unknown. |
+| `POST /internal/emergencies` | `{dog_user_id, description, timestamp?}` | Records an emergency and pushes it to connected family clients immediately. 422 if the dog user is unknown. |
+
+`timedate` and `timestamp` are integer Unix milliseconds and default to
+arrival time. Omit them only when the robot has no better clock than ours.
+
 ## Testing without the GX10
 
 `ANNIE_FAMILY_MOCK_ROBOT=true` on the app_backend host replaces the HTTP call

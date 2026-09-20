@@ -140,6 +140,49 @@ Two scripts help verify this without waiting on the actual robot:
 .venv/bin/python app_backend/scripts/demo_family_message.py --text "How are you feeling today?"
 ```
 
+## Household records
+
+The agreed schema lives in MongoDB when `MONGODB_URI` is set and reachable,
+and in an in-process fallback otherwise. `GET /api/storage` reports which is
+live and why, so "is it persisting?" is never a guess. The fallback exists so
+a database being down cannot take the family app down with it; records
+written to it do not survive a restart.
+
+| Collection | Fields |
+| --- | --- |
+| `dog_users` | id, name |
+| `app_users` | id (int), name, dog_user_id |
+| `messages` | id, date, dog_user_id, app_user_id, texts[] |
+| `reminders` | id, dog_user_id, hour, item |
+| `history_records` | id, reminder_id, timedate, description |
+| `emergencies` | id, dog_user_id, timestamp, description |
+
+App users are many-to-one onto dog users: several family members share one
+resident.
+
+| Route | Behavior |
+| --- | --- |
+| `POST/GET /api/dog-users` | Create or list residents |
+| `POST/GET /api/app-users` | Create or list family members; `?dog_user_id=` filters |
+| `POST/GET /api/schema/messages` | Record a message and send its text to robot_backend |
+| `POST/GET /api/schema/reminders` | Record a reminder and send its description to robot_backend |
+| `GET /api/schema/reminders/{id}/history` | What actually happened for that reminder |
+| `GET /api/schema/emergencies` | Emergencies received from robot_backend, newest first |
+| `GET /api/storage` | Which storage backend is live |
+
+Three inbound routes carry robot_backend's side. They use `X-Internal-Secret`,
+not the family token, and are rejected outright when the secret is unset:
+
+| Route | Fills |
+| --- | --- |
+| `POST /internal/message-reply` | Appends the dog's action summary or the resident's response to that message's `texts` |
+| `POST /internal/reminder-history` | A history record, e.g. "grandma took her pills" |
+| `POST /internal/emergencies` | An emergency record, fanned out to family clients immediately |
+
+Outbound calls to robot_backend take one attempt plus one retry and then give
+up quietly: the record is already stored, and the family app must not fail
+because the dog is unreachable.
+
 ## Rules and memory
 
 Two distinct, consecutive observations within five seconds, each with a person

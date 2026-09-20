@@ -83,7 +83,7 @@ with coordinates do not establish persistent identity or a full 4D graph.
 Full frames stay on the trusted local body/brain network. Cloud audio/text,
 Elastic captions, Linq notifications, released crops, and Subconscious evidence
 can contain personal information. This is local-first, not fully air-gapped.
-The user authorized cloud inference for synthetic simulator frames on 2026-09-19, within a total $20 external inference budget. It is explicitly configured; real resident/hardware frames remain local. No automatic provider fallback is permitted.
+The user authorized cloud inference for synthetic simulator frames on 2026-09-19 and subsequently raised the total external inference budget to $50. Preserve all prior spending and reservations; the shared service cap is $49 because an earlier $1 probe reservation is tracked separately. It is explicitly configured; real resident/hardware frames remain local. No automatic provider fallback is permitted.
 Use synthetic data for the current demo; define retention and crop release
 before collecting actual resident observations. Never put media or secrets in Git.
 

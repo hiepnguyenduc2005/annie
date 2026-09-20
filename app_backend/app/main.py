@@ -60,6 +60,15 @@ class DogCommandIn(BaseModel):
     author: str | None = Field(default=None, max_length=60)
 
 
+class PersonIn(BaseModel):
+    """A person the family wants Annie to know; photos are base64 JPEGs used once for the face embedding."""
+    name: str = Field(min_length=1, max_length=40)
+    relation: str | None = Field(default=None, max_length=40)
+    shirt: str | None = Field(default=None, max_length=20)
+    notes: str | None = Field(default=None, max_length=200)
+    photos: list[str] = Field(default_factory=list, max_length=10)
+
+
 class VoiceSettingsIn(BaseModel):
     """Family-app voice settings; keys are forwarded to the dog process and held in memory only."""
     cloud: bool | None = None
@@ -346,6 +355,48 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
         if r.status_code >= 400:
             raise HTTPException(r.status_code if r.status_code in (400, 401, 409) else 502, r.text[:200])
         return {'available': True, 'status_code': r.status_code, **(r.json() if r.content else {})}
+
+    @router.get('/api/people')
+    async def list_people():
+        """People Annie knows (name, relation, shirt colour, how many face samples); from the dog process."""
+        try:
+            r = await _dog_get('/people')
+            if r.status_code == 200:
+                return {'available': True, **r.json()}
+        except Exception:
+            pass
+        return {'available': False, 'people': []}
+
+    @router.post('/api/people')
+    async def add_person(body: PersonIn):
+        """Enrol a person from the family app: name, relation, optional shirt colour and up to 10 photos (base64
+        JPEG). Photos go to the dog process for the face embedding and are not kept anywhere."""
+        url = os.getenv('ANNIE_DOG_VIEW_URL', 'http://127.0.0.1:8011').rstrip('/')
+        payload = {k: v for k, v in body.model_dump().items() if v is not None}
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.post(url + '/people', json=payload, headers=_dog_headers())
+        except Exception:
+            raise HTTPException(503, 'The dog process is not reachable') from None
+        if r.status_code == 400:
+            raise HTTPException(400, (r.json() or {}).get('error', 'invalid person'))
+        if r.status_code != 200:
+            raise HTTPException(502, 'The dog process could not enrol the person')
+        return {'available': True, **r.json()}
+
+    @router.delete('/api/people/{name}')
+    async def forget_person(name: str):
+        url = os.getenv('ANNIE_DOG_VIEW_URL', 'http://127.0.0.1:8011').rstrip('/')
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.post(url + '/people/forget', json={'name': name}, headers=_dog_headers())
+        except Exception:
+            raise HTTPException(503, 'The dog process is not reachable') from None
+        if r.status_code == 404:
+            raise HTTPException(404, 'Unknown person')
+        return {'available': True, **r.json()}
 
     @router.get('/api/settings/voice')
     async def voice_settings():

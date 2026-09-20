@@ -375,6 +375,11 @@ class LiveView:
                     receipt = board.get(self.path[len("/command/"):].split("?")[0]) if board else None
                     return self._send(200, json.dumps(receipt).encode(), "application/json") if receipt \
                         else self._send(404, b'{"error":"unknown command_id"}', "application/json")
+                if self.path.startswith("/people"):
+                    people = getattr(view, "people", None)
+                    if people is None:
+                        return self._send(503, b'{"error":"people directory off"}', "application/json")
+                    return self._send(200, json.dumps({"people": people.list()}).encode(), "application/json")
                 if self.path.startswith("/voice"):
                     v = VOICE
                     st = v.status() if v is not None else {"cloud": False, "elevenlabs": False, "deepgram": False, "speak_via": "off", "hear_via": "off"}
@@ -420,12 +425,40 @@ class LiveView:
                 if not self._host_ok() or not self._token_ok():
                     return
                 length = int(self.headers.get("Content-Length") or 0)
-                raw = self.rfile.read(length) if 0 < length < 65536 else b""
+                raw = self.rfile.read(length) if 0 < length < (8 << 20 if self.path.startswith("/people") else 65536) else b""
                 board = getattr(view, "missions", None)
                 if self.path == "/stop" and board is not None:  # body contract: cancel the mission, StopMove follows
                     code, receipt = board.submit({"name": "stop"})
                     return self._send(200, json.dumps({"stop_code": None, "ack_ms": None, "cancelled": receipt.get("stop_requested", True),
                                                        "note": "software stop via the patrol loop"}).encode(), "application/json")
+                if self.path.startswith("/people"):
+                    people = getattr(view, "people", None)
+                    if people is None:
+                        return self._send(503, b'{"error":"people directory off"}', "application/json")
+                    try:
+                        payload = json.loads(raw.decode() or "{}")
+                        if not isinstance(payload, dict):
+                            raise ValueError
+                    except ValueError:
+                        return self._send(400, b'{"error":"invalid JSON object"}', "application/json")
+                    if self.path.startswith("/people/forget"):
+                        ok = people.forget(str(payload.get("name") or "").strip())
+                        return self._send(200 if ok else 404, json.dumps({"forgotten": ok}).encode(), "application/json")
+                    import base64
+                    photos = []
+                    for b64 in (payload.get("photos") or [])[:10]:
+                        with contextlib.suppress(Exception):
+                            photos.append(base64.b64decode(b64, validate=False))
+                    try:
+                        result = people.enroll(str(payload.get("name") or ""), photos, relation=payload.get("relation"),
+                                               shirt=payload.get("shirt"), notes=payload.get("notes"))
+                    except ValueError as exc:
+                        return self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
+                    view.log(f"people: {result['name']} enrolled ({result['faces_added']} face(s))")
+                    if result.get("shirt") and getattr(view, "identifier", None) is not None:
+                        ident = view.identifier
+                        ident.name, ident.colour = result["name"], result["shirt"]  # the shirt-colour identity follows the app
+                    return self._send(200, json.dumps(result).encode(), "application/json")
                 if self.path.startswith("/voice"):
                     try:
                         payload = json.loads(raw.decode() or "{}")
@@ -737,6 +770,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
     perception = Perception(tracker, convert=convert, annotate=annotate if view.port else None, diag=diag,
                             min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier, objects=detector, objects_every=8)
     view.commands = voice_state  # POST /command on the live view sets the same bounded override as a voice command
+    view.identifier = identifier
+    with contextlib.suppress(Exception):
+        from robot.dog.perception.people import PeopleDirectory
+        view.people = PeopleDirectory(tracker=tracker)  # /people: enrol from the family app, greet by name
     view.recorder = recorder
     missions = MissionBoard()
     view.missions = missions

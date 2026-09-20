@@ -581,8 +581,8 @@ def test_body_client_failures_are_safe_errand_errors():
     def refuse(request):
         raise httpx.ConnectError("refused")
 
-    with pytest.raises(ErrandError, match="unreachable"):
-        asyncio.run(body_client(refuse).command("say", {"text": "hi"}))
+    with pytest.raises(ErrandError, match="unreachable"):  # keeps retrying through a link relaunch, then says so
+        asyncio.run(body_client(refuse, reconnect_s=0.2).command("say", {"text": "hi"}))
     with pytest.raises(ErrandError, match="rejected say"):
         asyncio.run(body_client(lambda request: httpx.Response(422, json={"error": "bad args"})).command("say", {}))
 

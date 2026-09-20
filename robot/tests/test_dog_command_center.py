@@ -60,3 +60,23 @@ def test_mission_board_recent_is_newest_first():
     recent = board.recent(2)
     assert [r["args"]["text"] for r in recent] == ["three", "two"]
     assert all(r["state"] == "completed" for r in recent)
+
+
+def test_overlapping_missions_wait_their_turn_and_stop_clears_the_line():
+    board = MissionBoard()
+    c1, r1 = board.submit({"name": "hello"})
+    c2, r2 = board.submit({"name": "dance"})
+    c3, r3 = board.submit({"name": "say", "args": {"text": "hi"}})
+    assert (c1, c2, c3) == (202, 202, 202) and r2["state"] == "queued" and r2["position"] == 1 and r3["position"] == 2
+    first = board.take()
+    assert first["command_id"] == r1["command_id"] and board.take() is None  # one at a time
+    board.finish(first, result={"ok": True})
+    second = board.take()
+    assert second["command_id"] == r2["command_id"] and second["state"] == "executing"
+    assert board.get(r3["command_id"])["state"] == "queued"
+    code, stop = board.submit({"name": "stop"})
+    assert code == 200 and board.get(r2["command_id"])["state"] == "cancelled" and board.get(r3["command_id"])["state"] == "cancelled"
+    assert board.take() is None
+    for i in range(9):
+        board.submit({"name": "hello", "command_id": f"h{i}"})
+    assert board.submit({"name": "hello", "command_id": "overflow"})[0] == 409  # bounded line

@@ -17,6 +17,7 @@ from collections import OrderedDict
 
 TERMINAL = ("completed", "failed", "cancelled")
 MAX_RECEIPTS = 200
+MAX_WAITING = 8  # overlapping missions queue up to this many; beyond that the body answers 409 busy
 
 
 class MissionBoard:
@@ -27,6 +28,7 @@ class MissionBoard:
         self.current: dict | None = None
         self.parent: dict | None = None   # an "instruct" receipt whose planned steps run as child receipts
         self.queue: list[dict] = []
+        self.waiting: list[dict] = []     # missions accepted while another runs; started in order (state "queued")
 
     def submit(self, payload) -> tuple[int, dict]:
         """Body-compatible: 202 accepted, 200 on a repeated command_id, 409 busy, 400 invalid."""
@@ -46,7 +48,9 @@ class MissionBoard:
                 if self.parent is not None and self.parent["state"] not in TERMINAL:
                     self.parent["state"], self.parent["error"] = "cancelled", "stopped by operator"
                     self.parent["finished_at_ms"] = int(self.clock() * 1000)
-                self.current, self.parent, self.queue = None, None, []
+                for w in self.waiting:
+                    w["state"], w["error"], w["finished_at_ms"] = "cancelled", "stopped by operator", int(self.clock() * 1000)
+                self.current, self.parent, self.queue, self.waiting = None, None, [], []
                 receipt["state"], receipt["result"] = "completed", {"stop_code": None, "note": "cancelled the mission; the patrol loop sends StopMove"}
                 receipt["finished_at_ms"] = int(self.clock() * 1000)
                 receipt["stop_requested"] = True
@@ -54,7 +58,14 @@ class MissionBoard:
                 self.stop_requested = True
                 return 200, dict(receipt)
             if (self.current is not None and self.current["state"] in ("accepted", "executing")) or self.parent is not None:
-                return 409, {"error": "busy", "current": dict(self.current or self.parent)}
+                if len(self.waiting) >= MAX_WAITING:
+                    return 409, {"error": "busy", "current": dict(self.current or self.parent), "waiting": len(self.waiting)}
+                receipt = self._new(command_id, name, args)  # overlapping requests wait their turn instead of failing
+                receipt["state"], receipt["position"] = "queued", len(self.waiting) + 1
+                receipt["behind"] = (self.current or self.parent)["command_id"]
+                self._remember(receipt)
+                self.waiting.append(receipt)
+                return 202, dict(receipt)
             receipt = self._new(command_id, name, args)
             self._remember(receipt)
             self.current = receipt
@@ -90,6 +101,13 @@ class MissionBoard:
             if cur is not None and cur["state"] == "accepted":
                 cur["state"], cur["started_at_ms"] = "executing", int(self.clock() * 1000)
                 return cur
+            if cur is None and self.parent is None and self.waiting:  # next in line
+                nxt = self.waiting.pop(0)
+                if nxt["state"] == "queued":
+                    nxt["state"], nxt["started_at_ms"] = "executing", int(self.clock() * 1000)
+                    nxt.pop("position", None)
+                    self.current = nxt
+                    return nxt
             if cur is None and self.parent is not None and self.queue:
                 step = self.queue.pop(0)
                 n = self.parent["progress"]["done"] + 1

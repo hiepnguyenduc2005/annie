@@ -73,7 +73,8 @@ SAY_MAX_CHARS, TEXT_MAX_CHARS, NAME_MAX_CHARS, TRANSCRIPT_MAX_CHARS = 300, 2000,
 FIND_TIMEOUT_S, LISTEN_MAX_S = 90, 10
 # Hard client-side limits; anything else 15 s. Tricks: stand + balance + request + the body's settle time.
 DEADLINES_S = {"find_person": 120.0, "say": 45.0, "listen": 25.0, "hello": 40.0, "dance": 45.0}
-BUSY_WAIT_S = 5.0  # how long a 409 busy from the body is retried before giving up
+BUSY_WAIT_S = 45.0  # how long a 409 busy from the body is retried before giving up (a greeting/trick takes ~15 s)
+RECONNECT_S = float(os.environ.get("ANNIE_BODY_RECONNECT_S", "45"))  # the dog process relaunches in ~20 s after a link drop
 TERMINAL_KINDS = ("completed", "failed")
 RECEIPT_TERMINAL = ("completed", "failed", "cancelled")
 EVENT_RETRIES = {"progress": 1, "terminal": 3}
@@ -345,10 +346,11 @@ class BodyClient:
     """Thin HTTP adapter for the body service: submit a command, poll its receipt to a terminal state."""
 
     def __init__(self, base_url: str, *, token: str | None = None, poll_s: float = 0.5, deadlines: dict | None = None,
-                 transport=None, status=_log):
+                 transport=None, status=_log, reconnect_s: float | None = None):
         self.client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=5.0, trust_env=False, transport=transport,
                                         headers={"X-Body-Token": token} if token else None)
         self.poll_s, self.deadlines, self.status = poll_s, {**DEADLINES_S, **(deadlines or {})}, status
+        self.reconnect_s = RECONNECT_S if reconnect_s is None else float(reconnect_s)
 
     async def command(self, name: str, args: dict | None = None) -> dict:
         """Run one body command to completion and return its result dict; ErrandError otherwise."""
@@ -391,14 +393,19 @@ class BodyClient:
             response = await self._request("GET", f"/command/{command_id}")
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        """Up to three tries on transport errors; safe because command_id makes the POST idempotent."""
-        for attempt in range(3):
+        """Retries transport errors for up to RECONNECT_S (the dog process relaunches itself after a WebRTC link
+        drop, which takes ~20 s); safe because command_id makes the POST idempotent."""
+        until, attempt = time.monotonic() + self.reconnect_s, 0
+        while True:
             try:
                 return await self.client.request(method, path, **kwargs)
             except httpx.TransportError:
-                if attempt == 2:
+                attempt += 1
+                if time.monotonic() >= until:
                     raise ErrandError("The robot body service is unreachable.") from None
-                await asyncio.sleep(self.poll_s)
+                if attempt == 1:
+                    self.status(f"body unreachable; retrying for up to {self.reconnect_s:g} s (link relaunch?)")
+                await asyncio.sleep(min(2.0, self.poll_s * attempt))
 
 
 class AppClient:

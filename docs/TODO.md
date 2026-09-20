@@ -6,6 +6,10 @@ as work progresses and record a reason for blocked work.
 
 ## Now
 
+- [ ] TASK-014: Intelligent dog brain, step 1 (design: `superpowers/specs/2026-09-19-intelligent-dog-brain-design.md`; plan: `superpowers/plans/2026-09-19-intelligent-dog-brain-step1.md`). Done when the simulated and physical dog search systematically, trigger the fall check-in from two independent signals, listen to a live reply, and local plans pass the 5 s gate.
+  - Shipped 2026-09-19 (offline tests, documented checks pass): `robot/simulation/mission.py` (search progress), `posture.py` + `person_tracker.py` (keypoint posture, ByteTrack), `app_backend` `POST /recall` (embedding recall with lexical fallback), `robot/go2_perception.py` (hardware camera + posture + cited inference, no motion), `robot/simulation/live_listener.py` (VAD-gated microphone reply, `source: microphone`), `robot/go2_host_voice.py` (host speech + listening with `source: host` receipts; verified end to end on the Mac against the app).
+  - Open: wire `MissionState` and `/recall` into the planner/bridge (Codex owns `planner.py`, `context.py`, `bridge.py`, `task_progress.py`); benchmark mlx-vlm runtimes for sub-second local perception; a `person_seen` waypoint never retires, so cap the "return to last sighting" rule; test the posture rule on dog's-eye footage of a person on the floor; hardware runs need the dog in range and charged above 40%.
+
 - [ ] TASK-006: Complete and measure live image/audio inference behind the GX10-compatible service. Keep stale perception out of incident rules; distinguish successful media interpretation from HTTP acceptance.
   - Verified: two full-house model-driven simulator runs completed walking, camera detection, native check-in, correlated recorded reply, family alert and family playback in 41.864 s and 37.974 s. [Evidence](LIVE_DEMO.md).
   - Remaining: full scenario/latency qualification, real microphone input and GX10 deployment.

@@ -281,19 +281,12 @@ class LiveView:
                         else self._send(404, b'{"error":"unknown command_id"}', "application/json")
                 if self.path.startswith("/health"):
                     return self._send(200, b'{"ok": true, "service": "go2-patrol-greet"}', "application/json")
-                if self.path.startswith("/spacetime.json"):
-                    rec = getattr(view, "recorder", None)
-                    if rec is None:
-                        return self._send(503, b'{"error":"recorder off"}', "application/json")
-                    from urllib.parse import parse_qs, urlsplit
-                    q = parse_qs(urlsplit(self.path).query)
-                    since = float(q["since"][0]) if q.get("since") else None
-                    return self._send(200, json.dumps(rec.snapshot(since=since)).encode(), "application/json")
-                if self.path.startswith("/spacetime"):
-                    page = Path(__file__).resolve().parent / "spacetime_viewer.html"
-                    if not page.exists():
-                        return self._send(404, b"viewer not built yet", "text/plain")
-                    return self._send(200, page.read_bytes(), "text/html; charset=utf-8")
+                if self.path.startswith(("/spacetime", "/three.min.js")):
+                    # the recorder module owns these routes (validated since/until/max_frames, page, offline Three.js)
+                    from go2_spacetime import spacetime_http
+                    resp = spacetime_http(getattr(view, "recorder", None), self.path)
+                    if resp:
+                        return self._send(*resp)
                 if self.path.startswith("/map.jpg"):
                     data = getattr(view, "map_jpeg", None)
                     return self._send(200, data, "image/jpeg") if data else self._send(404, b"no map yet", "text/plain")

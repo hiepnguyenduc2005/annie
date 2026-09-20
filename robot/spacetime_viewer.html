@@ -376,7 +376,7 @@ function start() {
       rows = [["text", r.text || "–"]];
     }
     rows.push(["x, y, z", r.x.toFixed(2) + ", " + r.y.toFixed(2) + ", " + (r.z == null ? "–" : r.z.toFixed(2)) + " m"], ["seen", wall(r.t) + " (T+" + clock(r.t - data.t0) + ")"],
-      ["age", sel == null ? "–" : (sel - r.t).toFixed(1) + " s before the selected time"]);
+      ["age", sel == null ? "–" : Math.abs(sel - r.t).toFixed(1) + (sel >= r.t ? " s before" : " s after") + " the selected time"]);
     if (item.type === "person") rows.push(["note", "estimate from camera bearing + LiDAR range"]);
     var table = document.createElement("table");
     rows.forEach(function (kv) {
@@ -523,6 +523,7 @@ function start() {
       if (!full && snap.span && snap.span[1] != null && snap.span[1] < data.t1 - 5) { needReset = true; return 50; } // the recorder restarted with a new clock
       var thinned = full && snap.counts && snap.counts.frames_total > snap.counts.frames;
       ingest(snap, full, true); needReset = false; fails = 0; lastOk = performance.now();
+      setStatus((live ? "live" : "history") + " · updated 0 s ago", "ok"); // tick() keeps the age fresh, but a hidden tab gets no frames
       if (thinned && data.t1 != null) fetchSnap("?since=" + (data.t1 - DENSE_S).toFixed(3)).then(function (s) { ingest(s, false, false); }).catch(function () {});
       return POLL_MS;
     }).catch(function () {

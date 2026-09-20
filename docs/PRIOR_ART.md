@@ -22,3 +22,8 @@ they do not establish Annie's accuracy, novelty, or hardware readiness.
 is a discovery index, not evidence for individual performance claims. Guide-dog,
 ROS 2, custom SLAM, and arm work remain outside the current assistance loop.
 No sensor-spec numbers are needed for the current software claims.
+
+- Three.js r128 (`robot/three.min.js`, vendored 2026-09-20 from
+  https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js, sha256
+  9274bbcec8d96168…, MIT licence, Copyright 2010-2021 Three.js Authors): offline
+  fallback for the 4D space-time viewer (`robot/spacetime_viewer.html`).

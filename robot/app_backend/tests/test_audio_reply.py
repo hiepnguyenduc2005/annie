@@ -592,3 +592,15 @@ def test_router_capture_rejection_422(svc):
     r = client.post('/voice/capture', json=capture_req(uuid4()))
     assert r.status_code == 422
     assert 'no_active_checkin' in r.json()['detail']
+
+
+def test_microphone_source_is_accepted_for_capture_and_result():
+    from robot.app_backend.app.audio_reply import CaptureRequest, ResultRequest
+    from uuid import uuid4
+    ids = {'utterance_id': str(uuid4()), 'event_id': str(uuid4())}
+    CaptureRequest.model_validate({**ids, 'source': 'microphone', 'capture_started_at': 1000})
+    ResultRequest.model_validate({**ids, 'source': 'microphone', 'model': 'faster-whisper-tiny.en',
+                                  'capture_started_at': 1000, 'capture_ended_at': 2000, 'text': '', 'segments': []})
+    import pytest
+    with pytest.raises(Exception):
+        CaptureRequest.model_validate({**ids, 'source': 'phone_call', 'capture_started_at': 1000})

@@ -32,7 +32,7 @@ class FakeES:
         self.requests.append(("put", path))
         return FakeResp(200)
 
-    def post(self, path, content=None, json=None, headers=None):
+    def post(self, path, content=None, json=None, headers=None, params=None):
         self.requests.append(("post", path))
         if path == "/_bulk":
             lines = content.strip().split("\n")

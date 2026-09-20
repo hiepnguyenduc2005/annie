@@ -51,6 +51,9 @@ The app service health endpoint is `/health`; authenticated OpenAPI is
 For root `.env` settings append `--env-file .env`. Use [.env.example](.env.example)
 as a reference without replacing existing keys. Phone/LAN access requires an
 API token and the intended host in `ANNIE_ALLOWED_HOSTS`.
+[Local environment setup](docs/LOCAL_ENV.md) configures Ollama, Graphiti,
+local speech, and optional self-hosted Elasticsearch. The checked-in app journal
+uses SQLite; the team's expected MongoDB profile integration needs verification.
 [Subconscious setup](docs/SUBCONSCIOUS.md) documents the opt-in text advisory team;
 no paid calls or notifications run automatically.
 

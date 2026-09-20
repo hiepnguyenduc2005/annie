@@ -5,11 +5,12 @@ without cloud credentials. Set `ANNIE_MEMORY_PROVIDER=graphiti`; see
 [local setup and measured verification](LOCAL_MEMORY.md). This uses Graphiti's
 open-source graph storage and hybrid retrieval, not the Zep hosted service.
 
-## Optional Elastic Cloud
+## Optional Elasticsearch (local or cloud)
 
 Annie's simulation brain can persist and retrieve strict, image-free
-observation memories through an existing Elasticsearch index on the sponsor's
-Elastic Cloud deployment. This is opt-in: when ANNIE_MEMORY_PROVIDER is not
+observation memories through an existing Elasticsearch index.
+The current local profile uses a self-hosted HTTPS node; see
+[local setup](../../docs/LOCAL_ENV.md). This is opt-in: when ANNIE_MEMORY_PROVIDER is not
 "elastic" or "graphiti", from_env() returns None and the local journal remains
 the only memory (retained separately).
 
@@ -18,8 +19,9 @@ the only memory (retained separately).
 | Variable | Meaning | Default |
 | --- | --- | --- |
 | ANNIE_MEMORY_PROVIDER | "elastic" enables the adapter | unset (disabled) |
-| ELASTIC_URL | HTTPS Cloud endpoint, no credentials or query string | required |
+| ELASTIC_URL | HTTPS Elasticsearch endpoint, no credentials or query string | required |
 | ELASTIC_API_KEY | API key, sent only as Authorization: ApiKey header | required |
+| ELASTIC_CA_CERT | CA PEM path for a local HTTPS node; unset uses default certificate trust | optional |
 | ANNIE_MEMORY_INDEX | Existing index name, [a-z0-9][a-z0-9._-]* | annie-sim-observations |
 
 The index must already exist; the adapter never auto-creates indices or

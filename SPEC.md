@@ -58,6 +58,12 @@ See [the story and acceptance checks](robot/simulation/STORY_DEMO.md).
 
 ## Scope boundaries
 
+The current requested deployment profile runs all runtime services locally,
+including Elasticsearch when selected. Use local vision, Whisper/macOS speech,
+and Graphiti or self-hosted Elastic; cloud audio and advisory agents remain off.
+Prior cloud-based simulator measurements remain historical evidence, not
+acceptance of the all-local profile. See [local setup](docs/LOCAL_ENV.md).
+
 Target integrations: Go2 with DimOS/MuJoCo, GX10-local image-capable Nemotron,
 Deepgram, ElevenLabs, Linq, and Elastic. Track each as simulated/disconnected
 until verified. Initial delivery is a phone-friendly web app and local backend;

@@ -109,6 +109,13 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
   non-loopback clients without a token, a physical phone needs
   `ANNIE_API_TOKEN` set and entered in Profile; the simulator does not.
 
+## DEC-010: All-local deployment profile, including Elastic
+
+- Date: 2026-09-19.
+- Context: The user requested a sponsor-ready environment based on the working stack, then explicitly selected everything local, including Elastic.
+- Decision: Reuse local Ollama vision, Whisper/macOS speech, SQLite, and Graphiti. Support self-hosted Elasticsearch with its own API key and CA certificate; keep Graphiti selected until local Elastic is provisioned and verified. Cloud voice, advisory agents, and messaging are not dependencies of this profile.
+- Consequences: Prior cloud story results do not establish all-local acceptance. Elastic replaces the bridge memory provider, not the app journal. The user expects MongoDB to work; a fresh pull still contains no MongoDB driver or connection setting, so verify the team's integration before asserting its status. See [the environment guide](LOCAL_ENV.md).
+
 ## Future entries
 
 Use the next `DEC-NNN` ID. Include date, status, context, decision, alternatives,

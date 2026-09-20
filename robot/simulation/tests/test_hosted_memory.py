@@ -1,8 +1,10 @@
 import asyncio
 import json as jsonlib
+import ssl
 
 import httpx
 import pytest
+import certifi
 
 from robot.app_backend.app.models import Perception, Pose
 from robot.simulation.hosted_memory import (
@@ -55,16 +57,111 @@ def memory(transport, index='annie-sim-observations'):
                          client=client)
 
 
+def ca_env(monkeypatch, **values):
+    for key in ('ANNIE_MEMORY_PROVIDER', 'ELASTIC_URL', 'ELASTIC_API_KEY',
+                'ANNIE_MEMORY_INDEX', 'ELASTIC_CA_CERT'):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv('ANNIE_MEMORY_PROVIDER', 'elastic')
+    monkeypatch.setenv('ELASTIC_URL', 'https://ok.example')
+    monkeypatch.setenv('ELASTIC_API_KEY', 'secret')
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_from_env_propagates_ca_cert(monkeypatch):
+    ca_env(monkeypatch, ELASTIC_CA_CERT=certifi.where())
+    adapter = from_env()
+    assert adapter is not None
+    assert isinstance(adapter._verify, ssl.SSLContext)
+    assert adapter._verify.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_from_env_without_ca_uses_default_verify(monkeypatch):
+    ca_env(monkeypatch)
+    adapter = from_env()
+    assert adapter is not None
+    assert adapter._verify is True
+
+
+def test_blank_ca_env_treated_as_absent(monkeypatch):
+    ca_env(monkeypatch, ELASTIC_CA_CERT='')
+    adapter = from_env()
+    assert adapter is not None
+    assert adapter._verify is True
+
+
+def test_missing_ca_file_fails_sanitized_before_http(monkeypatch):
+    ca_env(monkeypatch, ELASTIC_CA_CERT='/nonexistent/path/ca.pem')
+    with pytest.raises(MemoryUnavailable) as excinfo:
+        from_env()
+    message = str(excinfo.value)
+    assert 'ca.pem' not in message
+    assert '/nonexistent' not in message
+    assert 'secret' not in message
+
+
+def test_invalid_ca_file_fails_sanitized_before_http(monkeypatch, tmp_path):
+    ca_file = tmp_path / 'bad.pem'
+    ca_file.write_bytes(b'this is not a certificate')
+    ca_env(monkeypatch, ELASTIC_CA_CERT=str(ca_file))
+    with pytest.raises(MemoryUnavailable) as excinfo:
+        from_env()
+    message = str(excinfo.value)
+    assert 'bad.pem' not in message
+    assert 'PEM' not in message
+    assert 'secret' not in message
+
+
+def test_valid_ca_file_is_accepted():
+    ca_file = certifi.where()
+    adapter = ElasticMemory('https://elastic.example:9243', 'test-key',
+                            'annie-sim-observations', ca_cert=str(ca_file))
+    assert isinstance(adapter._verify, ssl.SSLContext)
+    assert adapter._verify.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_https_still_required_with_ca():
+    ca_file = certifi.where()
+    with pytest.raises(MemoryUnavailable):
+        ElasticMemory('http://elastic.example:9243', 'test-key',
+                      'annie-sim-observations', ca_cert=str(ca_file))
+
+
+def test_custom_verify_context_reaches_httpx_client(monkeypatch):
+    ca_env(monkeypatch, ELASTIC_CA_CERT=certifi.where())
+    adapter = from_env()
+    assert adapter is not None
+    original_client = httpx.AsyncClient
+    seen = {}
+    transport = RecordingTransport({'json': {'hits': {'hits': []}}})
+
+    # One wrapper: capture kwargs and inject the recording transport so the
+    # client never attempts a live request.
+    def client_with_transport(*args, **kwargs):
+        seen.update(kwargs)
+        kwargs['transport'] = transport
+        return original_client(*args, **kwargs)
+    monkeypatch.setattr(
+        'robot.simulation.hosted_memory.httpx.AsyncClient',
+        client_with_transport)
+    result = asyncio.run(adapter.search('sitting', 'sim-one'))
+    assert result == []
+    assert seen.get('verify') is not True
+    assert isinstance(seen.get('verify'), ssl.SSLContext)
+    assert seen.get('trust_env') is False
+    assert seen.get('follow_redirects') is False
+
+
 def test_from_env_disabled_without_provider(monkeypatch):
     for key in ('ANNIE_MEMORY_PROVIDER', 'ELASTIC_URL', 'ELASTIC_API_KEY',
-                'ANNIE_MEMORY_INDEX'):
+                'ANNIE_MEMORY_INDEX', 'ELASTIC_CA_CERT'):
         monkeypatch.delenv(key, raising=False)
     assert from_env() is None
 
 
 def test_from_env_rejects_partial_or_unsafe_config(monkeypatch):
     for key in ('ANNIE_MEMORY_PROVIDER', 'ELASTIC_URL', 'ELASTIC_API_KEY',
-                'ANNIE_MEMORY_INDEX'):
+                'ANNIE_MEMORY_INDEX', 'ELASTIC_CA_CERT'):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv('ANNIE_MEMORY_PROVIDER', 'elastic')
     with pytest.raises(MemoryUnavailable):
@@ -80,7 +177,7 @@ def test_from_env_rejects_partial_or_unsafe_config(monkeypatch):
 
 def test_from_env_builds_adapter_with_default_index(monkeypatch):
     for key in ('ANNIE_MEMORY_PROVIDER', 'ELASTIC_URL', 'ELASTIC_API_KEY',
-                'ANNIE_MEMORY_INDEX'):
+                'ANNIE_MEMORY_INDEX', 'ELASTIC_CA_CERT'):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv('ANNIE_MEMORY_PROVIDER', 'elastic')
     monkeypatch.setenv('ELASTIC_URL', 'https://ok.example')

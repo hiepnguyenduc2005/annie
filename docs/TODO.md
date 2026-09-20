@@ -18,6 +18,7 @@ as work progresses and record a reason for blocked work.
 
 - [ ] TASK-004: Connect and evaluate GX10 local image inference. Done when rendered frames produce valid measured observations and the scenario matrix distinguishes VLM results from ground truth.
 - [ ] TASK-005: Integrate actual speech, messaging, and Elastic adapters. Done when provisioned services acknowledge execution and privacy boundaries are verified with synthetic data.
+  - Current deployment direction: all local, including Elastic. [Environment template and setup](LOCAL_ENV.md) reuse Ollama, Whisper/macOS speech, and Graphiti; self-hosted Elasticsearch needs a node, index, local API key, CA certificate, and live write/search verification. Cloud-only voice/messaging adapters are deferred for this profile.
 - [ ] TASK-006: Implement `robot_backend`'s side of `contract/family_messages.md` (`POST /dispatch`, `POST /internal/events` calls). Done when a real navigate/speak/listen/recall/speak run on the GX10 posts live events into `app_backend` and completes without `ANNIE_FAMILY_MOCK_ROBOT`.
 
 ## Blocked

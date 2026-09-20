@@ -8,6 +8,7 @@ never logs credentials.
 """
 import os
 import re
+import ssl
 import math
 import json as json_codec
 import asyncio
@@ -47,16 +48,33 @@ def _validate_url(url: str) -> str:
     return url.rstrip('/')
 
 
+def _load_verify(ca_cert: str | None) -> bool | ssl.SSLContext:
+    """Build an httpx verify argument from an optional local CA PEM file.
+
+    Returns True (httpx/system default verification) when no CA is given.
+    A missing or unreadable/invalid CA fails sanitized, before any HTTP.
+    """
+    if ca_cert is None:
+        return True
+    try:
+        return ssl.create_default_context(cafile=ca_cert)
+    except (OSError, ssl.SSLError):
+        raise MemoryUnavailable(
+            'elastic ca certificate is missing or invalid') from None
+
+
 class ElasticMemory:
     """Idempotent write/search adapter over one existing Elasticsearch index."""
 
     provider_name = 'elastic'
 
     def __init__(self, url: str, api_key: str, index: str,
-                 client: httpx.AsyncClient | None = None):
+                 client: httpx.AsyncClient | None = None,
+                 ca_cert: str | None = None):
         self._url = _validate_url(url)
         if not INDEX_PATTERN.fullmatch(index) or not api_key:
             raise MemoryUnavailable('elastic index or credentials are invalid')
+        self._verify = _load_verify(ca_cert)
         self._index = index
         self._headers = {
             'Authorization': 'ApiKey {0}'.format(api_key),
@@ -80,7 +98,8 @@ class ElasticMemory:
         try:
             if self._client is None:
                 async with httpx.AsyncClient(
-                        timeout=timeout, headers=self._headers, trust_env=False, follow_redirects=False) as client:
+                        timeout=timeout, headers=self._headers, trust_env=False,
+                        follow_redirects=False, verify=self._verify) as client:
                     return await exchange(client)
             else:
                 return await exchange(self._client)
@@ -184,9 +203,10 @@ def from_env() -> 'ElasticMemory | GraphitiMemory | None':
     url = os.environ.get('ELASTIC_URL')
     api_key = os.environ.get('ELASTIC_API_KEY')
     index = os.environ.get('ANNIE_MEMORY_INDEX', 'annie-sim-observations')
+    ca_cert = os.environ.get('ELASTIC_CA_CERT') or None
     if not url or not api_key:
         raise MemoryUnavailable(
             'elastic memory selected but ELASTIC_URL/ELASTIC_API_KEY missing')
     if not INDEX_PATTERN.match(index):
         raise MemoryUnavailable('elastic index name is not a safe pattern')
-    return ElasticMemory(url, api_key, index)
+    return ElasticMemory(url, api_key, index, ca_cert=ca_cert)

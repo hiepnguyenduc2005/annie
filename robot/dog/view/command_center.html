@@ -261,7 +261,7 @@
   }
   var voiceMuted = null, muteBusy = false;
   function renderMute(voice) {
-    if (voice && typeof voice.muted === "boolean") voiceMuted = voice.muted;
+    if (voice) voiceMuted = typeof voice.muted === "boolean" ? voice.muted : null;
     var b = $("voice-mute");
     b.disabled = muteBusy || voiceMuted == null;
     b.textContent = muteBusy ? "Changing sound…" : (voiceMuted == null ? "Sound unavailable" : (voiceMuted ? "Unmute Annie" : "Mute Annie"));
@@ -281,7 +281,7 @@
         if (!r.ok || typeof j.muted !== "boolean" || j.muted !== desired) throw new Error(j.error || "Mute was not confirmed");
         renderMute(j); toast(j.muted ? "Annie muted" : "Annie unmuted");
       }); })
-      .catch(function (e) { toast("Sound change failed: " + e.message, true); })
+      .catch(function (e) { voiceMuted = null; toast("Sound change failed: " + e.message, true); })
       .finally(function () { muteBusy = false; renderMute(null); });
   };
   // "Grandma for this demo": the operator points at the right live track by clothing
@@ -684,7 +684,7 @@
     $("fps").textContent = (s.fps || 0).toFixed(1) + " fps";
     var tracks = s.tracks || [], lying = tracks.some(function (x) { return x.posture === "lying"; });
     window.__telemetry = t;
-    renderMute(t.voice);
+    renderMute(t.voice || {});
     $("people").textContent = tracks.length + (tracks.length === 1 ? " person" : " people") + (tracks.length ? ": " + tracks.map(function (x) { return (x.identity && x.identity.name) || ("#" + x.track_id); }).join(", ") : "");
     renderGrandma(tracks);
     $("lying").hidden = !lying;
@@ -733,8 +733,8 @@
   }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function poll() {
-    fetch("/telemetry.json").then(function (r) { return r.json(); }).then(render)
-      .catch(function () { $("dot").className = "dot"; $("link").textContent = "dog process not reachable"; });
+    fetchBounded("/telemetry.json").then(function (r) { if (!r.ok) throw new Error("telemetry unavailable"); return r.json(); }).then(render)
+      .catch(function () { voiceMuted = null; renderMute(null); $("dot").className = "dot"; $("link").textContent = "dog process not reachable"; });
   }
   setInterval(poll, 500); poll();
 })();

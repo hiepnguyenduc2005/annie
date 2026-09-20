@@ -2,6 +2,7 @@
 import copy
 import asyncio
 import json
+import os
 import re
 import sqlite3
 import time
@@ -9,11 +10,21 @@ import functools
 from pathlib import Path
 from uuid import uuid4
 from .models import CHANNEL_MODELS, Event, Perception, VoiceHeard
+from .semantic_memory import SemanticMemory, disabled_embedder, ollama_embedder
 from . import audio_reply
 
 
 def now_ms():
     return int(time.time() * 1000)
+
+
+def embedder_from_env():
+    # Unset or "off" keeps recall on the offline lexical fallback; captions are
+    # sent to an embedding provider only when one is explicitly configured.
+    model = os.getenv('ANNIE_EMBED_MODEL', '').strip()
+    if not model or model.lower() == 'off':
+        return disabled_embedder
+    return ollama_embedder(os.getenv('ANNIE_EMBED_URL', '').strip() or 'http://127.0.0.1:11434', model)
 
 
 AUDIO_WATCHDOG_MS = 8000  # Uncertain playback failure deadline (acceptance v1).
@@ -63,7 +74,7 @@ def atomic(name):
 
 
 class Service:
-    def __init__(self, db_path, mode='demo', clock=now_ms, require_audio_receipt=False):
+    def __init__(self, db_path, mode='demo', clock=now_ms, require_audio_receipt=False, embedder=None):
         self.clock, self.mode = clock, mode
         self.require_audio_receipt = require_audio_receipt
         if db_path != ':memory:':
@@ -75,6 +86,9 @@ class Service:
         self.db.execute('CREATE TABLE IF NOT EXISTS state (topic TEXT PRIMARY KEY, payload TEXT)')
         self.db.execute('CREATE TABLE IF NOT EXISTS commands (command_id TEXT PRIMARY KEY, seq INTEGER, payload TEXT)')
         self.db.commit()
+        # Goal-conditioned recall over the memory table; an injected embedder
+        # keeps tests offline, otherwise the provider comes from the environment.
+        self.semantic = SemanticMemory(self.db, embedder=embedder or embedder_from_env())
         self.dog = self.perception = self.map = self.pending = None
         self.last_ts = self.db.execute('SELECT COALESCE(MAX(ts), -1) FROM memory').fetchone()[0]
         self.candidate = self.candidate_map = None
@@ -124,6 +138,19 @@ class Service:
 
     def _save_episode(self):
         self._save_state('episode', self.episode)
+
+    @atomic('reset_demo_episode')
+    def reset_demo_episode(self):
+        """Explicitly re-arm a resolved demo without inventing recovery evidence."""
+        if self.mode != 'demo':
+            raise PermissionError('Demo controls are unavailable in live mode')
+        if self.pending is not None:
+            raise ValueError('Resolve the active check-in before resetting the demo episode')
+        self.episode = False
+        self.candidate = self.candidate_map = None
+        self.rearm = []
+        self._save_episode()
+        return {'reset': True, 'scope': 'resolved_demo_episode'}
 
     def _load_commands(self):
         self.commands = [json.loads(row[0]) for row in
@@ -181,6 +208,7 @@ class Service:
     def status(self):
         return {'dog': self.dog, 'perception': self.perception, 'mode': self.mode,
                 'pending_checkin': self.pending,
+                'incident_episode_active': self.episode,
                 'integrations': {'robot': ('simulation_connected' if self.clock() - self.dog['ts'] < 3000 else 'simulation_stale')
                                  if self.dog and self.dog['pose']['map_id'].startswith('sim-') else 'not_connected', 'redis': 'not_implemented',
                                  'memory': 'local_sqlite', 'voice': ('receipt_required' if self.require_audio_receipt else 'queued_only'),
@@ -306,6 +334,10 @@ class Service:
         cursor = self.db.execute('INSERT OR IGNORE INTO memory VALUES (?, ?, ?)', (str(frame.frame_id), frame.ts, json.dumps(payload)))
         if not cursor.rowcount:
             return False
+        # Best effort and inside this transaction: an unavailable embedder
+        # returns False (bounded by its timeout, then skipped for a cooldown)
+        # and never aborts the safety rules below.
+        self.semantic.index(str(frame.frame_id), frame.pose.map_id, frame.ts, frame.caption)
         self.db.execute('DELETE FROM memory WHERE id NOT IN (SELECT id FROM memory ORDER BY ts DESC, rowid DESC LIMIT 1000)')
         self.last_ts, self.perception = frame.ts, payload
         self.emit('brain.perception', payload)
@@ -466,6 +498,12 @@ class Service:
         map_data = self.map or {}
         return EpisodicMemory(self.db, now=self.clock, map_id=map_data.get('map_id'),
                               waypoints=map_data.get('waypoints', ())).ask(text)
+
+    def recall(self, goal, map_id, ts_to=None, limit=6):
+        now = self.clock()
+        # Future-dated frames are never evidence, whatever bound the caller asks for.
+        ts_to = now if ts_to is None else min(ts_to, now)
+        return self.semantic.recall(goal, map_id=map_id, ts_to=ts_to, limit=limit)
 
     def seed(self):
         now = self.clock()

@@ -166,14 +166,53 @@ def test_circle_sends_yaw_rate():
     assert json.loads(move_cmds(conn)[0][1]["parameter"])["z"] == pytest.approx(0.3)
 
 
-def test_low_battery_never_moves():
-    conn = FakeConn(soc=15)
+@pytest.mark.parametrize("soc", [15, 23, 39.9])
+def test_low_battery_never_moves(soc):
+    conn = FakeConn(soc=soc)
     report = run(go2_walk.plan_motion(speed_mps=0.3, distance_m=1.0, duration_s=0.05), conn)
     assert move_cmds(conn) == []
     assert go2_walk.SPORT_CMD["StandUp"] not in api_ids(conn)
     assert report["reason"] == "battery_low"
     assert report["completed"] is False
     assert conn.disconnected is True
+
+
+@pytest.mark.parametrize("threshold", [40.0, 60.0, 100.0])
+def test_battery_at_valid_threshold_allows_stand(threshold):
+    conn = FakeConn(soc=threshold)
+    report = run(go2_walk.plan_motion(speed_mps=0.3, distance_m=1.0, duration_s=0.03),
+                 conn, min_soc=threshold)
+    assert go2_walk.SPORT_CMD["StandUp"] in api_ids(conn)
+    assert report["reason"] == "duration_complete"
+
+
+def test_default_battery_floor_accepts_40_percent():
+    conn = FakeConn(soc=40.0)
+    report = run(go2_walk.plan_motion(speed_mps=0.3, distance_m=1.0, duration_s=0.03), conn)
+    assert go2_walk.SPORT_CMD["StandUp"] in api_ids(conn)
+    assert report["reason"] == "duration_complete"
+
+
+@pytest.mark.parametrize("threshold", [23, 39.9, 100.1, float("nan"), float("inf"), -float("inf")])
+def test_api_rejects_invalid_battery_threshold_before_connection(threshold):
+    def forbidden_connection(*args):
+        pytest.fail("invalid battery threshold must not create a connection")
+
+    plan = go2_walk.plan_motion(speed_mps=0.3, distance_m=1.0)
+    with pytest.raises(ValueError, match="minimum battery"):
+        asyncio.run(go2_walk.run_walk(plan, ip="10.0.0.99", aes_key=None,
+                                     conn_factory=forbidden_connection, min_soc=threshold))
+
+
+@pytest.mark.parametrize("threshold", ["23", "39.9", "100.1", "nan", "inf", "-inf"])
+def test_cli_rejects_invalid_battery_threshold_before_connection(monkeypatch, threshold):
+    def forbidden_connection(*args):
+        pytest.fail("invalid battery threshold must not create a connection")
+
+    monkeypatch.setattr(go2_walk, "_default_conn_factory", forbidden_connection)
+    with pytest.raises(SystemExit) as exc:
+        go2_walk.main(["--distance", "1", f"--min-battery={threshold}"])
+    assert exc.value.code == 2
 
 
 def test_missing_telemetry_never_moves():

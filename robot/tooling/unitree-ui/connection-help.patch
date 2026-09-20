@@ -1,0 +1,73 @@
+diff --git a/src/connection/local-connector.ts b/src/connection/local-connector.ts
+index c17531d..0d03bae 100644
+--- a/src/connection/local-connector.ts
++++ b/src/connection/local-connector.ts
+@@ -67,10 +67,10 @@ async function decryptData1(
+         if (!aesHex) throw new Error('AES-128 key required to decrypt con_notify');
+         if (sn) setCachedAesKey(sn, aesHex);
+         const note = lastErr ? 'AES-128 key (prompted again, previous key failed)' : 'AES-128 key (prompted)';
+-        log.webrtc.info(`${tag()} ${note} for SN ${sn || '<unknown>'} — cached for next time, key=${aesHex}`);
++        log.webrtc.info(`${tag()} ${note} for SN ${sn || '<unknown>'} — available for the connection`);
+         onStep?.(`${note} — cached for SN ${sn || '<unknown>'}`);
+       } else {
+-        log.webrtc.info(`${tag()} AES-128 key loaded from localStorage cache for SN ${sn}, key=${aesHex}`);
++        log.webrtc.info(`${tag()} AES-128 key loaded from localStorage cache for SN ${sn}`);
+         onStep?.(`AES-128 key from localStorage cache (SN ${sn})`);
+       }
+       try {
+@@ -216,7 +216,7 @@ async function exchangeSdpNew(
+
+   // Step 2: con_ing — encrypted SDP exchange
+   const aesKey = generateAesKey();
+-  log.webrtc.info(`${tag()} AES key: ${aesKey}`);
++  log.webrtc.info(`${tag()} Session encryption initialized`);
+
+   const encryptedSdp = await aesEncrypt(JSON.stringify(payload), aesKey);
+   const encryptedKey = rsaEncrypt(aesKey, publicKey);
+diff --git a/src/ui/connection-panel.ts b/src/ui/connection-panel.ts
+index f174168..c1ef687 100644
+--- a/src/ui/connection-panel.ts
++++ b/src/ui/connection-panel.ts
+@@ -1,7 +1,7 @@
+ import type { ConnectionMode, ConnectionConfig } from '../types';
+ import { MODE_LABELS, DEFAULT_AP_IP } from '../connection/modes';
+ import { scanForRobots, type ScanResult } from '../connection/network-scan';
+-import { cloudApi, FAMILY_LABEL, CONNECT_FAMILIES, isG1Family, type RobotDevice } from '../api/unitree-cloud';
++import { cloudApi, FAMILY_LABEL, CONNECT_FAMILIES, type RobotDevice } from '../api/unitree-cloud';
+ import { buildCloudPrefsRow } from './components/cloud-prefs';
+
+ export type ConnectHandler = (config: ConnectionConfig) => void;
+@@ -79,7 +79,7 @@ export class ConnectionPanel {
+       </div>
+       <div class="form-group" id="ip-group">
+         <div id="scan-sn-row" style="margin-bottom:10px;display:none;">
+-          <label for="scan-sn-input">Robot SN</label>
++          <label for="scan-sn-input">Robot SN (optional)</label>
+           <input type="text" id="scan-sn-input" placeholder="e.g. B42D2000OBIB1F" autocomplete="off" spellcheck="false" />
+         </div>
+         <label for="ip-input">Robot IP Address</label>
+@@ -93,6 +93,8 @@ export class ConnectionPanel {
+         <label>Choose Robot</label>
+         <select id="robot-select"><option value="">-- Select robot --</option></select>
+       </div>
++      <p id="drive-help" style="font-size:14px;line-height:1.5;margin:12px 0;">After connecting, open <strong>Drive / Joysticks</strong>. The left joystick moves the robot; the right joystick turns it.</p>
++      <p id="ap-help" style="font-size:13px;line-height:1.5;display:none;">First join the robot’s Wi-Fi network on this computer. Direct mode uses 192.168.12.1 and does not require cloud login.</p>
+       <button id="connect-btn" class="btn-connect">Connect</button>
+       <div id="connection-status" class="status"></div>
+     `;
+@@ -208,11 +210,11 @@ export class ConnectionPanel {
+     }
+
+     ipGroup.style.display = isRemote ? 'none' : '';
+-    // SN-targeted scan only matters for the Explorer humanoids (G1 / R1) —
+-    // Go2 firmware doesn't gate multicast replies on the SN field, so the
+-    // regular Scan button is sufficient there.
++    // The optional serial also identifies the Go2's per-device AES key.
+     const snRow = this.container.querySelector('#scan-sn-row') as HTMLElement | null;
+-    if (snRow) snRow.style.display = (!isRemote && isG1Family(cloudApi.connectFamily)) ? '' : 'none';
++    if (snRow) snRow.style.display = !isRemote ? '' : 'none';
++    const apHelp = this.container.querySelector('#ap-help') as HTMLElement;
++    apHelp.style.display = mode === 'AP' ? '' : 'none';
+     this.robotPickerGroup.style.display = isRemote && cloudApi.isLoggedIn && this.devices.length > 1 ? '' : 'none';
+
+     // Inline hint under the mode selector covers the remaining cases:

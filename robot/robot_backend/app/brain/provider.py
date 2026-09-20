@@ -15,7 +15,7 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 from .models import MAX_JPEG_BYTES, Observation, ProviderUsage
-from .budget import APPROVED_VISION_MODELS, MODEL_RESERVATION_USD, reserve_attempt
+from .budget import APPROVED_VISION_MODELS, MODEL_RESERVATION_USD, reserve_attempt, settle_attempt
 
 
 @dataclass(frozen=True)
@@ -178,6 +178,7 @@ class ProviderResult:
 
 
 async def infer_image(config: VisionConfig, jpeg_b64: str, *, transport=None) -> ProviderResult:
+    reservation = None
     prompt = COMPACT_PROMPT if config.mode == 'local' else PROMPT
     payload = {'model': config.model, 'messages': [
         {'role': 'system', 'content': prompt},
@@ -201,7 +202,7 @@ async def infer_image(config: VisionConfig, jpeg_b64: str, *, transport=None) ->
         # The conservative reservation for the full approved model context
         # (see budget.MODEL_RESERVATION_USD) remains spent after any failure.
         # The shared ledger caps the combined total across approved models.
-        await asyncio.to_thread(reserve_attempt, config.usage_path,
+        reservation = await asyncio.to_thread(reserve_attempt, config.usage_path,
                                 config.max_cloud_calls, config.budget_usd,
                                 model=config.model,
                                 reservation_usd=MODEL_RESERVATION_USD[config.model])
@@ -240,6 +241,9 @@ async def infer_image(config: VisionConfig, jpeg_b64: str, *, transport=None) ->
             if 'cost' in usage:
                 values['cost_usd'] = usage['cost']
             reported = ProviderUsage.model_validate(values) if values else None
+        if reservation:
+            await asyncio.to_thread(settle_attempt, config.usage_path, reservation,
+                                    reported.cost_usd if reported else None)
         return ProviderResult(observation=observation, usage=reported)
     except (TimeoutError, httpx.TimeoutException):
         raise ProviderTimeout('Vision provider timed out') from None

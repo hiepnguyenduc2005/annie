@@ -1,0 +1,234 @@
+diff --git a/src/ui/app.ts b/src/ui/app.ts
+index 7e5cdbc..4ad27fb 100644
+--- a/src/ui/app.ts
++++ b/src/ui/app.ts
+@@ -141,6 +141,8 @@ export class App {
+
+   // Joystick state
+   private joystickState = { lx: 0, ly: 0, rx: 0, ry: 0 };
++  private leftJoystick: Joystick | null = null;
++  private rightJoystick: Joystick | null = null;
+   private joystickTimer: ReturnType<typeof setInterval> | null = null;
+   /** Number of zero-publish ticks remaining after a joystick release.
+    *  We need to publish one final zero (or a few, in case the data
+@@ -148,6 +150,7 @@ export class App {
+    *  Without this, idle-publish suppression strands the robot on the
+    *  last non-zero command and it keeps walking. */
+   private joystickReleaseTicks = 0;
++  private motionInputGeneration = 0;
+   private static readonly JOYSTICK_RELEASE_TICKS = 4;
+
+   // Robot fault tracking — single store, lives across reconnects; cleared on disconnect.
+@@ -272,6 +275,7 @@ export class App {
+     let lastHiddenAt = 0;
+     document.addEventListener('visibilitychange', () => {
+       if (document.visibilityState === 'hidden') {
++        this.stopJoystickLoop();
+         lastHiddenAt = Date.now();
+       } else if (lastHiddenAt && Date.now() - lastHiddenAt > 60 * 1000) {
+         lastHiddenAt = 0;
+@@ -292,7 +296,12 @@ export class App {
+         this.setActiveInputSource(null);
+       }
+     });
+-    window.addEventListener('beforeunload', () => this.gamepadManager?.destroy());
++    window.addEventListener('blur', () => this.stopJoystickLoop());
++    window.addEventListener('pagehide', () => this.stopJoystickLoop());
++    window.addEventListener('beforeunload', () => {
++      this.stopJoystickLoop();
++      this.gamepadManager?.destroy();
++    });
+
+     this.showLandingScreen();
+   }
+@@ -438,10 +447,10 @@ export class App {
+     btnRow.className = 'hub-buttons';
+     const needsWebRTC = false;
+
+-    // WebView
++    // Manual driving controls
+     const controlBtn = document.createElement('button');
+     controlBtn.className = `hub-btn ${needsWebRTC ? 'hub-btn-disabled' : 'hub-btn-primary'}`;
+-    controlBtn.innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg><span>WebView</span>`;
++    controlBtn.innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg><span>Drive / Joysticks</span>`;
+     if (!needsWebRTC) controlBtn.addEventListener('click', () => this.showControlUi());
+     else controlBtn.disabled = true;
+     btnRow.appendChild(controlBtn);
+@@ -583,6 +592,11 @@ export class App {
+
+     // Emergency stop
+     new EmergencyStop(this.controlUi, (active) => this.sendStop(active));
++    const stopControl = this.controlUi.querySelector<HTMLElement>('.emergency-stop');
++    if (stopControl) {
++      stopControl.title = 'Emergency stop relaxes the motors. Release the joystick for a normal walking stop.';
++      stopControl.setAttribute('aria-label', 'Emergency stop — relax motors');
++    }
+
+     // Operation layout
+     const opWrapper = document.createElement('div');
+@@ -590,9 +604,10 @@ export class App {
+
+     const w1 = document.createElement('div');
+     w1.className = 'wrapper-1';
+-    new Joystick(w1, (out) => {
++    this.leftJoystick = new Joystick(w1, (out) => {
+       this.joystickState.lx = out.x;
+       this.joystickState.ly = out.y;
++      if (out.x !== 0 || out.y !== 0) this.startJoystickLoop();
+     }, () => {
+       this.joystickState.lx = 0;
+       this.joystickState.ly = 0;
+@@ -637,9 +652,10 @@ export class App {
+
+     const w3 = document.createElement('div');
+     w3.className = 'wrapper-3';
+-    new Joystick(w3, (out) => {
++    this.rightJoystick = new Joystick(w3, (out) => {
+       this.joystickState.rx = out.x;
+       this.joystickState.ry = out.y;
++      if (out.x !== 0 || out.y !== 0) this.startJoystickLoop();
+     }, () => {
+       this.joystickState.rx = 0;
+       this.joystickState.ry = 0;
+@@ -1077,7 +1093,11 @@ export class App {
+   // ── Joystick Publishing Loop ──
+
+   private startJoystickLoop(): void {
++    if (this.joystickTimer !== null || !this.motionInputReady()) return;
++    const generation = this.motionInputGeneration;
+     this.joystickTimer = setInterval(() => {
++      if (generation !== this.motionInputGeneration) return;
++      if (!this.motionInputReady()) { this.stopJoystickLoop(); return; }
+       // Gamepad active → publish its state on the same 20 Hz cadence.
+       if (this.activeSourceId?.startsWith('gamepad:') && this.gamepadManager?.currentState) {
+         const { lx, ly, rx, ry, keys } = this.gamepadManager.currentState;
+@@ -1111,10 +1131,43 @@ export class App {
+   }
+
+   private stopJoystickLoop(): void {
+-    if (this.joystickTimer) {
++    // Invalidate queued callbacks before attempting any network writes. A
++    // stopped producer must never overwrite neutral with an old held input.
++    this.motionInputGeneration++;
++    if (this.joystickTimer !== null) {
+       clearInterval(this.joystickTimer);
+       this.joystickTimer = null;
+     }
++    const unsubscribe = this.relayUnsub;
++    this.relayUnsub = null;
++    this.activeSourceId = null;
++    this.joystickState = { lx: 0, ly: 0, rx: 0, ry: 0 };
++    this.joystickReleaseTicks = 0;
++    this.leftJoystick?.release();
++    this.rightJoystick?.release();
++    try { unsubscribe?.(); } catch { /* teardown must still send stop */ }
++
++    // Best effort while the channel still exists; no acknowledgment or
++    // physical stopping claim. Go2 StopMove preserves standing; Damp remains
++    // the separate red emergency control. Do not send Go2 API IDs to G1/R1.
++    try {
++      this.dataHandler?.publish(RTC_TOPIC.WIRELESS_CONTROLLER,
++        { lx: 0, ly: 0, rx: 0, ry: 0, keys: 0 });
++    } catch { /* a lost transport cannot carry a neutral packet */ }
++    if (!isG1Family(cloudApi.connectFamily)) {
++      try {
++        this.dataHandler?.publishRequest(RTC_TOPIC.SPORT_MOD, SPORT_CMD.StopMove,
++          '{}', { priority: true });
++      } catch { /* still allow the caller to close the transport */ }
++    }
++    if (this.leftJoystickWrap) this.leftJoystickWrap.style.visibility = '';
++    if (this.rightJoystickWrap) this.rightJoystickWrap.style.visibility = '';
++    this.refreshInputSources();
++  }
++
++  private motionInputReady(): boolean {
++    return this.currentScreen === 'control' && document.visibilityState === 'visible'
++      && document.hasFocus() && !this.isEmergencyStopped();
+   }
+
+   // ── Input Source (BT relay or USB/HID gamepad) ──
+@@ -1156,13 +1209,9 @@ export class App {
+    *  joysticks. Tears down the previous source's subscription / state. */
+   private setActiveInputSource(id: string | null): void {
+     if (id === this.activeSourceId) return;
+-
+-    // Tear down the previous source.
+-    if (this.activeSourceId?.startsWith('bt:')) {
+-      this.relayUnsub?.();
+-      this.relayUnsub = null;
+-    }
+-    // (Gamepad has no per-activation subscription — just stops being read.)
++    if (id !== null && (document.visibilityState !== 'visible'
++      || !document.hasFocus() || this.isEmergencyStopped())) return;
++    this.stopJoystickLoop();
+
+     this.activeSourceId = id;
+
+@@ -1177,23 +1226,26 @@ export class App {
+       if (this.rightJoystickWrap) this.rightJoystickWrap.style.visibility = 'hidden';
+
+       if (id.startsWith('bt:')) {
++        const generation = this.motionInputGeneration;
+         // Subscribe to BT backend remote_state → publish on every packet (~20 Hz).
+         const order = ['R1','L1','Start','Select','R2','L2','F1','F2','A','B','X','Y','Up','Right','Down','Left'];
+         this.relayUnsub = btBackend().subscribe('remote_state', (s: { lx: number; ly: number; rx: number; ry: number; buttons: Record<string, boolean> }) => {
+-          if (!this.dataHandler) return;
++          if (!this.dataHandler || generation !== this.motionInputGeneration
++            || this.activeSourceId !== id) return;
++          if (!this.motionInputReady()) return;
+           let keys = 0;
+           for (let i = 0; i < order.length; i++) {
+             if (s.buttons[order[i]]) keys |= (1 << i);
+           }
+-          const inUse = s.lx !== 0 || s.ly !== 0 || s.rx !== 0 || s.ry !== 0 || keys !== 0;
+-          if (!inUse) return;
++          // Neutral is meaningful: releasing a held stick must reach the robot.
+           if (this.isEmergencyStopped()) { this.notifyEstopBlocked(); return; }
+           this.dataHandler.publish(RTC_TOPIC.WIRELESS_CONTROLLER, {
+             lx: s.lx, ly: s.ly, rx: s.rx, ry: s.ry, keys,
+           });
+         });
+       }
+-      // Gamepad path: startJoystickLoop reads gamepadManager.currentState directly.
++      // Explicit source selection may resume input; window focus alone cannot.
++      this.startJoystickLoop();
+     }
+
+     this.settingsState.activeInputSourceId = this.activeSourceId;
+@@ -2628,6 +2680,7 @@ export class App {
+   private sendStop(active: boolean): void {
+     this.emergencyStopped = active;
+     if (!active) return;
++    this.stopJoystickLoop();
+     // E-stop sends a priority Damp request. For G1/R1 the damp command
+     // is encoded as api_id=7101 (G1State) with parameter {"data":1};
+     // for Go2 it's the plain api_id=1001 (Damp). Both go to SPORT_MOD
+diff --git a/src/ui/components/joystick.ts b/src/ui/components/joystick.ts
+index 92218cb..61c6512 100644
+--- a/src/ui/components/joystick.ts
++++ b/src/ui/components/joystick.ts
+@@ -52,6 +52,11 @@ export class Joystick {
+     window.addEventListener('touchend', (e) => this.onTouchEnd(e));
+     window.addEventListener('touchcancel', (e) => this.onTouchEnd(e));
+     window.addEventListener('mouseup', () => this.onMouseEnd());
++    window.addEventListener('blur', () => { if (this.active) this.reset(); });
++    window.addEventListener('pagehide', () => this.release());
++    document.addEventListener('visibilitychange', () => {
++      if (document.visibilityState === 'hidden' && this.active) this.reset();
++    });
+   }
+
+   private recalc(): void {
+@@ -136,7 +141,12 @@ export class Joystick {
+     this.onStop?.();
+   }
+
++  release(): void {
++    if (this.active) this.reset();
++  }
++
+   setDisabled(disabled: boolean): void {
++    if (disabled && this.active) this.reset();
+     this.box.classList.toggle('disable', disabled);
+   }
+ }

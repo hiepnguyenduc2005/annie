@@ -28,6 +28,14 @@ class AgentRequest(BaseModel):
     allow_cloud: bool = False
 
 
+class RecallRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    goal: str = Field(min_length=1, max_length=500)
+    map_id: str = Field(min_length=1, max_length=100)
+    ts_to: int | None = Field(default=None, strict=True, ge=0)  # Unix ms; None means now.
+    limit: int = Field(default=6, strict=True, ge=1, le=6)
+
+
 def loopback(host):
     if host == 'testclient':
         return True
@@ -193,6 +201,10 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, require_audio_
     async def query(body: Say):
         return app.state.service.query(body.text)
 
+    @router.post('/recall')
+    async def recall(body: RecallRequest):
+        return app.state.service.recall(body.goal, body.map_id, body.ts_to, body.limit)
+
     @router.get('/frames/{frame_id}')
     async def frame(frame_id: UUID):
         crop = app.state.service.crops.get(str(frame_id))
@@ -221,6 +233,13 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, require_audio_
     async def scenario(body: Scenario):
         app.state.service.scenario(body.scenario)
         return app.state.service.status()
+
+    @router.post('/demo/reset-episode', dependencies=[Depends(demo_only)])
+    async def reset_episode():
+        try:
+            return app.state.service.reset_demo_episode()
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     app.include_router(router)
     app.include_router(build_audio_reply_router(lambda: app.state.service, authorize))

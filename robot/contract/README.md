@@ -70,6 +70,7 @@ protection. Never put tokens in URLs or browser persistent storage.
 | `POST /ingest` | `{channel,data}` → validated ingestion. |
 | `WS /live` | Send `{token}` first if authentication is configured. Receive `{type:"snapshot",data:status}`, then `{type:channel,data:payload}`. No frame bytes. |
 | `POST /demo/seed` | Explicitly seed synthetic home state. Demo mode only. |
+| `POST /demo/reset-episode` | Explicitly re-arm a resolved demo episode; preserve evidence and commands; 409 while a check-in is active. Demo mode only. |
 | `POST /demo/scenario` | `{scenario}` with safe_bed/fall/help/okay/timeout. Exercises the same policy engine. Demo mode only. |
 | `POST /agents/run` | Optional `{task,evidence,allow_cloud:true}` advisory team; requires enabled configuration and valid bounded text evidence. |
 

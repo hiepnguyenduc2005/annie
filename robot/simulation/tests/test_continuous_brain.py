@@ -33,3 +33,35 @@ def test_bridge_lease_excludes_duplicate_delivery(tmp_path):
         with pytest.raises(RuntimeError):
             with body_bridge_lease(path): pass
     with body_bridge_lease(path): pass
+
+
+def test_scan_keeps_model_planning_available_for_stop_or_speech():
+    async def check():
+        bridge=Bridge(None,None,None,perception='agent',continuous_local=True)
+        state={'ready':True,'map_id':'home','running':True,'intelligence_enabled':True,
+               'navigation':{'state':'scanning'}}
+        calls=[]
+        async def request(*args,**kwargs): return state
+        async def body(*args): pass
+        async def infer(): calls.append('infer')
+        async def think(*args): calls.append('plan')
+        bridge.request=request;bridge.body=body;bridge.infer=infer;bridge.think=think
+        bridge.pending_agent_command='scan-in-flight'
+        await bridge.tick(wait_vision=True)
+        assert calls==['plan']
+    asyncio.run(check())
+
+
+def test_paused_autonomy_does_not_cancel_manual_patrol():
+    async def check():
+        bridge=Bridge(None,None,None,perception='disabled')
+        bridge.map_id='home'
+        state={'ready':True,'map_id':'home','qpos_base':[0.,0.,.3,1.,0.,0.,0.],
+               'running':True,'autonomy_mode':'paused',
+               'navigation':{'state':'moving','waypoint':'living-room','waypoints':[],'commands':[]}}
+        async def ingest(*args): return {}
+        async def commands(*args): pass
+        async def coordinate(*args): raise AssertionError('Paused autonomy must not send a stop')
+        bridge.ingest=ingest;bridge.process_commands=commands;bridge.coordinate=coordinate
+        await bridge.body(state)
+    asyncio.run(check())

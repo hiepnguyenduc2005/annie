@@ -62,12 +62,16 @@ class Bridge:
         self.pending_checkin = None
         self.history = []
         self.pending_agent_command = None
+        self.observation_evidence = None
+        self.incident_episode_active = False
+        self.recent_events = []
+        self.progress = {}
 
     @property
     def limit_reached(self):
         return not self.continuous_local and self.inferences >= self.max_inferences
 
-    async def retrieve_memories(self, goal, map_id):
+    async def retrieve_memories(self, goal, map_id, waypoints=()):
         """Retrieve durable evidence before capturing the current image."""
         from robot.robot_backend.app.brain.planner import Memory
         try:
@@ -76,13 +80,26 @@ class Bridge:
             else:
                 result = await self.request(self.app, 'POST', '/query', json={'text':'where was the person last seen'})
                 items = result.get('citations', [])
+                # Retrieve one recent view per known waypoint, so the last
+                # room does not crowd all earlier exploration out of context.
+                responses = await asyncio.gather(*(self.request(self.app, 'POST', '/query',
+                    json={'text':'what was last seen near '+w['id'].replace('-', ' ')})
+                    for w in list(waypoints)[:8]), return_exceptions=True)
+                diverse = [r['citations'][0] for r in responses
+                           if isinstance(r, dict) and r.get('citations')]
+                items = items[:2] + diverse + items[2:]
             cited = []
-            for item in items[:6]:
+            seen = set()
+            for item in items:
                 if item.get('pose',{}).get('map_id') != map_id or item.get('ts',0)>self.clock()*1000:
                     continue
+                if item.get('frame_id') in seen: continue
                 cited.append(Memory.model_validate({k:item[k] for k in ('caption','frame_id','ts','pose')}).model_dump())
+                seen.add(item['frame_id'])
+                if len(cited) >= 6: break
             self.memory_state = {'provider':'elastic' if self.memory else 'local_sqlite',
-                                 'retrieved':len(cited), 'status':'connected'}
+                                 'retrieved':len(cited), 'status':'connected',
+                                 'citations':cited[:3]}
             return cited
         except Exception as exc:
             self.memory_state = {'provider':'elastic' if self.memory else 'local_sqlite',
@@ -112,10 +129,15 @@ class Bridge:
                 'last_command':self.autonomy.last_command,'last_observed':self.autonomy.last_observed}
         status['agent'] = self.agent_state
         status['history'] = self.history[-12:]
+        status['progress'] = self.progress
         temporary = None
         try:
             encoded = json.dumps(status, allow_nan=False)
-            if len(encoded.encode()) > 16000:
+            # Preserve live state when bounded history/captions fill the file.
+            while len(encoded.encode()) > 30000 and status['history']:
+                status['history'].pop(0)
+                encoded = json.dumps(status, allow_nan=False)
+            if len(encoded.encode()) > 30000:
                 raise ValueError("Status exceeds bounded size")
             self.status_file.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(mode="w", dir=self.status_file.parent,
@@ -195,6 +217,9 @@ class Bridge:
             self.auto_commands.clear()
             self.agent_memory.clear()
             self.agent_feedback.clear()
+            self.pending_agent_command = None
+            self.recent_events = []
+            self.incident_episode_active = False
             self.last_perception = self.last_latency_ms = self.ingest_accepted = None
             size = (scene.get("ground_truth") or {}).get("room_size_m")
             origin = {"x": -size[0]/2, "y": -size[1]/2} if size else {"x": 0, "y": 0}
@@ -217,7 +242,11 @@ class Bridge:
         if self.perception == 'agent':
             status = await self.request(self.app,'GET','/status')
             self.pending_checkin = status.get('pending_checkin')
-        if 'autonomy_mode' in state and self.perception != 'agent':
+            self.incident_episode_active = status.get('incident_episode_active', False)
+        from robot.simulation.task_progress import task_progress
+        self.progress = task_progress(state, episode_active=self.incident_episode_active,
+                                      events=self.recent_events, now_ms=ts)
+        if state.get('autonomy_mode') not in (None,'paused') and self.perception != 'agent':
             await self.coordinate(state)
         if self.perception == "ground-truth":
             truth = scene.get("ground_truth")
@@ -346,6 +375,7 @@ class Bridge:
                 self.last_error = 'Inference belongs to a previous scene'
                 return
             self.record_perception(perception)
+            self.observation_evidence = observation
             provider = result.get("provider") or {}
             self.last_provider = {k: str(provider[k])[:200] for k in ("mode", "model") if k in provider}
             if isinstance(provider.get('usage'), dict):
@@ -369,7 +399,12 @@ class Bridge:
         goal = initial_state.get('intelligence_goal','Check on the resident and explore the home carefully.')
         self.agent_state = {**(self.agent_state or {}),'thinking':True,'goal':goal}
         try:
-            memories = await self.retrieve_memories(goal, initial_state['map_id'])
+            memories = await self.retrieve_memories(goal, initial_state['map_id'],
+                                                    initial_state['navigation']['waypoints'])
+            self.recent_events = await self.request(self.app, 'GET', '/events')
+            from robot.simulation.task_progress import task_progress
+            self.progress = task_progress(initial_state, episode_active=self.incident_episode_active,
+                events=self.recent_events, now_ms=int(self.clock()*1000))
             observation = await self.request(self.viewer,'GET','/observation')
             if not 0 <= self.clock()*1000-observation['ts'] <= 5000:
                 raise ValueError('Camera is not fresh')
@@ -379,15 +414,16 @@ class Bridge:
             if len(self.frames)>256:
                 self.frames.popitem(last=False)
             frame = {key:observation[key] for key in ('frame_id','ts','pose','source','jpeg_b64')}
-            outcomes = [{key:item[key] for key in ('command_id','cmd','status','detail') if key in item}
-                        for item in initial_state['navigation'].get('commands',[])[-4:]]
+            from robot.simulation.task_progress import execution_outcomes
+            outcomes = execution_outcomes(initial_state)
             nav = initial_state['navigation']
             outcomes.append({'cmd':'status','status':nav['state'], 'detail':
-                f"Current waypoint: {nav.get('waypoint')}; person stop: {initial_state.get('person_safety',{}).get('blocked')}."})
+                f"Current waypoint: {nav.get('waypoint')}; person stop enforced: {initial_state.get('person_safety',{}).get('enforced',True) and initial_state.get('person_safety',{}).get('blocked')}; camera person detections: {len(initial_state.get('person_safety',{}).get('detections',[]))}."})
             self.inferences += 1
             result = await self.request(self.brain,'POST','/plan',json={
                 'observation':frame,'goal':goal,'waypoints':initial_state['navigation']['waypoints'],
                 'recent_outcomes':(outcomes+self.agent_feedback[-1:])[-6:],
+                'progress':self.progress,
                 'memories':list({m['frame_id']:m for m in self.agent_memory[-3:]+memories}.values())[-6:]})
             if any(result[key]!=frame[key] for key in ('frame_id','ts','pose')):
                 raise ValueError('Plan evidence identity mismatch')
@@ -396,6 +432,7 @@ class Bridge:
             perception={**result['perception'],'frame_id':frame['frame_id'],'ts':frame['ts'],
                         'pose':frame['pose'],'source':'simulation_vlm','model':result['provider']['model']}
             self.record_perception(perception)
+            self.observation_evidence = observation
             self.last_provider = result['provider']
             self.last_latency_ms = result['latency_ms']
             response=await self.ingest('brain.perception',perception)
@@ -458,8 +495,8 @@ class Bridge:
         if (state.get("ready") and self.perception in ("vision",'agent') and
                 (self.perception!='agent' or (state.get('intelligence_enabled') and state.get('running'))) and
                 not self.limit_reached and self.monotonic() >= self.next_inference and
-                (self.perception != 'agent' or (not self.pending_checkin and not self.pending_agent_command and
-                 state['navigation']['state'] not in ('moving','scanning','turning'))) and
+                (self.perception != 'agent' or (not self.pending_checkin and
+                 (not self.pending_agent_command or state['navigation']['state'] in ('moving','scanning','turning')))) and
                 (self.vision_task is None or self.vision_task.done())):
             self.next_inference = self.monotonic() + self.inference_interval
             p=self.last_perception or {}
@@ -467,6 +504,7 @@ class Bridge:
             # needs a second independent fresh image, not another route plan.
             # This path still runs the real VLM; it injects no scenario labels.
             confirming = (self.perception=='agent' and self.ingest_accepted and
+                not self.incident_episode_active and
                 p.get('person') and p.get('posture')=='lying' and
                 p.get('location') in ('floor','chair') and p.get('confidence',0)>=.8 and
                 p.get('pose',{}).get('map_id')==state['map_id'])

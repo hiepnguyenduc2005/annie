@@ -101,6 +101,15 @@
           </div>
         </section>
         <aside>
+          <section class="panel" id="demo-evidence-panel">
+            <p class="eyebrow">LIVE END-TO-END RUN</p>
+            <h2 id="demo-run-status">Ready to demonstrate</h2>
+            <button id="start-house-demo" class="primary">Run full-house demo</button>
+            <p class="hint">Resets the simulated house and stages a fall. The configured image model chooses the robot’s actions. A recorded “not okay” reply is replayed and transcribed.</p>
+            <ol id="demo-stages" aria-live="polite"></ol>
+            <p id="demo-run-detail" class="hint"></p>
+            <a href="http://127.0.0.1:8000/app/" target="_blank" rel="noopener">Open family alert feed ↗</a>
+          </section>
           <section class="panel" id="daily-life-panel">
             <p class="eyebrow">GRANDMA’S DAY</p>
             <h2 id="resident-activity">Resident routine</h2>
@@ -122,7 +131,9 @@
             <p id="autonomy-status" class="hint">Waiting for the model planner.</p>
             <p id="agent-reason" class="hint"></p>
             <p id="agent-context" class="hint"></p>
-            <p class="hint">Camera + goal + observation memory + execution feedback → model-selected action. Movement remains subject to the local stop interlocks.</p>
+            <p id="agent-memory" class="hint"></p>
+            <ol id="agent-history" class="hint"></ol>
+            <p class="hint">Camera + goal + observation memory + execution feedback → model-selected action. The simulator reports whether person detection is advisory or stops movement.</p>
           </section>
           <section class="panel factory-panel">
             <p class="eyebrow">BULK GENERATION</p>
@@ -250,7 +261,7 @@
             <p id="brain-note" class="hint"></p>
           </section>
           <section class="panel" id="person-safety-panel">
-            <p class="eyebrow">CAMERA PERSON STOP</p>
+            <p class="eyebrow">CAMERA PERSON DETECTION</p>
             <div class="state-heading">
               <h2>Person safety</h2>
               <span id="safety-state" class="badge">NO DATA</span>

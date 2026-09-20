@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import heapq
 import math
+import time
 from uuid import uuid4
 
 
@@ -190,6 +191,8 @@ class Navigator:
     def update(self, status, detail):
         if self.active:
             self.active.update(status=status, detail=detail)
+            if status == 'completed':
+                self.active['completed_at'] = int(time.time() * 1000)
 
     def fail(self, detail):
         self.update("failed", detail)
@@ -210,6 +213,8 @@ class Navigator:
             "status": "accepted",
             "detail": "Simulator accepted command",
         }
+        if cmd == 'goto':
+            item['waypoint'] = waypoint
         self.commands = (self.commands + [item])[-100:]
         self.active = item
         self.started = float(self.data.time)

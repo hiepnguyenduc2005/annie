@@ -141,9 +141,10 @@ not sustained app integration or navigation.
 
 A priority StopMove request was acknowledged while the robot was stationary
 in 44.8 ms. That is request round-trip time, not measured stopping performance.
-No stand, walking, mode-switch, or patrol command was sent. The operator has
-requested a five-metre patrol boundary and reported no physical controller.
-The boundary, physical stop/recovery, and loss-of-link behavior remain unverified.
+At that stage no movement command had been sent. The operator subsequently
+confirmed a paired physical controller and requested supervised walking within
+a five-metre boundary. The boundary, physical stop/recovery, and loss-of-link
+behavior remain unverified; controller availability alone is not a tested stop.
 
 The initially installed DimOS 0.0.13.post1 `stop_movement` implementation only
 cancelled its host timer. A local backport emitted neutral joystick input;
@@ -176,6 +177,77 @@ these are software tests. The hardware adapter is not wired to it, and all
 physical stop, loss-link, map-boundary and obstacle behavior attestations
 remain false until controlled measurement. `missing_verifications` exposes
 the unmet checks to the operator.
+
+## Supervised commissioning follow-up
+
+After the robot was powered back on, a stationary reconnect read 40% battery.
+Short direct Sport Move and obstacle-controller requests were followed by
+explicit priority StopMove and neutral inputs. A two-second low joystick test
+measured 0.0968 m net odometry displacement and fresh near-zero velocity after
+stopping. This does not independently establish gait: body settling and pose
+estimation can change these values. A requested 0.20 m forward route timed out
+after seven seconds with only 0.015 m forward progress; its return leg did not
+run. No complete circle or autonomous patrol has been demonstrated.
+
+Firmware `mcf` requires different telemetry decoding: `sportmodestate.mode`
+can remain zero while `error_code` carries the active mode. The installed
+upstream UI decodes raw value 100 as Free Walk and 1013 as balance stand.
+Do not interpret mode zero as proof of idle on this firmware, or use the UI's
+cached gait highlight as fresh execution evidence. Record raw state with XY
+and heading traces for subsequent commissioning.
+
+The last prepared FreeWalk API 2045 test read **23% battery** and aborted before
+sending FreeWalk or joystick input. Its initial raw MCF state was already 100;
+therefore selecting Free Walk is not an established fix. The earlier 25% local
+script cutoff was a chosen test limit, not a manufacturer threshold. Unitree's
+[current battery manual](https://marketing.unitree.com/article/en/Go2/Battery_Charger.html)
+(Recommended use, page 8) recommends stopping below **40%** and replacing or
+charging the battery. This is operating guidance, distinct from BMS hard
+protection. Replace/charge before further motion tests; do not lower the local
+cutoff to work around this guidance.
+
+The tracked `go2_walk.py` commissioning tool now enforces a finite minimum
+battery setting of 40–100%, defaulting to 40%, before opening a connection.
+Its 44 fake-only checks pass, but it is not qualified for physical patrol:
+the current completion flag measures elapsed command duration rather than
+route execution, and its stop observer does not yet require distinct fresh
+post-stop samples. The MCF command path also needs hardware verification.
+Do not treat this tool's completion flag as a successful walk or patrol.
+
+The local Unitree UI uses **Connect → Access Point (Direct) → Drive / Joysticks**
+after joining the robot's Wi-Fi. The left joystick translates; the right
+joystick turns. Direct control requires no Unitree cloud login. This Mac's
+single Wi-Fi connection cannot simultaneously remain on its previous internet
+network and the robot AP. Changing to a shared network or providing a second
+internet connection remains necessary for continuous connected assistant work.
+The most recent stationary reconnect attempt could not reach the robot AP;
+23% remains the last measured charge, not a fresh current reading. The local
+connection-help patch is preserved in [tooling](tooling/unitree-ui/connection-help.patch)
+against the pinned Unitree UI revision above.
+
+## Motion and perception tools (2026-09-19)
+
+Two operator tools sit beside the probe. Both use the probe's connection path,
+read `UNITREE_AES_128_KEY` from the environment only, and stop with sanitized
+errors. Neither has run on the physical dog yet: on 2026-09-19 the unit was out
+of Wi-Fi and Bluetooth range from the host and its last battery reading was
+23%, below the operating floor.
+
+- `robot/go2_walk.py`: a supervised walk for HW-04/HW-05. `--distance 1` walks
+  a straight line at 0.3 m/s; `--circle-radius 1 --laps 3` or `--duration 1800`
+  walks a circle. Speed is capped at 0.6 m/s. It sends StandUp, BalanceStand,
+  streams Move at 10 Hz, and sends a priority StopMove on completion, stale
+  telemetry, low battery, leaving the configured boundary (default 2.5 m from
+  the start), any error, or Ctrl-C, then reports pose, stop acknowledgment
+  round trip and post-stop overrun. 26 fakes-only tests. The host-side stop
+  still cannot reach the robot over a lost link; keep an operator beside it.
+- `robot/go2_perception.py`: read-only perception loop. It streams the camera,
+  runs the tracked keypoint posture detector on every new frame at 5 Hz, sends
+  the latest frame to the local brain `/infer` once per second (one in flight,
+  stale frames dropped, never re-dated) and publishes the cited perception and
+  a measured `dog.status` to the app with `source: hardware`. It sends no motion
+  command. 10 fakes-only tests. Capture times are host receipt times paired
+  with odometry by receipt time, not calibrated synchronization.
 
 ## Verification and outstanding work
 

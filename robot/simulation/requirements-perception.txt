@@ -1,3 +1,4 @@
 # Install into the simulation environment after the physics setup.
 ultralytics==8.4.150
 faster-whisper==1.2.1
+# yolo11n-pose.pt from https://github.com/ultralytics/assets/releases/tag/v8.3.0 (AGPL-3.0, Ultralytics)

@@ -89,6 +89,8 @@ def test_no_new_motion_after_async_failure_or_context_change(fault):
                 return httpx.Response(200, json={"accepted": fault != "expired_plan_fresh_camera"})
             if path == "/query":
                 return httpx.Response(200, json={"citations": []})
+            if path == "/events":
+                return httpx.Response(200, json=[])
             raise AssertionError(f"Unexpected mocked request: {request.method} {path}")
 
         async with httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(handler)) as client:

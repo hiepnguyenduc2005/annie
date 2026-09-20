@@ -35,6 +35,14 @@ The rule uses known floor/chair locations. Unlike the source's literal
 thresholds are demo settings, not clinical performance. `fall_confirmed` is
 retained as a wire name for escalation confirmed, never a proven medical fall.
 
+The model-driven MuJoCo demonstration supports an explicit advisory person-detection
+policy: detections inform the model's choice to approach, wait, speak, or stop;
+unavailable detector results still inhibit motion. Stop enforcement remains the
+default, and this option does not alter physical robot controls. Rehearsal resets
+may re-arm only a resolved episode in demo mode, preserving evidence and command
+history without injecting a perception observation. Full-house runs stage the
+resident routine/fall and recorded reply while the model chooses robot actions.
+
 ## Scope boundaries
 
 Target integrations: Go2 with DimOS/MuJoCo, GX10-local image-capable Nemotron,
@@ -67,6 +75,13 @@ actual hardware/SDK/model versions, frame-to-pose synchronization, crop and
 retention policy, named owner for brain integration, and notification/playback
 acknowledgements before physical signoff. Measure demo latency and false alerts
 on stated scenarios instead of inventing performance figures.
+
+Manual Go2 control must clear held input and attempt neutral input plus a
+stand-preserving StopMove before disconnect, navigation away, or loss of page
+focus. Returning focus alone must not resume motion. The separate damping
+control must clearly say that it relaxes the motors. Hardware commissioning
+must follow the manufacturer's battery operating guidance; small odometry
+changes and command acknowledgments do not establish a completed patrol.
 
 ## Detailed acceptance and codebase quality targets
 

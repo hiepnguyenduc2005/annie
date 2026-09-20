@@ -286,3 +286,53 @@ is prepared at viewer startup and cached; speech completion is reported only
 by the selected player. Local Whisper is the default recorded-WAV option;
 MiMo cloud audio requires the brain launcher's explicit `--cloud-audio` flag.
 Current evidence and limitations are in [LIVE_DEMO.md](../../docs/LIVE_DEMO.md).
+
+## Full-house model-driven demonstration
+
+The viewer can own its command bridge. **Run full-house demo** resets only a
+resolved demo episode, stages the resident's routine and fall, and records each
+completed step. The model chooses the robot's route from camera pixels. The
+recorded resident reply is synthetic; native playback receipts and local Whisper
+complete the check-in and family-message loop. Saved results are under
+`.data/simulation/house-demo.json` and `output/house-demo-*.json`.
+
+Start the app in `ANNIE_MODE=demo` with `ANNIE_REQUIRE_AUDIO_RECEIPT=true` for
+repeatable rehearsals. Existing alerts, commands and memory survive the explicit
+`POST /demo/reset-episode`; an active check-in cannot be reset. Do not start a
+separate simulation bridge when using the viewer's demo or AI controls.
+
+The verified cloud configuration uses an explicitly enabled synthetic-only
+brain on port 8003, with the existing shared spending ledger preserved:
+
+```sh
+# Terminal 1: use the existing ignored .env as needed for configured credentials.
+ANNIE_MODE=demo ANNIE_REQUIRE_AUDIO_RECEIPT=true \
+  .venv/bin/uvicorn robot.app_backend.app.main:app --host 127.0.0.1 --port 8000 \
+  --no-proxy-headers --env-file .env
+
+# Terminal 2: this session reserves $1 separately for an earlier probe, so
+# the shared service cap is $19. This does not reset the ledger or spend limit.
+ANNIE_VISION_BUDGET_USD=19 ANNIE_VISION_MAX_CLOUD_CALLS=130 \
+  .venv/bin/python robot/simulation/run_brain.py --mode cloud \
+  --model google/gemini-2.5-flash-lite:floor --port 8003
+
+# Terminal 3: detection remains active; model-directed simulation uses advisory mode.
+.cache/dimos/.venv/bin/python robot/simulation/viewer.py \
+  --model .cache/menagerie/unitree_go2/scene.xml \
+  --scenes .data/simulation/scenes/manifest.json --locomotion --person-safety \
+  --person-policy advisory --native-audio --demo-brain-url http://127.0.0.1:8003 \
+  --demo-allow-cloud --port 8766
+```
+
+Open `http://127.0.0.1:8766/` and choose **Run full-house demo**. Each cloud run
+has at most 20 image inference attempts and remains subject to the shared budget.
+There is no provider fallback. **Start AI / resume** starts the viewer-owned
+bridge for the entered goal; **Pause AI** pauses planning while keeping command and voice delivery active. Starting the full
+rehearsal takes over a viewer-owned bridge, while an unrelated bridge produces
+a clear conflict instead of duplicate command delivery.
+
+Without `--demo-allow-cloud`, the demo requires a local brain (port 8004 by
+default). Local Qwen planning on the tested Mac often exceeded the five-second
+freshness boundary, so this is not the qualified configuration. Advisory mode
+applies only to this MuJoCo viewer; unavailable detector results still inhibit
+motion. It does not change physical Go2 obstacle avoidance or stop behavior.

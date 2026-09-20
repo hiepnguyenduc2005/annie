@@ -249,8 +249,10 @@ def test_real_ledger_records_audio_reservation(tmp_path):
         assert api.post('/transcribe', json=utterance()).status_code == 200
         assert api.post('/transcribe', json=utterance()).status_code == 200
     state = json.loads(open(usage).read())
-    assert state == {'models': {AUDIO_MODEL: {'attempts': 2, 'reserved_usd': 0.4}},
-                     'total_reserved_usd': 0.4}
+    assert state['models'] == {AUDIO_MODEL: {'attempts': 2, 'reserved_usd': 0.4}}
+    assert state['total_reserved_usd'] == 0.4
+    assert state['version'] == 2
+    assert len(state['pending_reservations']) == 2  # Unsettled audio keeps its full debit.
 
 
 def test_real_ledger_budget_exhaustion_fails_closed(tmp_path):

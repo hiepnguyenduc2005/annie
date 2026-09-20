@@ -41,6 +41,13 @@ MAX_SPEED_MPS = 0.6  # hard cap for commissioning runs
 DEFAULT_SPEED_MPS = 0.3
 DEFAULT_BOUNDARY_M = 2.5  # operator's requested 5 m patrol width
 STOPPED_SPEED_MPS = 0.05
+MIN_OPERATING_SOC_PERCENT = 40.0  # Unitree recommends stopping below 40%.
+DEFAULT_MIN_SOC_PERCENT = MIN_OPERATING_SOC_PERCENT
+
+
+def _validate_min_soc(min_soc: float) -> None:
+    if not math.isfinite(min_soc) or not MIN_OPERATING_SOC_PERCENT <= min_soc <= 100.0:
+        raise ValueError("minimum battery must be finite and within 40-100 percent")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -150,9 +157,10 @@ def _say(text: str) -> None:
 
 async def run_walk(plan: MotionPlan, *, ip: str, aes_key: str | None, conn_factory=None,
                    tick_s: float = 0.1, stale_s: float = 1.0, settle_s: float = 3.0,
-                   first_telemetry_s: float = 5.0, min_soc: float = 20.0,
+                   first_telemetry_s: float = 5.0, min_soc: float = DEFAULT_MIN_SOC_PERCENT,
                    connect_timeout_s: float = 20.0, stop_ack_timeout_s: float = 2.0,
                    stop_observe_s: float = 3.0, status=_say) -> dict:
+    _validate_min_soc(min_soc)
     loop = asyncio.get_running_loop()
     tel = _Telemetry(loop.time)
     report = {
@@ -326,11 +334,13 @@ def main(argv=None) -> int:
     parser.add_argument("--duration", type=float, help="keep walking this many seconds")
     parser.add_argument("--boundary", type=float, default=DEFAULT_BOUNDARY_M,
                         help="stop if the robot gets this far from its start, metres")
-    parser.add_argument("--min-battery", type=float, default=20.0, help="percent")
+    parser.add_argument("--min-battery", type=float, default=DEFAULT_MIN_SOC_PERCENT,
+                        help="minimum battery percent, 40-100 (default: 40)")
     parser.add_argument("--tick", type=float, default=0.1, help="Move resend period, seconds")
     parser.add_argument("--output", help="write the JSON report here")
     args = parser.parse_args(argv)
     try:
+        _validate_min_soc(args.min_battery)
         plan = plan_motion(speed_mps=args.speed, distance_m=args.distance,
                            circle_radius_m=args.circle_radius, laps=args.laps,
                            duration_s=args.duration, boundary_radius_m=args.boundary)

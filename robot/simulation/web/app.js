@@ -10,6 +10,7 @@ let catalogGeneration = null;
 let catalogRequest = false;
 let generationPending = false;
 let activeSceneId = null;
+let intelligenceRevision = null;
 
 async function loadCatalog() {
   if (catalogRequest) return;
@@ -192,6 +193,11 @@ async function pollState() {
       wasConnected = true;
     }
     renderMission(current);
+    if (intelligenceRevision !== current.intelligence_revision) {
+      intelligenceRevision=current.intelligence_revision;
+      if (document.activeElement !== $('intelligence-goal') && current.intelligence_goal)
+        $('intelligence-goal').value=current.intelligence_goal;
+    }
     $('demo-voice').closest('label').hidden = current.audio_output === 'native';
     const resident = current.resident;
     $('resident-activity').textContent = resident?.activity || 'Resident routine';
@@ -334,7 +340,8 @@ document.querySelectorAll('[data-resident]').forEach(button => {
 });
 $('intelligence-form').addEventListener('submit', event => {
   event.preventDefault();
-  control({action:'intelligence',enabled:true,goal:$('intelligence-goal').value});
+  postJSON('/agent/start',{action:'intelligence',enabled:true,goal:$('intelligence-goal').value})
+    .catch(error=>setPanelError('brain-error',error.message));
 });
 $('intelligence-stop').addEventListener('click',()=>control({action:'intelligence',enabled:false,goal:$('intelligence-goal').value}));
 $('open-house').addEventListener('click', async () => {
@@ -432,8 +439,9 @@ function renderPersonSafety(safety) {
     error.hidden = true;
     return;
   }
-  badge.textContent = !safety.enabled ? 'DISABLED' : safety.blocked ? 'BLOCKED' : safety.ready ? 'READY' : 'WARMING';
-  stateText.textContent = !safety.enabled ? 'Camera stop is not enabled.' : safety.blocked ? 'Movement inhibited.' : 'Fresh detector result; ready for a mission.';
+  const advisory = safety.enforced === false;
+  badge.textContent = !safety.enabled ? 'DISABLED' : !safety.ready ? 'WARMING' : advisory ? 'ADVISORY' : safety.blocked ? 'BLOCKED' : 'READY';
+  stateText.textContent = !safety.enabled ? 'Camera detection is not enabled.' : !safety.ready ? 'Waiting for a fresh detector result.' : advisory ? 'Person detections inform the model; the model chooses the action.' : safety.blocked ? 'Movement inhibited.' : 'Fresh detector result; ready for a mission.';
   reason.textContent = safety.reason ?? "—";
   confidence.textContent =
     !safety.detections?.length
@@ -441,7 +449,7 @@ function renderPersonSafety(safety) {
       : `${(Math.max(...safety.detections.map(d => d.confidence)) * 100).toFixed(0)}% (model estimate)`;
   latency.textContent =
     safety.latency_ms == null ? "—" : `${Number(safety.latency_ms).toFixed(0)} ms`;
-  if (safety.blocked) {
+  if (safety.blocked && !advisory) {
     error.textContent = safety.reason ? `Stop reason: ${safety.reason}` : "Person stop active.";
     error.hidden = false;
   } else {
@@ -467,6 +475,13 @@ async function pollBrain() {
     if (!response.ok)
       throw new Error(data.last_error || "Brain bridge not connected");
     const agent = data.agent;
+    $('agent-memory').textContent = `Memory: ${data.memory?.provider || 'unavailable'} · ${data.memory?.retrieved ?? 0} retrieved citations · ${data.memory?.status || 'waiting'}`;
+    $('agent-history').replaceChildren(...(data.history || []).slice(-4).map(item => {
+      const row=document.createElement('li');
+      const receipt=current?.navigation?.commands?.find(c=>c.command_id===item.command_id);
+      row.textContent=`${item.action.action}${item.action.waypoint_id ? ' → '+item.action.waypoint_id : ''} · ${receipt?.status || item.execution} · ${Math.round(item.latency_ms)} ms`;
+      return row;
+    }));
     $('autonomy-status').textContent = agent
       ? `${current?.intelligence_enabled ? (agent.thinking ? 'Thinking…' : agent.action?.action || 'Ready') : 'Paused'} · ${agent.model || 'vision-language model'}${agent.latency_ms ? ' · '+Math.round(agent.latency_ms)+' ms' : ''}`
       : 'Waiting for the model planner.';
@@ -479,7 +494,7 @@ async function pollBrain() {
         ? "LOCAL MODEL"
         : data.last_provider?.mode === "cloud"
           ? "CLOUD MODEL"
-          : data.perception_mode === 'vision' ? 'VISION' : data.perception_mode === 'ground-truth' ? 'AUTHORED LABELS' : "DISABLED";
+          : data.continuous_local ? 'LOCAL MODEL · CONTINUOUS' : data.perception_mode === 'agent' ? 'PLANNER STARTING' : data.perception_mode === 'vision' ? 'VISION' : data.perception_mode === 'ground-truth' ? 'AUTHORED LABELS' : "DISABLED";
     const sameMap = !data.last_perception || data.last_perception.pose?.map_id === current?.map_id;
     const p = sameMap ? data.last_perception ?? null : null;
     const stale = p && Date.now() - p.ts > 5000;
@@ -525,7 +540,7 @@ async function pollBrain() {
         ? "Vision inference is disabled in the brain bridge configuration; this panel shows connection state only. Scene labels in the ground truth section are authored simulation data, not image inference."
         : "Actual image inference from the configured vision model — distinct from the authored simulation ground truth section.";
     renderPersonSafety(current?.person_safety);
-    setPanelError("brain-error", null);
+    setPanelError("brain-error", data.last_error || null);
   } catch (error) {
     $("brain-mode").textContent = "DISCONNECTED";
     renderPersonSafety(null);
@@ -793,6 +808,28 @@ async function voiceLoop() {
   await pollQueuedClips();
   pollBrain();
   pollCheckin();
+  pollDemo();
   setTimeout(voiceLoop, 500);
 }
 voiceLoop();
+
+async function pollDemo() {
+  try {
+    const response=await fetch('/demo-state',{cache:'no-store'});
+    if (!response.ok) return;
+    const data=await response.json();
+    $('demo-run-status').textContent={running:'Demonstrating live…',passed:'Full-house run passed',failed:'Run incomplete',not_started:'Ready to demonstrate'}[data.status] || data.status;
+    $('start-house-demo').disabled=data.status==='running';
+    $('demo-stages').replaceChildren(...(data.stages || []).map(stage=>{
+      const li=document.createElement('li');
+      li.textContent=`${((stage.ts-data.started_at)/1000).toFixed(1)} s · ${stage.detail}${stage.text ? ' — '+stage.text : ''}`;
+      return li;
+    }));
+    $('demo-run-detail').textContent=data.error || data.last_error || (data.model ? `${data.model} · ${data.inferences || 0} image inferences · ${data.last_plan?.execution || 'Waiting for first action'}` : 'Each step appears only when its real result arrives.');
+  } catch (_) { /* Renderer remains usable if the separate demo report is absent. */ }
+}
+$('start-house-demo').addEventListener('click',async()=>{
+  $('start-house-demo').disabled=true;
+  try { $('demo-stages').replaceChildren(); $('demo-run-detail').textContent=''; await postJSON('/demo/start',{}); $('demo-run-status').textContent='Starting demonstration…'; }
+  catch(error) { $('demo-run-detail').textContent=error.message; $('start-house-demo').disabled=false; }
+});

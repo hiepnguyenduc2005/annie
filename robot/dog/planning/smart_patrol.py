@@ -223,14 +223,32 @@ class OccupancyGrid:
                 unvisited += 1
         return unvisited / n
 
-    def render(self, pose_xy=None, yaw=None, target_heading=None, scale=3):
-        """Top-down JPEG: obstacles dark, visited light, trail blue, marks (greet=green, seen=yellow), robot red."""
+    # BGR palettes. "dark": the original debug look. "light": the family app's palette (cream page, ink
+    # obstacles, blue-grey trail/marks, one red for the robot) so the command-center page reads as one design.
+    PALETTES = {
+        "dark": {"unknown": (28, 28, 28), "visited": (60, 60, 60), "occupied": (200, 200, 200), "trail": (200, 120, 0),
+                 "greet": (0, 200, 0), "seen": (0, 200, 255), "robot": (0, 0, 255), "heading": (255, 0, 255), "origin": (255, 255, 255)},
+        "light": {"unknown": (241, 239, 236), "visited": (255, 255, 255), "occupied": (0, 0, 0), "trail": (100, 90, 69),
+                  "greet": (100, 90, 69), "seen": (156, 144, 120), "robot": (46, 58, 163), "heading": (46, 58, 163), "origin": (156, 144, 120)},
+        # floor texture for the 3D panel: unknown near-black, walked free space lavender, obstacles dark (blocks sit on top)
+        "costmap": {"unknown": (22, 18, 14), "visited": (178, 122, 108), "occupied": (72, 56, 46), "trail": (120, 220, 120),
+                    "greet": (120, 220, 120), "seen": (90, 200, 240), "robot": (60, 60, 230), "heading": (230, 90, 230), "origin": (200, 200, 200)},
+    }
+
+    def geometry(self) -> dict:
+        """World extent of `render()`'s image: centre, side in metres, cell size (for a textured floor plane)."""
+        return {"origin": [self.origin[0], self.origin[1]], "size_m": self.n * self.cell_m, "cell_m": self.cell_m}
+
+    def render(self, pose_xy=None, yaw=None, target_heading=None, scale=3, palette="dark"):
+        """Top-down JPEG: obstacles, visited cells, trail, marks (greet, seen), robot (with heading) and the explore
+        heading, in one of `PALETTES`."""
         import cv2
         np = self.np
-        img = np.full((self.n, self.n, 3), 28, dtype=np.uint8)
-        img[self.visited.T > 0] = (60, 60, 60)
+        c = self.PALETTES.get(palette, self.PALETTES["dark"])
+        img = np.full((self.n, self.n, 3), c["unknown"], dtype=np.uint8)
+        img[self.visited.T > 0] = c["visited"]
         occ = (self.obstacle.T >= self.threshold)
-        img[occ] = (200, 200, 200)
+        img[occ] = c["occupied"]
         img = cv2.resize(img, (self.n * scale, self.n * scale), interpolation=cv2.INTER_NEAREST)
         img = cv2.flip(img, 0)  # +y up
 
@@ -238,19 +256,19 @@ class OccupancyGrid:
             i, j = self._cell(x, y)
             return int(i * scale + scale / 2), int(self.n * scale - (j * scale + scale / 2))
         for a, b in zip(self.trail, self.trail[1:]):
-            cv2.line(img, px(*a), px(*b), (200, 120, 0), 1, cv2.LINE_AA)
+            cv2.line(img, px(*a), px(*b), c["trail"], 1, cv2.LINE_AA)
         for x, y, kind in self.marks:
-            cv2.circle(img, px(x, y), 4, (0, 200, 0) if kind == "greet" else (0, 200, 255), -1)
+            cv2.circle(img, px(x, y), 4, c["greet"] if kind == "greet" else c["seen"], -1)
         if pose_xy is not None:
             p = px(*pose_xy)
-            cv2.circle(img, p, 5, (0, 0, 255), -1)
+            cv2.circle(img, p, 5, c["robot"], -1)
             if yaw is not None:
                 q = px(pose_xy[0] + 0.5 * math.cos(yaw), pose_xy[1] + 0.5 * math.sin(yaw))
-                cv2.line(img, p, q, (0, 0, 255), 2, cv2.LINE_AA)
+                cv2.line(img, p, q, c["robot"], 2, cv2.LINE_AA)
             if target_heading is not None:
                 q = px(pose_xy[0] + 0.9 * math.cos(target_heading), pose_xy[1] + 0.9 * math.sin(target_heading))
-                cv2.line(img, p, q, (255, 0, 255), 1, cv2.LINE_AA)
-        cv2.circle(img, px(*self.origin), 4, (255, 255, 255), 1)
+                cv2.line(img, p, q, c["heading"], 1, cv2.LINE_AA)
+        cv2.circle(img, px(*self.origin), 4, c["origin"], 1)
         ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
         return buf.tobytes() if ok else None
 

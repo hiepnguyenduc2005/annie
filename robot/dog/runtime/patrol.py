@@ -39,6 +39,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # repository root
 from robot.dog.link.follow import follow_command  # noqa: E402
@@ -256,7 +257,50 @@ g('fps').textContent=(s.fps||0).toFixed(1);g('people').textContent=(s.tracks||[]
 g('log').textContent=(s.log||[]).join('\n');}catch(e){}},250);
 </script>"""
 
+COMMAND_CENTER_PATH = Path(__file__).resolve().parents[1] / "view" / "command_center.html"  # the operator page; VIEW_HTML is the fallback
+
 SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12), (11, 13), (13, 15), (12, 14), (14, 16)]
+
+
+def telemetry_snapshot(view) -> dict:
+    """Everything the command-center page shows in one bounded JSON: live state, the last brain decisions and
+    voice commands, greetings/check-ins/collisions, mission receipts, the frontier goal and the graph's sentences.
+    Reads the run's report dict from the server thread; every part is optional and failures degrade to empty."""
+    with view.lock:
+        state = json.loads(json.dumps(view.state))
+    report = getattr(view, "report", None) or {}
+    out = {"state": state, "connected": (report.get("connection") or {}).get("status") == "connected",
+           "reason": report.get("reason"), "elapsed_s": report.get("elapsed_s"),
+           "brain": {"enabled": bool((report.get("brain") or {}).get("enabled")), "period_s": getattr(view, "brain_period_s", None),
+                     "decisions": list((report.get("brain") or {}).get("decisions") or [])[-8:]},
+           "voice": {"commands": list((report.get("voice") or {}).get("commands") or [])[-6:]},
+           "greetings": [{"t_s": g.get("t_s"), "text": g.get("text"), "name": (g.get("identity") or {}).get("name") if isinstance(g.get("identity"), dict) else None}
+                         for g in list(report.get("greetings") or [])[-6:]],
+           "checkins": [{"t_s": c.get("t_s")} for c in list(report.get("checkins") or [])[-4:]],
+           "collisions": [{"t_s": c.get("t_s"), "mode": c.get("mode"), "front_m": c.get("front_m")} for c in list(report.get("collisions") or [])[-4:]],
+           "missions": [], "frontier": {"available": False, "goal": None}, "graph_sentences": [], "places": 0, "objects": [],
+           "map": getattr(view, "map_geometry", None)}
+    board = getattr(view, "missions", None)
+    if board is not None:
+        with contextlib.suppress(Exception):
+            out["missions"] = board.recent(12)
+    frontier = getattr(view, "frontier", None)
+    if frontier:
+        goal = frontier.get("goal")
+        out["frontier"] = {"available": frontier.get("planner") is not None,
+                           "goal": [round(float(goal[0]), 2), round(float(goal[1]), 2)] if goal is not None else None}
+    graph = getattr(view, "graph", None)
+    if graph is not None:
+        with contextlib.suppress(Exception):
+            out["graph_sentences"] = list(graph.summary(limit=6).get("sentences") or [])[:6]
+            out["places"] = len(graph.places())
+    recorder = getattr(view, "recorder", None)
+    if recorder is not None:
+        with contextlib.suppress(Exception):
+            latest = recorder.latest()
+            out["objects"] = sorted({p["label"] for p in latest.get("people") or []
+                                     if str(p.get("track_id", "")).startswith("obj-")})[:12]
+    return out
 
 
 class LiveView:
@@ -310,7 +354,11 @@ class LiveView:
                     if g is None:
                         return self._send(503, b'{"error":"graph off"}', "application/json")
                     try:
-                        return self._send(200, json.dumps(g.snapshot()).encode(), "application/json")
+                        q = parse_qs(urlsplit(self.path).query)
+                        n_vox = max(0, min(int(q.get("voxels", ["0"])[0]), 20000))  # ?voxels=N embeds the remembered geometry
+                        return self._send(200, json.dumps(g.snapshot(max_voxels=n_vox)).encode(), "application/json")
+                    except ValueError:
+                        return self._send(400, b'{"error":"voxels must be an integer"}', "application/json")
                     except Exception:
                         return self._send(500, b'{"error":"snapshot failed"}', "application/json")
                 if self.path.startswith("/command/"):
@@ -339,7 +387,18 @@ class LiveView:
                     with view.lock:
                         data = json.dumps(view.state).encode()
                     return self._send(200, data, "application/json")
-                self._send(200, VIEW_HTML.encode(), "text/html; charset=utf-8")
+                if self.path.startswith("/telemetry.json"):
+                    try:
+                        return self._send(200, json.dumps(telemetry_snapshot(view), allow_nan=False).encode(), "application/json")
+                    except Exception:
+                        return self._send(500, b'{"error":"telemetry failed"}', "application/json")
+                if self.path.startswith("/classic"):
+                    return self._send(200, VIEW_HTML.encode(), "text/html; charset=utf-8")
+                try:
+                    page = COMMAND_CENTER_PATH.read_bytes()  # read per request so edits show on reload
+                except OSError:
+                    page = VIEW_HTML.encode()
+                self._send(200, page, "text/html; charset=utf-8")
 
             def do_POST(self):
                 if not self._host_ok() or not self._token_ok():
@@ -571,7 +630,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                             graph.ingest_obstacles(time.time(), world_obs)
                     if time.monotonic() - grid["rendered"] > 0.4 and view.port:
                         grid["rendered"] = time.monotonic()
-                        view.map_jpeg = grid["map"].render(pose, yaw, planner.target_heading)
+                        view.map_jpeg = grid["map"].render(pose, yaw, planner.target_heading, palette="costmap")
+                        view.map_geometry = grid["map"].geometry()
             except Exception:
                 continue
             tel["ranges"], tel["ranges_t"] = ranges, loop.time()
@@ -647,6 +707,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
     planner_obj = (FrontierPlanner() if FrontierPlanner is not None else None) if frontier_planner == "auto" else frontier_planner
     frontier = {"planner": planner_obj, "goal": None, "t": 0.0}
     report["frontier"] = {"available": frontier["planner"] is not None, "goals": 0}
+    view.report, view.frontier, view.brain_period_s = report, frontier, brain_period_s  # /telemetry.json reads these
 
     async def on_track(track):
         while not stopped:

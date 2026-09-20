@@ -14,7 +14,7 @@ timestamped, positioned diary the agent queries before it decides.
 | `missions/` | the family-message coordinator (`errand`), dimOS skills | `go2_errand`, `dimos_skills` |
 | `voice/` | cloud voice (ElevenLabs/Deepgram with local fallback), wake-word commands, host voice loop | `go2_voice_*`, `go2_host_voice` |
 | `memory/` | space-time recorder + JSON API, Elasticsearch indexer, the 4D graph | `go2_spacetime`, `go2_spacetime_elastic` |
-| `view/` | the 4D viewer page and vendored Three.js | — |
+| `view/` | command-center page (`command_center.html`, served at `/` by the dog process), the 4D viewer, `replay.py` (page from a recording), vendored Three.js | — |
 | `runtime/` | the dog process (`patrol`: explore/greet idle, missions on request, live view) and the standalone body service | `go2_patrol_greet`, `go2_body` |
 | `inference.py` | the single place a language/vision model is called (provider switch) — owned by Henry | `annie_inference` |
 

@@ -66,6 +66,11 @@ class MissionBoard:
         while len(self.receipts) > MAX_RECEIPTS:
             self.receipts.popitem(last=False)
 
+    def recent(self, n=12) -> list[dict]:
+        """The last `n` receipts, newest first (copies), for the operator's page."""
+        with self.lock:
+            return [dict(r) for r in list(self.receipts.values())[-max(0, int(n)):][::-1]]
+
     def get(self, command_id) -> dict | None:
         with self.lock:
             r = self.receipts.get(command_id)

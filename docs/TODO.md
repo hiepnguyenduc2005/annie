@@ -17,6 +17,10 @@ as work progresses and record a reason for blocked work.
   - Verified: iPhone reminder delivered with mocked resident reply (29.8 s); full robot suites passed in both environments (545/550 tests before the final paused-telemetry regression). Message sweep 20/20. Fall sweep 16/20: duplicate check-ins at seeds 1/5/8 and synthetic-person contact at seed 15 remain open; autonomous readiness is not complete.
   - Physical follow-up remains separate: live microphone/ElevenLabs, Go2 motion/stop/link-loss qualification, requested door contact, device signing, and GX10 access.
 
+- [ ] Configure and verify the companion final-summary receiver on port 8000 when API delivery is re-enabled. Delivery is currently disabled; local finalization and outbox retention are covered by mocked tests.
+
+- [ ] Verify the standalone `speaker_mic` app connects on a physical phone using its build-configured `/audio` URL. Address/key fields removed; simulator build verified. Run `robot_backend` on port 8080, then check LAN connection and playback on device.
+
 - [ ] TASK-016: Rehearse the one-command local stack and HTTP showcases ([runbook](LIVE_DEMO.md#one-command-local-showcases)). Launcher, showcases, trick bridge/planner support and offline regression checks are implemented. Done when the local patrol, fall timeline and five tricks complete with recorded live timings. Current coding sandbox blocks localhost HTTP and Git writes; live rehearsal and delivery commits remain pending.
 
 - [ ] TASK-014: Intelligent dog brain, step 1 (design: `superpowers/specs/2026-09-19-intelligent-dog-brain-design.md`; plan: `superpowers/plans/2026-09-19-intelligent-dog-brain-step1.md`). Done when the simulated and physical dog search systematically, trigger the fall check-in from two independent signals, listen to a live reply, and local plans pass the 5 s gate.

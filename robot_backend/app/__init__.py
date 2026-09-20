@@ -1,1 +1,1 @@
-"""Robot-side perception, reasoning, and interaction."""
+"""Local multimodal companion service."""

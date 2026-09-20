@@ -152,3 +152,47 @@ still uses the simulator's motion gates. These are simulator workflows only.
 - `turn(degrees)` and `walk(metres)` are odometry-closed steps; `walk` stops at obstacles (< 0.45 m).
   A requested `dance` is refused when something is closer than 0.5 m ahead.
 - Turn-in-place commands never go below 0.8 rad/s and reverses never below 0.2 m/s (Go2 deadbands).
+
+## Voice, memory, people and the family app (2026-09-20, later)
+
+- **Voice.** ElevenLabs speaks and Deepgram hears whenever their keys are present (`ANNIE_VOICE_CLOUD=0`
+  or the app's Settings toggle switches to local `say`/Whisper at runtime; keys may be replaced from the
+  app and live in memory only). The wake-word microphone is always on and transcribes through the same
+  path. The speaker and microphone are chosen by name (`/voice` on the dog process, `/api/settings/voice`
+  in the app): AirPods, the Mac's own devices, the iPhone Continuity mic, or the "iPhone (Annie Audio)"
+  WebSocket app on :8030. The dog process mutes its own voice on the mic while speaking.
+- **Conversation.** After a greeting (which asks how the person is) the dog listens up to 6 s, classifies
+  the reply (fine / concern / other / none), answers in Annie's voice (model-composed, quality-gated) and
+  for a *concern* uses fixed wording and records a `concern`. For 45 s after Annie speaks, speech needs no
+  wake word: a sentence that reads like a command becomes an instruction, anything else gets a reply.
+  Transcripts (`conversations`) and `concerns` are in `/telemetry.json` and `/api/dog/status`.
+- **Persona.** One `PERSONA` block (caring, warm, unhurried, first names, notices how people seem, no
+  machine talk) heads every plan and spoken line; fallback greetings ask how the person is.
+- **Memory across restarts.** At start the dog process replays the last hour of the recorder JSONL into
+  the graph (`ANNIE_MEMORY_RELOAD_S`); odometry only lines up within one power cycle.
+- **People.** `/people` on the dog process and `/api/people` in the app: enrol a person from up to 10
+  photos (face embeddings only are kept, in `.data/faces/index.json`), relation, shirt colour; the live
+  tracker uses the new index at once. `robot/dog/perception/reid.py` re-identifies across tracker-id churn
+  by face, then clothing signature, then shirt colour; unknown regulars become "Guest N" (clothing
+  vectors only, no faces, expiring).
+- **Missions.** Overlapping family requests queue (state `queued`, bounded at 8) instead of failing busy;
+  `stop` cancels the line. The errand keeps retrying the body for 45 s while the dog process relaunches
+  after a link drop.
+- **Outcomes.** Every family message ends in one of three app-facing outcomes on its run: `message_response`,
+  `reminder_update` (a reminder sent with `reminder_id` and acknowledged is marked done) or `emergency`
+  (a reply that sounded like a call for help; listed at `/api/alerts`).
+- **Family app.** Controls card with live dog status; real task chips; questions to `/api/ask` (which
+  understands grandma/she as the resident and answers from the dog's live memory), tasks to missions;
+  on-device speech-to-text; Settings (cloud voice, mic/speaker, keys in the Keychain, Server under
+  Advanced); live History; conversations shown as an agentic timeline; People Annie knows.
+- **Command center.** Served at `/` by the dog process: camera with boxes, remembered LiDAR world with a
+  history slider and fading dots, latency, agent log, mission receipts, controls and an instruction box;
+  `/telemetry.json` feeds it. Works from a recording (`robot/dog/view/replay.py`) and from the simulated
+  dog (`--sim`, `robot/dog/sim/`) when the hardware is off.
+- **Perception.** Objects come from the open-vocabulary detector (YOLO-World, folded labels such as
+  `door`) when its baked checkpoint exists, warmed off the control thread; the LiDAR guard looks at
+  0.10-0.75 m, stops at 0.6 m, creeps on a stale map, and a detected object filling the view counts as
+  an obstacle. `look_for(thing)` scans with the camera and asks the vision model where the thing is.
+- **MCP.** `robot/dog/mcp_server.py` exposes the dog (status, instruct, command, say, listen, find_person,
+  look_for, where_is, people, voice settings, memory) to any MCP client; elder-care skills are
+  compositions of the primitives (`robot/dog/planning/care_skills.py`).

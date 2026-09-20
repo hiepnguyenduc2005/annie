@@ -18,6 +18,11 @@ def pack_context(request, *, max_bytes=CONTEXT_BYTES):
              'admissible_waypoints':data.get('waypoints',[]),
              'execution_feedback':data.get('recent_outcomes',[]),
              'memories':[]}
+    waypoints=data.get('waypoints',[])
+    if waypoints:
+        nearest=min(waypoints,key=lambda p:math.hypot(p['x']-frame['pose']['x'],p['y']-frame['pose']['y']))
+        context['nearest_waypoint']={'id':nearest['id'], 'distance_m':round(math.hypot(
+            nearest['x']-frame['pose']['x'],nearest['y']-frame['pose']['y']),2)}
     def encode():
         return json.dumps(context,ensure_ascii=False,separators=(',',':'))
     text=encode()

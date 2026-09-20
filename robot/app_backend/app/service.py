@@ -125,6 +125,19 @@ class Service:
     def _save_episode(self):
         self._save_state('episode', self.episode)
 
+    @atomic('reset_demo_episode')
+    def reset_demo_episode(self):
+        """Explicitly re-arm a resolved demo without inventing recovery evidence."""
+        if self.mode != 'demo':
+            raise PermissionError('Demo controls are unavailable in live mode')
+        if self.pending is not None:
+            raise ValueError('Resolve the active check-in before resetting the demo episode')
+        self.episode = False
+        self.candidate = self.candidate_map = None
+        self.rearm = []
+        self._save_episode()
+        return {'reset': True, 'scope': 'resolved_demo_episode'}
+
     def _load_commands(self):
         self.commands = [json.loads(row[0]) for row in
                          self.db.execute('SELECT payload FROM commands ORDER BY seq, rowid')]

@@ -222,6 +222,13 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, require_audio_
         app.state.service.scenario(body.scenario)
         return app.state.service.status()
 
+    @router.post('/demo/reset-episode', dependencies=[Depends(demo_only)])
+    async def reset_episode():
+        try:
+            return app.state.service.reset_demo_episode()
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
     app.include_router(router)
     app.include_router(build_audio_reply_router(lambda: app.state.service, authorize))
 

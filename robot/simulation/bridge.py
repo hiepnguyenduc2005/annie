@@ -62,6 +62,7 @@ class Bridge:
         self.pending_checkin = None
         self.history = []
         self.pending_agent_command = None
+        self.observation_evidence = None
 
     @property
     def limit_reached(self):
@@ -217,7 +218,7 @@ class Bridge:
         if self.perception == 'agent':
             status = await self.request(self.app,'GET','/status')
             self.pending_checkin = status.get('pending_checkin')
-        if 'autonomy_mode' in state and self.perception != 'agent':
+        if state.get('autonomy_mode') not in (None,'paused') and self.perception != 'agent':
             await self.coordinate(state)
         if self.perception == "ground-truth":
             truth = scene.get("ground_truth")
@@ -346,6 +347,7 @@ class Bridge:
                 self.last_error = 'Inference belongs to a previous scene'
                 return
             self.record_perception(perception)
+            self.observation_evidence = observation
             provider = result.get("provider") or {}
             self.last_provider = {k: str(provider[k])[:200] for k in ("mode", "model") if k in provider}
             if isinstance(provider.get('usage'), dict):
@@ -383,7 +385,7 @@ class Bridge:
                         for item in initial_state['navigation'].get('commands',[])[-4:]]
             nav = initial_state['navigation']
             outcomes.append({'cmd':'status','status':nav['state'], 'detail':
-                f"Current waypoint: {nav.get('waypoint')}; person stop: {initial_state.get('person_safety',{}).get('blocked')}."})
+                f"Current waypoint: {nav.get('waypoint')}; person stop enforced: {initial_state.get('person_safety',{}).get('enforced',True) and initial_state.get('person_safety',{}).get('blocked')}; camera person detections: {len(initial_state.get('person_safety',{}).get('detections',[]))}."})
             self.inferences += 1
             result = await self.request(self.brain,'POST','/plan',json={
                 'observation':frame,'goal':goal,'waypoints':initial_state['navigation']['waypoints'],
@@ -396,6 +398,7 @@ class Bridge:
             perception={**result['perception'],'frame_id':frame['frame_id'],'ts':frame['ts'],
                         'pose':frame['pose'],'source':'simulation_vlm','model':result['provider']['model']}
             self.record_perception(perception)
+            self.observation_evidence = observation
             self.last_provider = result['provider']
             self.last_latency_ms = result['latency_ms']
             response=await self.ingest('brain.perception',perception)
@@ -458,8 +461,8 @@ class Bridge:
         if (state.get("ready") and self.perception in ("vision",'agent') and
                 (self.perception!='agent' or (state.get('intelligence_enabled') and state.get('running'))) and
                 not self.limit_reached and self.monotonic() >= self.next_inference and
-                (self.perception != 'agent' or (not self.pending_checkin and not self.pending_agent_command and
-                 state['navigation']['state'] not in ('moving','scanning','turning'))) and
+                (self.perception != 'agent' or (not self.pending_checkin and
+                 (not self.pending_agent_command or state['navigation']['state'] in ('moving','scanning','turning')))) and
                 (self.vision_task is None or self.vision_task.done())):
             self.next_inference = self.monotonic() + self.inference_interval
             p=self.last_perception or {}

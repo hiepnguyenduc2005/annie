@@ -24,7 +24,8 @@ def gate_action(action, *, state, status, frame, now_ms, last_speech_ms=None):
     safety=state.get('person_safety') or {}
     resident_guard=state.get('resident_guard') or {}
     if kind in ('goto','look'):
-        if not safety.get('ready') or safety.get('blocked') or resident_guard.get('blocked'):
+        if (not safety.get('ready') or (safety.get('enforced',True) and safety.get('blocked'))
+                or (resident_guard.get('enforced',True) and resident_guard.get('blocked'))):
             return None,'Person/stale-camera interlock holds motion; explicit operator restart required'
         if (state.get('navigation') or {}).get('state') in ('moving','scanning','turning'):
             return None,'Current motion has no terminal execution receipt yet'

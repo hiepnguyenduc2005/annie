@@ -181,6 +181,10 @@ class Shared:
         self.stt = None
         self.native_player = None
         self.resident_reply = None
+        self.demo_process = None
+        self.agent_process = None
+        self.demo_brain_url = "http://127.0.0.1:8004"
+        self.demo_allow_cloud = False
 
 
 def playback_callback_for(shared, command_id):
@@ -252,6 +256,18 @@ def speech_receipts(clips, native):
     return receipts
 
 
+def active_checkin():
+    import os
+    import httpx
+    token=os.getenv('ANNIE_API_TOKEN')
+    headers={'Authorization':'Bearer '+token} if token else {}
+    with httpx.Client(base_url='http://127.0.0.1:8000',headers=headers,
+                      timeout=2,trust_env=False) as app:
+        response=app.get('/status')
+        response.raise_for_status()
+        return bool(response.json().get('pending_checkin'))
+
+
 def handler_for(shared, port):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -319,6 +335,17 @@ def handler_for(shared, port):
                     self.reply(200, json.loads(status_file.read_text()))
                 except (OSError, ValueError):
                     self.reply(503, {"last_error": "Brain bridge not connected"})
+            elif path == '/demo-state':
+                try:
+                    report = Path('.data/simulation/house-demo.json')
+                    if report.stat().st_size > 64000:
+                        raise ValueError('Report is too large')
+                    data=json.loads(report.read_text())
+                    if data.get('status')=='running' and shared.demo_process is not None and shared.demo_process.poll() is not None:
+                        data.update(status='failed',error='Demonstration process exited before completing')
+                    self.reply(200, data)
+                except (OSError, ValueError):
+                    self.reply(200, {'status':'not_started','stages':[]})
             elif path.startswith("/speech/") and path.endswith(".wav"):
                 key = path.rsplit("/", 1)[-1][:-4]
                 with shared.lock:
@@ -376,10 +403,43 @@ def handler_for(shared, port):
             if not self.allowed(write=True):
                 return
             path = urlsplit(self.path).path
+            if path == '/demo/start':
+                # Fixed local acceptance driver, no caller-provided executable,
+                # model, paths or shell arguments. Its inputs are synthetic.
+                import subprocess
+                try:
+                    pending=active_checkin()
+                except Exception:
+                    self.reply(503, {'error':'Check-in status unavailable; demo was not started'})
+                    return
+                if pending:
+                    self.reply(409, {'error':'Resolve the active check-in before starting a new demonstration'})
+                    return
+                with shared.lock:
+                    if shared.demo_process and shared.demo_process.poll() is None:
+                        self.reply(409, {'error':'A full-house demonstration is already running'})
+                        return
+                    if shared.agent_process and shared.agent_process.poll() is None:
+                        shared.agent_process.terminate()
+                        shared.agent_process.wait(timeout=5)
+                    from robot.simulation.bridge_lease import body_bridge_lease
+                    try:
+                        with body_bridge_lease(): pass
+                    except RuntimeError as exc:
+                        self.reply(409, {'error':str(exc)})
+                        return
+                    root=Path(__file__).resolve().parents[2]
+                    shared.demo_process=subprocess.Popen([
+                        str(root/'.venv/bin/python'),'-m','robot.simulation.house_demo',
+                        '--brain-url', shared.demo_brain_url,
+                        *(['--allow-cloud'] if shared.demo_allow_cloud else [])],
+                        cwd=root,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                self.reply(202, {'status':'starting'})
+                return
             if path in {"/say", "/speech/played", "/transcribe", "/transcribe-local", "/resident-reply"}:
                 self.speech_request(path)
                 return
-            if path != "/control":
+            if path not in {"/control", "/agent/start"}:
                 self.reply(404, {"error": "not found"})
                 return
             try:
@@ -394,6 +454,29 @@ def handler_for(shared, port):
                 command = validate_control(
                     json.loads(self.rfile.read(length)), shared.catalog.entries
                 )
+                if path == '/agent/start':
+                    if command.get('action')!='intelligence' or command.get('enabled') is not True:
+                        raise ValueError('AI start requires an enabled intelligence goal')
+                    import subprocess
+                    with shared.lock:
+                        if shared.demo_process and shared.demo_process.poll() is None:
+                            self.reply(409, {'error':'The full-house demonstration currently owns the robot goal'})
+                            return
+                        if not shared.agent_process or shared.agent_process.poll() is not None:
+                            from robot.simulation.bridge_lease import body_bridge_lease
+                            try:
+                                with body_bridge_lease(): pass
+                            except RuntimeError as exc:
+                                self.reply(409, {'error':str(exc)})
+                                return
+                            root=Path(__file__).resolve().parents[2]
+                            shared.agent_process=subprocess.Popen([
+                                str(root/'.venv/bin/python'),'-m','robot.simulation.bridge',
+                                '--perception','agent','--brain-url',shared.demo_brain_url,
+                                '--max-inferences','20',
+                                *([] if shared.demo_allow_cloud else ['--continuous-local'])],
+                                cwd=root,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+
                 if command.get("preset") == "room":
                     with shared.lock:
                         current = shared.state.get("current_scene")
@@ -635,7 +718,7 @@ class SceneCatalog:
 class MujocoSession:
     """A model, renderer and controls, all created and used on the main thread."""
 
-    def __init__(self, path, scene=None, locomotion=False, person_safety=None):
+    def __init__(self, path, scene=None, locomotion=False, person_safety=None, person_policy='stop'):
         import mujoco
 
         self.mj = mujoco
@@ -647,6 +730,7 @@ class MujocoSession:
         self.intelligence_enabled, self.intelligence_revision = False, 0
         self.intelligence_goal = 'Explore the ground floor and check on the resident. Describe what you see, stay clear of people, and choose your next action from camera evidence.'
         self.person_safety = person_safety
+        self.person_policy = person_policy
         if locomotion:
             try:
                 from robot.simulation.locomotion import prepare_locomotion_model
@@ -749,7 +833,11 @@ class MujocoSession:
                 positions=self.data.mocap_pos
                 near = min(math.hypot(p[0]-data.qpos[0],p[1]-data.qpos[1]) for p in positions if p[2]<2) if len(positions) else math.inf
                 self.resident_guard = {'blocked':near<.85, 'distance_m':near, 'source':'authored_simulator_proximity'}
-            if (safety and safety['blocked']) or self.resident_guard['blocked']:
+            enforce_person=getattr(self,'person_policy','stop')=='stop'
+            self.resident_guard['enforced']=enforce_person
+            blocked = ((safety and (not safety['ready'] or (enforce_person and safety['blocked'])))
+                       or (enforce_person and self.resident_guard['blocked']))
+            if blocked:
                 if self.navigator.state in ('moving', 'scanning', 'turning'):
                     self.navigator.fail(safety['reason'] if safety and safety['blocked'] else 'Animated resident proximity guard')
                 self.controller.apply(0, 0, 0)
@@ -917,7 +1005,8 @@ class MujocoSession:
             "map_id": self.map_id,
             "locomotion": self.controller.state() if self.controller else None,
             "navigation": self.navigator.snapshot() if self.navigator else None,
-            "person_safety": self.person_safety.snapshot() if self.person_safety else {'enabled': False},
+            "person_safety": {**self.person_safety.snapshot(), 'enforced':self.person_policy=='stop',
+                              'policy':self.person_policy} if self.person_safety else {'enabled': False},
             "resident": self.resident.state() if self.resident else None,
             "resident_guard": self.resident_guard,
             "autonomy_mode": self.autonomy_mode,
@@ -976,8 +1065,11 @@ def run(args):
         catalog.entries.get(first_id),
         args.locomotion,
         guard,
+        args.person_policy,
     )
     shared = Shared()
+    shared.demo_brain_url = args.demo_brain_url
+    shared.demo_allow_cloud = args.demo_allow_cloud
     if args.native_audio:
         shared.native_player = NativeAudioPlayer()
         shared.native_player.start()
@@ -1053,6 +1145,7 @@ def run(args):
                             candidate_catalog.entries[scene_id],
                             args.locomotion,
                             guard,
+                            args.person_policy,
                         )
                         if candidate.physics_error:
                             raise ValueError("scene has invalid initial physics")
@@ -1186,6 +1279,10 @@ def run(args):
     except KeyboardInterrupt:
         pass
     finally:
+        for child in (shared.agent_process, shared.demo_process):
+            if child and child.poll() is None:
+                child.terminate()
+                child.wait(timeout=5)
         server.shutdown()
         server.server_close()
         if shared.native_player is not None:
@@ -1198,6 +1295,11 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument('--person-policy', choices=['stop','advisory'], default='stop',
+                        help='Simulated person detections stop movement or advise the model')
+    parser.add_argument('--demo-brain-url', default='http://127.0.0.1:8004')
+    parser.add_argument('--demo-allow-cloud', action='store_true',
+                        help='Explicitly allow bounded synthetic demo inference using the configured cloud brain')
     parser.add_argument('--person-safety', action='store_true',
                         help='Inhibit movement on person detection or unavailable camera detector')
     parser.add_argument(

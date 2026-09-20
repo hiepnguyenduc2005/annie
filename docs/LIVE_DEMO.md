@@ -1,5 +1,46 @@
 # Live integration evidence
 
+## Repeatable full-house run, 2026-09-19
+
+Two complete runs passed on the same Mac: **41.864 s / 13 image inferences**
+and **37.974 s / 8 image inferences**. The configured model was
+`google/gemini-2.5-flash-lite:floor`, explicitly using synthetic camera frames.
+The model chose the living-room waypoint; trained-policy joint actuation moved
+the dog over 0.5 m before two distinct floor-lying observations initiated a
+check-in. Saved camera images were visually inspected and show the resident
+lying on the floor. No authored posture labels were sent to the model.
+
+Native question playback completed before the reply window opened. Local
+Whisper transcribed the recorded synthetic reply as “Not okay.” (286.6 ms and
+262.9 ms respectively); both replies applied to their identified incidents.
+The family alert persisted, and the family message completed native playback.
+These are playback-process receipts, not human-witnessed speaker audibility.
+The routine and fall are staged, and the reply is a recorded fixture. Robot
+intent comes from the model. This does not establish real microphone capture,
+physical robot motion, or external notification delivery.
+
+The second run used the explicit demo-only episode reset, which preserves
+alerts, memory and command history and rejects an active check-in. The viewer
+owns its command bridge; the AI button starts it and Pause AI pauses planning while retaining voice delivery. Person
+detections are advisory in this simulator configuration; missing detector
+results still hold movement. Physical Go2 controls are unchanged.
+
+Reports and image evidence remain in ignored `output/house-demo-*.json` and
+`output/house-frame-*.jpg`; latest report is `.data/simulation/house-demo.json`
+(run `4d7b5ea8-348c-4cd2-8258-89b3bb25462e`). The combined backend, planner,
+bridge, audio and demo-lifecycle suite passed **204 tests**; schema export and
+both frontend JavaScript syntax checks passed. See the
+[reproduction commands](../robot/simulation/README.md#full-house-model-driven-demonstration).
+
+Local Qwen planning repeatedly took 7–10 s on this machine and its actions were
+correctly rejected by the five-second freshness boundary. The verified demo
+explicitly uses the cloud service, with no automatic provider fallback, at most
+20 image attempts per run, and a $19 shared reservation cap plus the earlier
+$1 probe reservation within the authorized $20 total. This small repeat sample
+is not the full scenario matrix or 100-attempt latency qualification.
+
+## Earlier integration run
+
 Development run on 2026-09-19, Apple M1 Max / 64 GB. This is a measured partial
 integration result, not a declaration that every [acceptance gate](ACCEPTANCE.md)
 passes. Evidence: ignored `output/live-loop-gemini.jsonl` and `output/vision/`.
@@ -51,13 +92,12 @@ explicit demo setup.
 
 ## Remaining acceptance work
 
-The transcription UI currently reports a recorded transcript; it does not yet
-bind that audio to a live incident response. The tested timeout therefore proves
-a software no-reply branch, not a healthy microphone observing resident silence.
-Input availability, utterance/incident correlation, echo handling, multi-player
-leases, full scenario/repetition matrices, and 100-attempt latency qualification
-remain open. Physical Go2, GX10, full DimOS, Elastic, and external notifications
-have not been demonstrated. See [deployment target](DEPLOYMENT_TARGET.md).
+Recorded synthetic replies now bind to live simulator incidents as recorded above.
+The earlier timeout demonstrates a software no-reply branch, not a healthy
+microphone observing resident silence. Real input availability, echo handling,
+multi-player leases, full scenario/repetition matrices, and 100-attempt latency
+qualification remain open. Physical patrol, GX10 deployment, full DimOS, Elastic,
+and external notification delivery have not been demonstrated. See [deployment target](DEPLOYMENT_TARGET.md).
 
 External-call reservations at this run: $2.38 shared ledger plus $1 reserved
 for the earlier fast-model probe, below the $20 total allowance. Reservations

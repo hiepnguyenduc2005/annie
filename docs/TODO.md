@@ -7,6 +7,8 @@ as work progresses and record a reason for blocked work.
 ## Now
 
 - [ ] TASK-006: Complete and measure live image/audio inference behind the GX10-compatible service. Keep stale perception out of incident rules; distinguish successful media interpretation from HTTP acceptance.
+  - Verified: two full-house model-driven simulator runs completed walking, camera detection, native check-in, correlated recorded reply, family alert and family playback in 41.864 s and 37.974 s. [Evidence](LIVE_DEMO.md).
+  - Remaining: full scenario/latency qualification, real microphone input and GX10 deployment.
 
 ## Next
 

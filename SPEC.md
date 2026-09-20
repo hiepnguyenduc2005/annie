@@ -35,6 +35,14 @@ The rule uses known floor/chair locations. Unlike the source's literal
 thresholds are demo settings, not clinical performance. `fall_confirmed` is
 retained as a wire name for escalation confirmed, never a proven medical fall.
 
+The model-driven MuJoCo demonstration supports an explicit advisory person-detection
+policy: detections inform the model's choice to approach, wait, speak, or stop;
+unavailable detector results still inhibit motion. Stop enforcement remains the
+default, and this option does not alter physical robot controls. Rehearsal resets
+may re-arm only a resolved episode in demo mode, preserving evidence and command
+history without injecting a perception observation. Full-house runs stage the
+resident routine/fall and recorded reply while the model chooses robot actions.
+
 ## Scope boundaries
 
 Target integrations: Go2 with DimOS/MuJoCo, GX10-local image-capable Nemotron,

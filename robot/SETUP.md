@@ -206,6 +206,14 @@ charging the battery. This is operating guidance, distinct from BMS hard
 protection. Replace/charge before further motion tests; do not lower the local
 cutoff to work around this guidance.
 
+The tracked `go2_walk.py` commissioning tool now enforces a finite minimum
+battery setting of 40–100%, defaulting to 40%, before opening a connection.
+Its 44 fake-only checks pass, but it is not qualified for physical patrol:
+the current completion flag measures elapsed command duration rather than
+route execution, and its stop observer does not yet require distinct fresh
+post-stop samples. The MCF command path also needs hardware verification.
+Do not treat this tool's completion flag as a successful walk or patrol.
+
 The local Unitree UI uses **Connect → Access Point (Direct) → Drive / Joysticks**
 after joining the robot's Wi-Fi. The left joystick translates; the right
 joystick turns. Direct control requires no Unitree cloud login. This Mac's

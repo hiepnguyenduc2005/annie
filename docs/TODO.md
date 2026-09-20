@@ -23,6 +23,7 @@ as work progresses and record a reason for blocked work.
   - Prepared: [offline patrol supervisor](../robot/patrol/README.md), with 44 pure gate tests and 11 mocked bridge cases; physical adapter integration remains open. No verification flags are inferred from stationary acknowledgments.
   - Current: operator confirmed a paired physical controller. Short tests produced small odometry changes, but the 20 cm route timed out; no circle/patrol is verified. Last battery was 23%; replace/charge according to Unitree’s below-40% guidance before more motion.
   - Blockers: independent stop/recovery, moving-stop and link-loss behavior, physical map alignment, and enforced boundary are unverified. MCF uses `error_code` for gait state; `mode=0` is not idle proof. Small pose changes, acknowledgments and offline driver tests do not satisfy execution checks.
+  - `go2_walk.py` now enforces a 40% minimum battery threshold; 44 fake-only tests pass. Before hardware use, fix its duration-only completion flag and require distinct fresh stop observations, then verify the MCF motion path.
   - Done when: a nearby operator can reliably stop the robot and one deliberately slow, bounded physical route completes with measured pose and execution evidence.
 
 - [ ] TASK-008: Persist profiles server-side (MongoDB was proposed) so the app and dog profiles, their kinds, and which was created first survive across devices.

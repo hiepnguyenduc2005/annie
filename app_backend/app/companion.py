@@ -73,6 +73,8 @@ STOP_WORDS = {'where', 'when', 'was', 'were', 'the', 'a', 'an', 'is', 'did', 'i'
 class CompanionService:
     def __init__(self, now=None):
         self.reminders = seed_reminders()
+        self.alerts = []
+        self.live_facts = []
         self.memory = seed_memory(now)
 
     def add_reminder(self, time, title):
@@ -94,6 +96,7 @@ class CompanionService:
 
     # ---- live facts from the dog process (its space-time graph), merged ahead of the seeded ones ----
     live_facts: list = []
+    alerts: list = []  # emergencies from missions (see main._apply_outcome); newest last, bounded
 
     @staticmethod
     def family_wording(sentence: str) -> str:

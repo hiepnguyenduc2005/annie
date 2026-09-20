@@ -102,6 +102,7 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
             dispatch_timeout=float(os.getenv('ANNIE_ROBOT_DISPATCH_TIMEOUT_S', '3')),
             mock=os.getenv('ANNIE_FAMILY_MOCK_ROBOT', 'false').lower() == 'true',
             recall_provider=recall_provider,
+            on_outcome=lambda run: app.state.apply_outcome(run),
         )
         app.state.schema = schema_store or SchemaStore()
         await app.state.schema.connect()
@@ -269,7 +270,7 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
     async def post_message(body: MessageIn):
         # Must never block on robot_backend: the dispatch runs as a background
         # task started inside post_message, so this returns immediately.
-        _message, run = app.state.family.post_message(body.author_id, body.text)
+        _message, run = app.state.family.post_message(body.author_id, body.text, reminder_id=body.reminder_id)
         return {'run_id': run['run_id'], 'status': run['status']}
 
     @router.get('/api/runs/{run_id}')
@@ -447,6 +448,26 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
             raise HTTPException(409, str(exc)) from None
 
     # ---- household schema: profiles, messages, reminders, history, emergencies ----
+
+    def _apply_outcome(run):
+        """Reminder update: an acknowledged reminder is marked done. Emergency: recorded as a live alert fact."""
+        outcome = run.get('outcome') or {}
+        companion = app.state.companion
+        if outcome.get('type') == 'reminder_update' and outcome.get('done') and outcome.get('reminder_id') is not None:
+            with contextlib.suppress(KeyError):
+                item = next((r for r in companion.reminders if r['id'] == outcome['reminder_id']), None)
+                if item is not None and not item['done']:
+                    companion.toggle_reminder(outcome['reminder_id'])
+        if outcome.get('type') == 'emergency':
+            companion.alerts.append({'run_id': run['run_id'], 'at': run.get('updated_at'), 'detail': outcome.get('detail', '')})
+            del companion.alerts[:-10]
+
+    app.state.apply_outcome = _apply_outcome  # attached to the family service once the lifespan creates it
+
+    @router.get('/api/alerts')
+    async def list_alerts():
+        """Emergencies raised by missions (a reply that sounded like a call for help), newest last."""
+        return app.state.companion.alerts
 
     def store():
         return app.state.schema

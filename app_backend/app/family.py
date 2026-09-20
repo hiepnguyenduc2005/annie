@@ -34,6 +34,23 @@ def now_ms():
 class MessageIn(StrictModel):
     author_id: Literal['jeanine', 'zach', 'ellis']
     text: Text
+    reminder_id: int | None = None  # set by the app's "Remind" button: a delivered reminder updates the schedule
+
+
+def classify_outcome(run, payload) -> dict:
+    """The three app-facing outcomes of a family message (contract: family_messages.md):
+    message response (delivered, with or without a reply), reminder update (a reminder acknowledged -> done),
+    emergency (the person may need help)."""
+    reply = str((payload or {}).get('reply') or 'none')
+    detail = str((payload or {}).get('detail') or '')
+    if run.get('status') == 'failed':
+        return {'type': 'message_response', 'delivered': False, 'reply': 'none', 'detail': detail}
+    if reply == 'concern':
+        return {'type': 'emergency', 'delivered': True, 'reply': reply, 'detail': detail}
+    if run.get('reminder_id') is not None and reply in ('okay', 'none'):
+        return {'type': 'reminder_update', 'delivered': True, 'reply': reply, 'reminder_id': run['reminder_id'],
+                'done': reply == 'okay', 'detail': detail}
+    return {'type': 'message_response', 'delivered': True, 'reply': reply, 'detail': detail}
 
 
 class InternalEventIn(StrictModel):
@@ -113,8 +130,9 @@ async def default_dispatch(url, payload, timeout, headers=None):
 
 class FamilyService:
     def __init__(self, clock=now_ms, robot_backend_url='', dispatch_timeout=3.0,
-                 mock=False, mock_speed=1.0, dispatch_fn=None, recall_provider=None, internal_secret=''):
+                 mock=False, mock_speed=1.0, dispatch_fn=None, recall_provider=None, internal_secret='', on_outcome=None):
         self.clock = clock
+        self.on_outcome = on_outcome  # callback(run) after a terminal event: reminder update / emergency outcomes
         self.robot_backend_url = robot_backend_url.rstrip('/')
         self.dispatch_timeout = dispatch_timeout
         self.mock = mock
@@ -148,12 +166,13 @@ class FamilyService:
     def recent_history(self, limit=50):
         return {'thread': self.thread[-limit:], 'runs': list(self.runs.values())[-limit:]}
 
-    def post_message(self, author_id, text):
+
+    def post_message(self, author_id, text, reminder_id=None):
         run_id = str(uuid4())
         at = self.clock()
         message = {'message_id': str(uuid4()), 'author_id': author_id, 'text': text, 'at': at, 'run_id': run_id}
         run = {'run_id': run_id, 'author_id': author_id, 'text': text, 'status': 'dispatched',
-               'created_at': at, 'updated_at': at, 'events': []}
+               'created_at': at, 'updated_at': at, 'events': [], 'reminder_id': reminder_id, 'outcome': None}
         self.thread.append(message)
         self.runs[run_id] = run
         self.emit('message', message)
@@ -271,6 +290,13 @@ class FamilyService:
         run['events'].append(event)
         run['updated_at'] = self.clock()
         run['status'] = kind if kind in ('completed', 'failed') else 'running'
+        if kind in ('completed', 'failed'):
+            run['outcome'] = classify_outcome(run, payload)
+            if self.on_outcome is not None:
+                try:
+                    self.on_outcome(run)
+                except Exception:
+                    pass
         self.emit('run_event', event)
         self.emit('run_status', {'run_id': run_id, 'status': run['status']})
         return event

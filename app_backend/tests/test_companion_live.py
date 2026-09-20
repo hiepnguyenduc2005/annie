@@ -52,3 +52,43 @@ def test_family_wording_and_honest_unknown_resident():
     assert c.ask("Where is Grandma?").startswith("I haven't recognised Jeanine by name yet. Someone last seen")
     c.live_facts = []
     assert c.ask("where is she") == "I haven't seen Jeanine yet today, but I'm keeping watch."
+
+
+def test_reminder_update_and_emergency_outcomes():
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    import httpx
+    H = {'X-Internal-Secret': 's3cret'}
+    monkey_env = {'ROBOT_BACKEND_URL': 'http://robot.test'}
+    import os
+    old_env = {k: os.environ.get(k) for k in monkey_env}
+    os.environ.update(monkey_env)
+    from app import family as family_mod
+
+    async def accepted(url, payload, timeout, headers=None):  # the errand accepted the dispatch; events come later
+        return httpx.Response(202, json={'accepted': True})
+    real_default = family_mod.default_dispatch
+    family_mod.default_dispatch = accepted
+    try:
+        _run_outcome_checks(TestClient, create_app, H)
+    finally:
+        family_mod.default_dispatch = real_default
+        for k, v in old_env.items():
+            (os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v))
+
+
+def _run_outcome_checks(TestClient, create_app, H):
+    with TestClient(create_app(':memory:', mode='live', token='', internal_secret='s3cret')) as c:
+        # the mock robot sequence is off in live mode; drive the run through the internal event route
+        rid = c.post('/api/messages', json={'author_id': 'zach', 'text': 'tell Grandma to charge her phone', 'reminder_id': 4}).json()['run_id']
+        c.post('/internal/events', json={'run_id': rid, 'kind': 'navigating', 'payload': {'detail': 'Looking for Jeanine.'}, 'at': 1}, headers=H)
+        r = c.post('/internal/events', json={'run_id': rid, 'kind': 'completed', 'payload': {'detail': 'Jeanine says okay.', 'reply': 'okay', 'mood': 'happy'}, 'at': 2}, headers=H)
+        assert r.status_code in (200, 201, 202)
+        run = c.get(f'/api/runs/{rid}').json()
+        assert run['outcome']['type'] == 'reminder_update' and run['outcome']['done'] is True
+        assert next(x for x in c.get('/api/reminders').json() if x['id'] == 4)['done'] is True
+        rid2 = c.post('/api/messages', json={'author_id': 'zach', 'text': 'check on Grandma'}).json()['run_id']
+        c.post('/internal/events', json={'run_id': rid2, 'kind': 'completed', 'payload': {'detail': 'Jeanine may need help: "I fell"', 'reply': 'concern', 'mood': 'worried'}, 'at': 3}, headers=H)
+        assert c.get(f'/api/runs/{rid2}').json()['outcome']['type'] == 'emergency'
+        alerts = c.get('/api/alerts').json()
+        assert len(alerts) == 1 and alerts[0]['run_id'] == rid2

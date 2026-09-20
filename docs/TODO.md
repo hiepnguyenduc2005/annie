@@ -6,6 +6,10 @@ as work progresses and record a reason for blocked work.
 
 ## Now
 
+- [x] Fix unreadable native text when the iPhone uses dark appearance. Both app versions
+  explicitly use light appearance with the fixed paper/ink palette. Signed iOS build,
+  physical install, and phone screenshot verified; v2 Swift build also passed.
+
 - [x] Add shared Annie speech mute to the family app and operator dashboard. Controls use
   confirmed server state; muting cancels owned Mac playback and queued synthesis, closes
   the open conversation window, and preserves microphone commands and robot controls.

@@ -41,6 +41,8 @@ struct AnnieApp: App {
             }
             .environmentObject(state)
             .environmentObject(profiles)
+            // Keep system text and controls legible with the fixed paper/ink palette.
+            .preferredColorScheme(.light)
             // Tab bar, pickers and other system controls follow the palette
             // instead of the default iOS blue.
             .tint(Palette.slate)

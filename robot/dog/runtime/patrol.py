@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import hmac
 import json
 import logging
 import math
@@ -253,8 +254,12 @@ SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12),
 class LiveView:
     """Annotated camera + status for the operator's browser; a stdlib HTTP server in a thread. Port 0 disables."""
 
-    def __init__(self, port=8011, host="127.0.0.1", status_lines=12):
+    def __init__(self, port=8011, host="127.0.0.1", status_lines=12, token=None):
         self.port, self.host = port, host
+        # Token: required for the state-changing routes (/command, /stop) when set; binding beyond loopback
+        # without one is refused in main(). Host check: a browser page elsewhere cannot reach us via DNS rebinding.
+        self.token = token if token is not None else (os.environ.get("ANNIE_BODY_TOKEN") or None)
+        self.extra_hosts = {h.strip().lower() for h in os.environ.get("ANNIE_VIEW_HOSTS", "").split(",") if h.strip()}
         self.state = {"mode": "-", "action": None, "tracks": [], "ranges": None, "battery": None, "t_s": 0.0,
                       "greetings": 0, "checkins": 0, "home_m": 0.0, "log": []}
         self.status_lines = status_lines
@@ -274,7 +279,22 @@ class LiveView:
             def log_message(self, *a):
                 pass
 
+            def _host_ok(self):
+                host = (self.headers.get("Host") or "").split(":")[0].strip("[]").lower()
+                ok = host in ("127.0.0.1", "localhost", "::1", view.host.lower()) or host in view.extra_hosts
+                if not ok:
+                    self._send(421, b'{"error":"unexpected Host"}', "application/json")
+                return ok
+
+            def _token_ok(self):
+                if view.token and not hmac.compare_digest(self.headers.get("X-Body-Token") or "", view.token):
+                    self._send(401, b'{"error":"unauthorized"}', "application/json")
+                    return False
+                return True
+
             def do_GET(self):
+                if not self._host_ok():
+                    return
                 if self.path.startswith("/stream.mjpg"):
                     return self._stream()
                 if self.path.startswith("/command/"):
@@ -306,6 +326,8 @@ class LiveView:
                 self._send(200, VIEW_HTML.encode(), "text/html; charset=utf-8")
 
             def do_POST(self):
+                if not self._host_ok() or not self._token_ok():
+                    return
                 length = int(self.headers.get("Content-Length") or 0)
                 raw = self.rfile.read(length) if 0 < length < 65536 else b""
                 board = getattr(view, "missions", None)
@@ -728,6 +750,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         rec_last = [-1e9]
         mission_state: dict = {}
         mission_hold_until = [0.0]
+        rec_objects_seq = [-1]
         bandit = bandit or HeadingBandit()
         bandit_state = {"until": 0.0, "rewarded": False}
         report["bandit"] = None
@@ -837,11 +860,18 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                                                  "y": tel["pose"][1] + dist * math.sin(ang), "z": 0.9,
                                                  "label": ident or f"person {t.get('track_id')}", "identity": ident,
                                                  "posture": t.get("posture")})
-                        recorder.record_people(wall, people_world)
+                    else:
+                        people_world = []
                     objs = res.get("objects") or []
-                    if objs and fw and objects_mod is not None:
+                    object_world = []
+                    if objs and fw and objects_mod is not None and res.get("objects_seq", 0) != rec_objects_seq[0]:
+                        rec_objects_seq[0] = res["objects_seq"]  # place each detection list once, at this pose
+                        objs = objects_mod.not_people(objs, [t["box"] for t in res.get("raw_tracks", [])])  # a lying person is not a couch
+                        objs = [o for o in objs if o.get("hits", 1) >= 2]  # drop one-frame hallucinations
                         placed = objects_mod.place(objs, fw, fh or 480, tel["pose"], tel["yaw"], front_range_m=front_r)
-                        recorder.record_people(wall, objects_mod.sightings(placed, int(wall * 1000)))
+                        object_world = objects_mod.sightings(placed, int(wall * 1000))
+                    if people_world or object_world:
+                        recorder.record_people(wall, people_world + object_world)  # one call: it replaces "now"
             if now - last_diag >= diag_every_s:
                 last_diag = now
                 status(f"diag {diag.line()}")
@@ -1175,7 +1205,9 @@ def main(argv=None):
     parser.add_argument("--firmware-avoid", action="store_true", help="also switch on the firmware obstacle-avoid service")
     parser.add_argument("--stop-on-checkin", action="store_true", help="end the run after the first lying-person check-in")
     parser.add_argument("--idle-trick", type=float, default=90.0, help="seconds without a new person before a trick; 0 disables")
-    parser.add_argument("--view-port", type=int, default=8011, help="live camera/boxes page on 127.0.0.1; 0 disables")
+    parser.add_argument("--view-port", type=int, default=8011, help="live camera/boxes page; 0 disables")
+    parser.add_argument("--view-host", default="127.0.0.1", help="bind address; beyond loopback requires ANNIE_BODY_TOKEN "
+                        "and ANNIE_VIEW_HOSTS (comma list of this machine's addresses the page may be opened on)")
     parser.add_argument("--no-motion", action="store_true", help="perception-only: never move or perform tricks")
     parser.add_argument("--imgsz", type=int, default=352, help="tracker inference size (multiple of 32)")
     parser.add_argument("--diag-every", type=float, default=5.0, help="seconds between diagnostic lines")
@@ -1200,6 +1232,8 @@ def main(argv=None):
         if line.startswith(("ELEVENLABS_", "DEEPGRAM_")) and "=" in line:
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip().strip('"'))
+    if args.view_host not in ("127.0.0.1", "localhost", "::1") and not os.environ.get("ANNIE_BODY_TOKEN"):
+        parser.error("--view-host beyond loopback requires ANNIE_BODY_TOKEN (fail closed: anyone on the LAN could move the robot)")
     _say(f"voice: {voice().enabled} (cloud when a key is set; local say/Whisper otherwise)")
     logging.disable(logging.CRITICAL)
     try:
@@ -1207,7 +1241,7 @@ def main(argv=None):
                                               duration_s=args.duration, speed_mps=args.speed, boundary_m=args.boundary,
                                               lidar=not args.no_lidar, firmware_avoid=args.firmware_avoid,
                                               stop_on_checkin=args.stop_on_checkin, idle_trick_s=args.idle_trick,
-                                              view=LiveView(port=args.view_port), no_motion=args.no_motion,
+                                              view=LiveView(port=args.view_port, host=args.view_host), no_motion=args.no_motion,
                                               imgsz=args.imgsz, diag_every_s=args.diag_every,
                                               brain=VisionBrain() if args.brain else None, brain_period_s=args.brain_period,
                                               memory=SightingMemory(args.memory_file),

@@ -132,7 +132,7 @@ class Perception:
         self.track_q: queue.Queue = queue.Queue(maxsize=1)
         self.ann_q: queue.Queue = queue.Queue(maxsize=1)
         self.lock = threading.Lock()
-        self.result = {"seq": 0, "tracks": [], "raw_tracks": [], "objects": [], "w": None, "h": None, "t": None}
+        self.result = {"seq": 0, "tracks": [], "raw_tracks": [], "objects": [], "objects_seq": 0, "w": None, "h": None, "t": None}
         self.context = {"mode": "-", "ranges": None, "battery": None}
         self.stopped = False
         self.threads = [threading.Thread(target=fn, daemon=True, name=name)
@@ -196,18 +196,19 @@ class Perception:
                     self.identifier.apply(img, tracks)
                 except Exception:
                     self.diag.count("errors")
-            objects = self.result["objects"]
+            objects, objects_seq = self.result["objects"], self.result["objects_seq"]
             if self.objects is not None and self.result["seq"] % self.objects_every == 0:
                 t1 = time.perf_counter()
                 try:
                     objects = self.objects.detect(img, now_ms)
+                    objects_seq += 1  # a fresh list: consumers record it once, never re-project a stale one
                 except Exception:
                     self.diag.count("errors")
                 self.diag.sample("objects_ms", (time.perf_counter() - t1) * 1000)
             now = time.monotonic()
             with self.lock:
                 self.result = {"seq": self.result["seq"] + 1, "tracks": tracks, "raw_tracks": raw, "objects": objects,
-                               "w": img.shape[1], "h": img.shape[0], "t": now}
+                               "objects_seq": objects_seq, "w": img.shape[1], "h": img.shape[0], "t": now}
                 ctx = dict(self.context)
                 ctx["objects"] = objects
             self.diag.tick("processed", now)

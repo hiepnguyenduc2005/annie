@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import hmac
 import json
 import os
 import re
@@ -426,7 +427,10 @@ class ErrandService:
     sockets, so it can be tested directly.
     """
 
-    def __init__(self, run_errand, *, body_url: str = "", status=_log):
+    def __init__(self, run_errand, *, body_url: str = "", status=_log, dispatch_secret: str | None = None):
+        # Inbound auth for /dispatch: app_backend sends X-Internal-Secret (the shared ANNIE_INTERNAL_SECRET);
+        # required whenever this service is reachable beyond loopback (main() fails closed).
+        self.dispatch_secret = dispatch_secret or None
         self.run_errand, self.body_url, self.status = run_errand, body_url, status
         self.runs: dict[str, dict] = {}
         self.open = 0  # accepted + queued + running
@@ -451,8 +455,12 @@ class ErrandService:
         if not self.loop.is_running() and not self.loop.is_closed():
             self.loop.close()  # never started, or the loop thread has already returned
 
-    def handle(self, method: str, path: str, raw: bytes = b"") -> tuple[int, dict]:
+    def handle(self, method: str, path: str, raw: bytes = b"", headers=None) -> tuple[int, dict]:
         path = path.split("?", 1)[0].rstrip("/")
+        if method == "POST" and path == "/dispatch" and self.dispatch_secret:
+            given = (headers or {}).get("X-Internal-Secret") or (headers or {}).get("x-internal-secret") or ""
+            if not hmac.compare_digest(given, self.dispatch_secret):
+                return 401, {"error": "X-Internal-Secret required"}
         if method == "GET" and path == "/health":
             return 200, {"ok": True, "body_url": self.body_url, "busy": self.open > 0}
         if method == "GET" and path.startswith("/runs/"):
@@ -534,7 +542,8 @@ def make_handler(service: ErrandService):
                 code, payload = 400, {"error": "bad Content-Length"}
             else:
                 try:
-                    code, payload = service.handle(method, self.path, self.rfile.read(length) if length else b"")
+                    code, payload = service.handle(method, self.path, self.rfile.read(length) if length else b"",
+                                                   headers={k: v for k, v in self.headers.items()})
                 except Exception as exc:
                     _log(f"request failed ({type(exc).__name__})")
                     code, payload = 500, {"error": "internal error"}
@@ -560,7 +569,7 @@ def _interrupt(*_):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Family-message errand relay for the physical Go2 (software relay).")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1", help="beyond loopback requires the dispatch secret (fail closed)")
     parser.add_argument("--port", type=int, default=8010)
     parser.add_argument("--body-url", default=os.environ.get("ANNIE_BODY_URL") or "http://127.0.0.1:8001")
     parser.add_argument("--app-url", default=os.environ.get("ANNIE_APP_URL") or "http://127.0.0.1:8000")
@@ -580,7 +589,11 @@ def main(argv=None):
         return await Errand(body.command, app.post_event).run(run["run_id"], run["author_name"], run["text"],
                                                                log=run["events"])
 
-    service = ErrandService(run_errand, body_url=args.body_url).start()
+    # /dispatch is authenticated with the same shared secret app_backend uses for events; on loopback it is
+    # optional (ANNIE_DISPATCH_AUTH=off), anywhere else it is mandatory.
+    loopback = args.host in ("127.0.0.1", "localhost", "::1")
+    dispatch_secret = None if (loopback and os.environ.get("ANNIE_DISPATCH_AUTH", "on") == "off") else secret
+    service = ErrandService(run_errand, body_url=args.body_url, dispatch_secret=dispatch_secret).start()
     try:
         server = ThreadingHTTPServer((args.host, args.port), make_handler(service))
     except OSError as exc:

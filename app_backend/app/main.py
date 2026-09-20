@@ -72,6 +72,7 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
         app.state.family = family_service or FamilyService(
             clock=clock,
             robot_backend_url=os.getenv('ROBOT_BACKEND_URL', ''),
+            internal_secret=internal_secret,
             dispatch_timeout=float(os.getenv('ANNIE_ROBOT_DISPATCH_TIMEOUT_S', '3')),
             mock=os.getenv('ANNIE_FAMILY_MOCK_ROBOT', 'false').lower() == 'true',
             recall_provider=recall_provider,

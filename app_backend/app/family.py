@@ -106,19 +106,25 @@ def build_mock_sequence(text, author_name, recall=DEFAULT_RECALL):
     ]
 
 
-async def default_dispatch(url, payload, timeout):
+async def default_dispatch(url, payload, timeout, headers=None):
     async with httpx.AsyncClient(timeout=timeout) as client:
-        return await client.post(url, json=payload)
+        return await client.post(url, json=payload, headers=headers or {})
 
 
 class FamilyService:
     def __init__(self, clock=now_ms, robot_backend_url='', dispatch_timeout=3.0,
-                 mock=False, mock_speed=1.0, dispatch_fn=None, recall_provider=None):
+                 mock=False, mock_speed=1.0, dispatch_fn=None, recall_provider=None, internal_secret=''):
         self.clock = clock
         self.robot_backend_url = robot_backend_url.rstrip('/')
         self.dispatch_timeout = dispatch_timeout
         self.mock = mock
         self.mock_speed = mock_speed
+        self.internal_secret = internal_secret or ''
+        if dispatch_fn is None and self.internal_secret:
+            # robot_backend authenticates /dispatch with the same shared secret it uses to post events back
+            secret = self.internal_secret
+            dispatch_fn = lambda url, payload, timeout: default_dispatch(url, payload, timeout,  # noqa: E731
+                                                                         {'X-Internal-Secret': secret})
         self.dispatch_fn = dispatch_fn or default_dispatch
         # Lets the mock cite the same observation the resident view shows,
         # instead of a second hardcoded copy that could drift out of sync.

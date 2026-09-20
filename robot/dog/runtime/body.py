@@ -519,6 +519,8 @@ class Body:
 # -- HTTP (stdlib server in a thread, coroutines run on the body's loop) -----------------------------------------------
 
 def make_handler(body: Body, loop: asyncio.AbstractEventLoop, token: str | None):
+    allowed_hosts = {h.strip().lower() for h in os.environ.get("ANNIE_VIEW_HOSTS", "").split(",") if h.strip()}
+
     def run(coro, timeout=10.0):
         return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout)
 
@@ -535,6 +537,10 @@ def make_handler(body: Body, loop: asyncio.AbstractEventLoop, token: str | None)
             self.wfile.write(data)
 
         def _authorized(self):
+            host = (self.headers.get("Host") or "").split(":")[0].strip("[]").lower()
+            if host not in ("127.0.0.1", "localhost", "::1") and host not in allowed_hosts:
+                self._send(421, {"error": "unexpected Host"})  # DNS-rebinding guard
+                return False
             if token and not hmac.compare_digest(self.headers.get("X-Body-Token") or "", token):
                 self._send(401, {"error": "unauthorized"})
                 return False

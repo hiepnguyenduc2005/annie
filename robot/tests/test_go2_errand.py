@@ -610,3 +610,17 @@ def test_main_refuses_to_start_without_the_internal_secret(monkeypatch, capsys):
     assert go2_errand.main([]) == 2
     err = capsys.readouterr().err
     assert err.startswith("go2-errand:") and "ANNIE_INTERNAL_SECRET is not set" in err
+
+
+def test_dispatch_requires_the_shared_secret_when_configured():
+    from go2_errand import ErrandService
+
+    async def never(run):
+        return "completed"
+    svc = ErrandService(never, body_url="http://127.0.0.1:1", dispatch_secret="s3cret")
+    body = b'{"run_id":"5488e7cb-8d54-4c59-8e02-9b739d694a81","author_id":"zach","author_name":"Zach","text":"hi","dispatched_at":1}'
+    assert svc.handle("POST", "/dispatch", body)[0] == 401
+    assert svc.handle("POST", "/dispatch", body, headers={"X-Internal-Secret": "wrong"})[0] == 401
+    assert svc.handle("GET", "/health")[0] == 200  # health stays open
+    open_svc = ErrandService(never, body_url="http://127.0.0.1:1")  # loopback dev mode: no secret configured
+    assert open_svc.handle("POST", "/dispatch", body)[0] in (202, 503)

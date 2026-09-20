@@ -44,6 +44,18 @@ may re-arm only a resolved episode in demo mode, preserving evidence and command
 history without injecting a perception observation. Full-house runs stage the
 resident routine/fall and recorded reply while the model chooses robot actions.
 
+## REQ-014: Zach's message to Janine (current demo)
+
+Zach texts Annie because his messages to his mother, Janine, have not been
+delivered. Annie must choose its search route from camera evidence, find a
+person, and audibly relay Zach's request to charge/check Janine's phone. The
+task completes only after measured movement and speech playback receipts.
+Janine's follow-up that she lost her phone must retrieve a cited historical
+phone observation and communicate uncertainty about its current location.
+Names come from the supplied conversation; face identity and who placed the
+phone are not inferred. This story is the immediate demonstration priority.
+See [the story and acceptance checks](robot/simulation/STORY_DEMO.md).
+
 ## Scope boundaries
 
 Target integrations: Go2 with DimOS/MuJoCo, GX10-local image-capable Nemotron,

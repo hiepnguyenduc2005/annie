@@ -97,3 +97,8 @@ raw microphone audio through the robot. “Come here” needs a known room or a
 visible-person target; a voice packet by itself does not locate the speaker.
 The current text story and native simulator speech do not establish this future
 phone microphone transport or physical robot voice playback.
+
+The separately developed [Annie Audio iPhone app](../../speaker/mic/README.md)
+provides a network microphone/speaker transport: mono 16 kHz PCM over WebSocket.
+Its current binary protocol does not itself perform transcription or reasoning,
+and its transport verification is separate from this text-driven story.

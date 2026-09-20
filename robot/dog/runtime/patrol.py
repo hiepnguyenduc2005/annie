@@ -33,6 +33,7 @@ import logging
 import math
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
@@ -49,6 +50,8 @@ from robot.dog.voice.commands import CommandListener  # noqa: E402
 from robot.dog.link.probe import extract_lowstate, extract_pose, safe_error  # noqa: E402
 from robot.dog.planning.smart_patrol import (HeadingBandit, OccupancyGrid, PatrolPlanner, StallDetector, body_frame,  # noqa: E402
                               quaternion_yaw, sector_ranges, voxel_points_world, wrap_angle)
+from robot.dog.planning.resident_policy import ResidentPolicy, RESOLVE_POSTURES
+from robot.dog.perception.reid import spoken_name
 from robot.dog.planning.missions import MissionBoard  # noqa: E402
 from robot.dog.planning import agent as agent_mod  # noqa: E402
 from robot.dog.perception.target_id import TargetIdentifier  # noqa: E402
@@ -93,12 +96,23 @@ class GreetPolicy:
         self.checkin_cooldown_s = checkin_cooldown_s
         self.greeted: dict[int, float] = {}
         self.checked: dict[int, float] = {}
+        self.residents = ResidentPolicy()
         self.ignored: dict[int, float] = {}  # track_id -> until; people we are done with for a while
 
     def ignore(self, track_id, *, now_s, for_s=120.0):
         self.ignored[track_id] = now_s + for_s
 
-    def step(self, tracks, frame_w, frame_h, *, now_s, front_m=None):
+    def observe(self, tracks, place_by_tid, *, now_s):
+        self.residents.observe(tracks, place_by_tid, now_s=now_s)
+        for track in tracks:
+            if track.get("posture") in RESOLVE_POSTURES:
+                self.checked.pop(track.get("track_id"), None)
+
+    def mark_checkin(self, track, place, *, now_s, radius_m=None):
+        self.checked[track.get("track_id")] = now_s
+        self.residents.mark_asked(track, place, now_s=now_s, radius_m=radius_m)
+
+    def step(self, tracks, frame_w, frame_h, *, now_s, front_m=None, place_by_tid=None, radius_by_tid=None):
         """Return ('patrol', None) | ('follow', track_id) | ('greet', track_id) | ('checkin', track_id).
 
         `front_m` is the LiDAR range straight ahead when known: a centred person within 1.1 m
@@ -111,8 +125,9 @@ class GreetPolicy:
         for t in lying:
             tid = t.get("track_id")
             last = self.checked.get(tid)
-            if last is None or now_s - last >= self.checkin_cooldown_s:
-                self.checked[tid] = now_s
+            if (last is None or now_s - last >= self.checkin_cooldown_s) and self.residents.should_ask(
+                    t, (place_by_tid or {}).get(tid), now_s=now_s, radius_m=(radius_by_tid or {}).get(tid),
+                    visible_lying_tids={person.get("track_id") for person in lying}):
                 return "checkin", tid
         people = []
         for t in tracks:
@@ -142,7 +157,7 @@ class GreetPolicy:
     @staticmethod
     def greeting_text(track) -> str:
         identity = track.get("identity") or {}
-        name = identity.get("name")
+        name = spoken_name(identity)
         return f"Hi {name}, lovely to see you. How are you feeling today?" if name else "Hello there, lovely to see you. How are you doing?"
 
 
@@ -255,7 +270,7 @@ def _encode(frame, width=480, quality=70):
     return buf.tobytes(), img.shape[1], img.shape[0]
 
 
-def _fast_tracker(conf=0.30, imgsz=352):
+def _fast_tracker(conf=0.30, imgsz=352, faces_dir=None):
     """Pose tracker at a reduced inference size for low-latency following.
 
     CPU on purpose: on Apple MPS the ultralytics NMS step hits its 2 s time limit on real
@@ -265,7 +280,7 @@ def _fast_tracker(conf=0.30, imgsz=352):
     face_index = None
     with contextlib.suppress(Exception):  # enrolled, consenting people only; absent index -> no face matching
         from robot.simulation.face_id import DEFAULT_FACES_DIR, INDEX_FILENAME, FaceIndex
-        index_path = Path(DEFAULT_FACES_DIR) / INDEX_FILENAME
+        index_path = Path(faces_dir or os.environ.get("ANNIE_FACES_DIR") or DEFAULT_FACES_DIR) / INDEX_FILENAME
         if index_path.exists():
             face_index = FaceIndex().load(index_path)
     return PersonTracker(conf=conf, device="cpu", imgsz=imgsz, face_index=face_index)
@@ -311,6 +326,7 @@ def telemetry_snapshot(view) -> dict:
     report = getattr(view, "report", None) or {}
     out = {"state": state, "connected": (report.get("connection") or {}).get("status") == "connected",
            "source": report.get("source") or "hardware",
+           "motion_enabled": report.get("motion_enabled", False), "paused": report.get("paused", False),
            "reason": report.get("reason"), "elapsed_s": report.get("elapsed_s"),
            "brain": {"enabled": bool((report.get("brain") or {}).get("enabled")), "period_s": getattr(view, "brain_period_s", None),
                      "decisions": list((report.get("brain") or {}).get("decisions") or [])[-8:]},
@@ -418,6 +434,8 @@ class LiveView:
                         return self._send(503, b'{"error":"people directory off"}', "application/json")
                     return self._send(200, json.dumps({"people": people.list()}).encode(), "application/json")
                 if self.path.startswith("/voice"):
+                    if getattr(view, "mock_audio", False):
+                        return self._send(200, b'{"source":"simulation","mocked":true,"cloud":false,"speak_via":"mock","hear_via":"mock"}', "application/json")
                     v = VOICE
                     st = v.status() if v is not None else {"cloud": False, "elevenlabs": False, "deepgram": False, "speak_via": "off", "hear_via": "off"}
                     with contextlib.suppress(Exception):
@@ -465,9 +483,17 @@ class LiveView:
                 raw = self.rfile.read(length) if 0 < length < (8 << 20 if self.path.startswith("/people") else 65536) else b""
                 board = getattr(view, "missions", None)
                 if self.path == "/stop" and board is not None:  # body contract: cancel the mission, StopMove follows
-                    code, receipt = board.submit({"name": "stop"})
-                    return self._send(200, json.dumps({"stop_code": None, "ack_ms": None, "cancelled": receipt.get("stop_requested", True),
-                                                       "note": "software stop via the patrol loop"}).encode(), "application/json")
+                    if getattr(view, "commands", None) is not None:
+                        view.commands["resume_requested"] = False
+                    try:
+                        payload = json.loads(raw.decode() or "{}")
+                        if not isinstance(payload, dict):
+                            raise ValueError
+                    except ValueError:
+                        return self._send(400, b'{"error":"invalid JSON object"}', "application/json")
+                    code, receipt = board.submit({"name": "stop", **({"command_id": payload["command_id"]} if "command_id" in payload else {})})
+                    return self._send(code, json.dumps({**receipt, "cancelled": bool(receipt.get("stop_requested")),
+                                                       "note": "Stop requested; poll /command/{command_id} for software acknowledgment."}).encode(), "application/json")
                 if self.path.startswith("/people"):
                     people = getattr(view, "people", None)
                     if people is None:
@@ -497,6 +523,8 @@ class LiveView:
                         ident.name, ident.colour = result["name"], result["shirt"]  # the shirt-colour identity follows the app
                     return self._send(200, json.dumps(result).encode(), "application/json")
                 if self.path.startswith("/voice"):
+                    if getattr(view, "mock_audio", False):
+                        return self._send(409, b'{"error":"audio is mocked in simulation"}', "application/json")
                     try:
                         payload = json.loads(raw.decode() or "{}")
                         if not isinstance(payload, dict):
@@ -524,6 +552,8 @@ class LiveView:
                     except ValueError:
                         return self._send(400, b'{"error":"invalid JSON"}', "application/json")
                     if isinstance(payload, dict) and "name" in payload and board is not None:  # body-shaped mission
+                        if payload.get("name") == "stop" and getattr(view, "commands", None) is not None:
+                            view.commands["resume_requested"] = False
                         code, receipt = board.submit(payload)
                         view.log(f"mission {receipt.get('name', '?')} -> {code}")
                         return self._send(code, json.dumps(receipt).encode(), "application/json")
@@ -533,6 +563,11 @@ class LiveView:
                     cmds = getattr(view, "commands", None)
                     if cmds is None:
                         return self._send(503, b'{"error":"not running"}', "application/json")
+                    if action != "stop" and not getattr(view, "motion_enabled", True):
+                        return self._send(409, b'{"error":"no_motion: movement disabled"}', "application/json")
+                    if action == "stop" and board is not None:
+                        board.submit({"name": "stop"})
+                    cmds["resume_requested"] = action != "stop"
                     cmds["intent"], cmds["until"] = action, time.monotonic() + (90.0 if action == "go_home" else 12.0)
                     cmds["source"] = "web"
                     view.log(f"web command: {action}")
@@ -629,6 +664,51 @@ class LiveView:
             self.server.shutdown()
 
 
+def _person_places(tracks, frame_w, frame_h, pose, yaw, front_m=None):
+    """Current-frame person position estimates for resident episodes, independent of recording."""
+    places, radii = {}, {}
+    if pose is None:
+        return places, radii
+    for track in tracks:
+        tid = track.get("track_id")
+        if tid is None:
+            continue
+        x1, y1, x2, y2 = track["box"]
+        cx = (x1 + x2) / (2.0 * frame_w)
+        height = max(0.05, (y2 - y1) / frame_h)
+        distance = front_m if front_m is not None and abs(cx - 0.5) < 0.18 else min(6.0, 0.55 / height)
+        bearing = yaw + (0.5 - cx) * math.radians(100.0)
+        places[tid] = (pose[0] + distance * math.cos(bearing), pose[1] + distance * math.sin(bearing))
+        radii[tid] = min(0.9, max(0.3, distance * 0.25))
+    return places, radii
+
+
+def _mission_person_pool(tracks, wanted, identity_cache, now, *, identity_ttl_s=2.0):
+    """Named missions never fall back to strangers; tolerate short same-track ID flicker."""
+    pool = []
+    for track in tracks:
+        tid = track.get("track_id")
+        if tid is None:
+            continue
+        identity = track.get("identity") or {}
+        if identity.get("name"):
+            identity_cache[tid] = (now, dict(identity))
+        elif tid in identity_cache:
+            seen_at, cached = identity_cache[tid]
+            if now - seen_at <= identity_ttl_s:
+                identity = cached
+        if not wanted or str(identity.get("name") or "").lower() == wanted:
+            pool.append(dict(track, identity=dict(identity) if identity else None))
+    for tid, (seen_at, _) in list(identity_cache.items()):
+        if now - seen_at > identity_ttl_s:
+            identity_cache.pop(tid, None)
+    return pool
+
+
+class MissionInterrupted(asyncio.CancelledError):
+    """Safety interruption, including through best-effort firmware request handlers."""
+
+
 async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw_rps=0.5, boundary_m=2.5,
                            rate_hz=15.0, stale_s=1.0, min_soc=MIN_OPERATING_SOC_PERCENT, conn_factory=None,
                            tracker=None, encoder=_encode, speak=_speak_host, policy=None, status=_say,
@@ -636,9 +716,19 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                            stop_on_checkin=False, idle_trick_s=45.0, view=None, no_motion=False, diag_every_s=5.0,
                            imgsz=352, voxel_min_interval_s=0.25, brain=None, brain_period_s=4.0, memory=None,
                            voice=None, bandit=None, identifier=None, recorder=None, frontier_planner="auto",
-                           source="hardware"):
+                           source="hardware", audio=None, faces_dir=None, start_paused=False):
+    if audio is not None and getattr(audio, "source", None) == "simulation" and source != "simulation":
+        raise ValueError("mock audio requires simulation")
+    if audio is not None:
+        speak = audio.speak
+    blocking_speak = audio.speak if audio is not None else speak_blocking
+    blocking_listen = audio.listen if audio is not None else listen_blocking
+    faces_dir = faces_dir or os.environ.get("ANNIE_FACES_DIR") or (".data/sim/faces" if source == "simulation" else ".data/faces")
+    audio_where = "simulation mock" if audio is not None and getattr(audio, "source", None) == "simulation" else None
     loop = asyncio.get_running_loop()
     view = view or LiveView(port=0)
+    view.mock_audio = bool(audio_where)
+    view.motion_enabled = not no_motion
     view_url = view.start()
     if view_url:
         status(f"live view at {view_url}")
@@ -648,13 +738,13 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         view.log(text)
         _status(text)
 
-    report = {"script": SCRIPT_VERSION, "source": source, "target_ip": ip, "connection": {"status": "not_started"},
+    report = {"script": SCRIPT_VERSION, "source": source, "motion_enabled": not no_motion, "paused": bool(start_paused), "target_ip": ip, "connection": {"status": "not_started"},
               "battery_soc_start": None, "frames": 0, "moves_sent": 0, "greetings": [], "checkins": [],
               "collisions": [], "modes": {}, "lidar": {"maps": 0, "first_ranges": None, "stale_ticks": 0},
               "firmware_avoid": None, "elapsed_s": 0.0, "max_distance_from_origin_m": 0.0, "reason": None,
               "completed": False, "stop": {"requested": False, "ack_ms": None, "code": None},
               "notes": ["Software StopMove only; host cannot stop the robot over a lost link.",
-                        "Speech is played on the host, not the robot.",
+                        "Audio is mocked; no playback or recording." if audio_where else "Speech is played on the host, not the robot.",
                         "Collision detection = LiDAR voxel sectors + odometry stall; no touch sensors on this robot."]}
     policy = policy or GreetPolicy()
     planner = planner or PatrolPlanner(cruise_mps=speed_mps, turn_rps=yaw_rps, leash_m=boundary_m * 0.8,
@@ -662,7 +752,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
     stall = stall or StallDetector()
     guard_state = {"cam_log": 0.0}
     if tracker is None:
-        tracker = _fast_tracker(imgsz=imgsz)
+        tracker = _fast_tracker(imgsz=imgsz, faces_dir=faces_dir)
     diag = Diag()
     memory = memory or SightingMemory()
     if recorder is not None:
@@ -827,7 +917,12 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
     view.identifier = identifier
     with contextlib.suppress(Exception):
         from robot.dog.perception.people import PeopleDirectory
-        view.people = PeopleDirectory(tracker=tracker)  # /people: enrol from the family app, greet by name
+        view.people = PeopleDirectory(faces_dir=faces_dir, tracker=tracker)  # shared tracker receives enrollment updates
+        view.people._index = getattr(tracker, "face_index", None)  # reuse the already loaded matching index
+        if identifier is None or isinstance(identifier, TargetIdentifier):
+            perception.identifier = view.people.reid(
+                shirt_rules=lambda: [(identifier.name, identifier.colour)] if isinstance(identifier, TargetIdentifier) else [],
+                pose_source=lambda: tel["pose"])
     view.recorder = recorder
     missions = MissionBoard()
     view.missions = missions
@@ -913,10 +1008,16 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
 
     async def heartbeat():
         """Event-loop lag: how late a 50 ms sleep wakes up. Big numbers mean something is hogging the loop."""
+        last_publish = loop.time()
         while not stopped:
             t0 = loop.time()
             await asyncio.sleep(0.05)
             diag.sample("loop_lag_ms", max(0.0, (loop.time() - t0 - 0.05) * 1000))
+            if loop.time() - last_publish >= 0.25:
+                # Keep diagnostics live even while the behaviour loop awaits speech.
+                # Publishing never increments the safety or control counters.
+                view.update(diag=diag.snapshot())
+                last_publish = loop.time()
 
     async def request(api_id, priority=False, timeout=5.0):
         options = {"api_id": api_id}
@@ -930,15 +1031,52 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         resp = await asyncio.wait_for(conn.datachannel.pub_sub.publish_request_new(TOPIC_SPORT, options), timeout)
         return _status_code(resp)
 
+    def guarded_velocity(vx, wz):
+        """Final forward-motion boundary; autonomous modes cannot bypass sensor guards."""
+        if vx > 0:
+            if lidar and (tel["ranges_t"] is None or loop.time() - tel["ranges_t"] > lidar_stale_s):
+                return 0.0, 0.0
+            if (tel["ranges"] or {}).get("front", float("inf")) < max(0.4, planner.stop_m):
+                vx = 0.0
+            current = perception.latest()
+            height = current.get("h") or 480
+            for obj in current.get("objects") or []:
+                x1, y1, x2, y2 = obj["box"]
+                if y2 - y1 > 0.55 * height and y2 > 0.85 * height and obj.get("hits", 1) >= 2:
+                    vx = 0.0
+                    break
+        return vx, wz
+
     def send_move(vx, wz):
-        nonlocal seq
+        nonlocal seq, cmd_vx
         if no_motion:
             return
+        vx, wz = guarded_velocity(vx, wz)
+        cmd_vx = vx  # stall detection must use sent motion, not a proposal the guard rejected
         seq += 1
         conn.datachannel.pub_sub.publish_without_callback(
             TOPIC_SPORT, data={"header": {"identity": {"id": seq, "api_id": MOVE}},
                                "parameter": json.dumps({"x": float(vx), "y": 0.0, "z": float(wz)})}, msg_type="req")
         report["moves_sent"] += 1
+        diag.tick("motion_tx")
+
+    async def process_stop_requests(*, force=False):
+        pending = missions.take_stops()
+        if not pending and not force:
+            return None
+        send_move(0.0, 0.0)
+        began, code, error = loop.time(), None, None
+        try:
+            code = await request(STOP_MOVE, priority=True, timeout=2.0)
+        except asyncio.CancelledError:
+            error = "StopMove interrupted before acknowledgment"
+            raise
+        except Exception as exc:
+            error = f"StopMove failed: {type(exc).__name__}"
+        finally:
+            ack_ms = round((loop.time() - began) * 1000, 1)
+            missions.finish_stops(pending, code=code, ack_ms=ack_ms, error=error)
+        return {"code": code, "ack_ms": ack_ms, "error": error}
 
     commanded = False
     try:
@@ -1004,7 +1142,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                f"firmware_avoid={report['firmware_avoid']}, range_obstacle={tel['range_obstacle']}, "
                f"origin {origin[0]:.2f},{origin[1]:.2f}; patrolling")
         commanded = not no_motion
-        for api in () if no_motion else (STAND_UP, BALANCE_STAND):
+        for api in () if no_motion or start_paused else (STAND_UP, BALANCE_STAND):
             for attempt in range(3):  # the firmware answers -1 / nothing while still finishing a previous motion
                 try:
                     code = await request(api, timeout=4.0)
@@ -1035,6 +1173,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         blocked_times: list[float] = []
         rec_last = [-1e9]
         mission_state: dict = {}
+        mission_paused = bool(start_paused)
+        report["paused"] = mission_paused
+        needs_stand = bool(start_paused and not no_motion)
         mission_hold_until = [0.0]
         last_people_world = []
         last_remark_check = 0.0
@@ -1043,31 +1184,163 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         bandit_state = {"until": 0.0, "rewarded": False}
         report["bandit"] = None
 
-        async def show(trick_name, trick_api, trick_settle, text, look_up=False):
+        def mission_guard(receipt, *, moving=False, forward=False):
+            """Recheck live safety inputs at every nested-loop tick and after inference."""
+            now_guard = loop.time()
+            report["elapsed_s"] = round(now_guard - start, 1)
+            if missions.stop_requested or receipt["state"] != "executing":
+                raise MissionInterrupted("stopped by operator")
+            if now_guard - start >= duration_s:
+                raise MissionInterrupted("duration_complete")
+            if tel["soc"] is None or tel["soc"] < min_soc:
+                raise MissionInterrupted("battery_low")
+            if any(tel[k] is None or now_guard - tel[k] > stale_s for k in ("low_t", "pose_t")):
+                raise MissionInterrupted("telemetry_stale")
+            distance = math.dist(origin, tel["pose"])
+            report["max_distance_from_origin_m"] = max(report["max_distance_from_origin_m"], round(distance, 3))
+            if distance > boundary_m:
+                raise MissionInterrupted("boundary_exceeded")
+            if moving and no_motion:
+                raise MissionInterrupted("no_motion: movement disabled")
+            if forward:
+                if lidar and (tel["ranges_t"] is None or now_guard - tel["ranges_t"] > lidar_stale_s):
+                    raise MissionInterrupted("lidar_stale")
+                if (tel["ranges"] or {}).get("front", float("inf")) < 0.6:
+                    raise MissionInterrupted("obstacle ahead")
+                current = perception.latest()
+                for obj in current.get("objects") or []:
+                    x1, y1, x2, y2 = obj["box"]
+                    height = current.get("h") or 480
+                    if y2 - y1 > 0.55 * height and y2 > 0.85 * height and obj.get("hits", 1) >= 2:
+                        raise MissionInterrupted("camera obstacle ahead")
+            diag.tick("safety")
+
+        async def mission_wait(receipt, seconds):
+            deadline = loop.time() + seconds
+            while loop.time() < deadline:
+                mission_guard(receipt)
+                await asyncio.sleep(min(0.05, max(0.0, deadline - loop.time())))
+            mission_guard(receipt)
+
+        async def mission_turn(receipt, degrees, timeout):
+            mission_guard(receipt, moving=True)
+            previous_yaw, turned = tel["yaw"], 0.0
+            target = math.radians(degrees)
+            deadline = loop.time() + timeout
+            try:
+                while True:
+                    mission_guard(receipt, moving=True)
+                    turned += wrap_angle(tel["yaw"] - previous_yaw)
+                    previous_yaw = tel["yaw"]
+                    error = target - turned
+                    if abs(error) < 0.12:
+                        return math.degrees(error)
+                    if loop.time() >= deadline:
+                        raise MissionInterrupted("turn timeout: target not reached")
+                    send_move(0.0, math.copysign(max(0.8, min(1.0, 1.5 * abs(error))), error))
+                    await mission_wait(receipt, 0.05)
+            finally:
+                send_move(0.0, 0.0)
+
+        async def mission_walk(receipt, metres, timeout):
+            mission_guard(receipt, moving=True)
+            p0, want, forward = tel["pose"], abs(metres), metres > 0
+            deadline = loop.time() + timeout
+            stall.update(now_s=loop.time(), pose_xy=tel["pose"], commanded_vx=0.0)
+            try:
+                while True:
+                    mission_guard(receipt, moving=True)
+                    gone = math.dist(p0, tel["pose"])
+                    if gone >= want:
+                        return gone
+                    if loop.time() >= deadline:
+                        raise MissionInterrupted("walk timeout: target not reached")
+                    mission_guard(receipt, moving=True, forward=forward)
+                    if stall.update(now_s=loop.time(), pose_xy=tel["pose"], commanded_vx=0.3 if forward else 0.2):
+                        raise MissionInterrupted("odometry stalled")
+                    send_move(min(0.35, max(0.2, 0.4 * (want - gone))) if forward else -0.2, 0.0)
+                    await mission_wait(receipt, 0.05)
+            finally:
+                send_move(0.0, 0.0)
+
+        async def mission_spot(receipt, thing, jpeg):
+            # A blocked provider must not hold the control loop or asyncio executor shutdown.
+            # The daemon has no motion authority; its late result is discarded after cancellation.
+            send_move(0.0, 0.0)
+            result_queue = queue.Queue(maxsize=1)
+            def infer():
+                try:
+                    result_queue.put((agent_mod.spot(thing, jpeg), None))
+                except Exception as exc:
+                    result_queue.put((None, type(exc).__name__))
+            threading.Thread(target=infer, daemon=True, name="mission-spot").start()
+            deadline = loop.time() + 15.0
+            while True:
+                mission_guard(receipt)
+                if loop.time() >= deadline:
+                    raise MissionInterrupted("vision timeout")
+                try:
+                    result, error = result_queue.get_nowait()
+                except queue.Empty:
+                    await asyncio.sleep(0.05)
+                    continue
+                if error:
+                    raise MissionInterrupted(f"vision failed: {error}")
+                return result
+
+        async def guarded_await(awaitable):
+            """Keep the safety loop active while awaiting firmware, speech, or inference."""
+            pending = asyncio.ensure_future(awaitable)
+            try:
+                while not pending.done():
+                    mission_guard({"state": "executing"})
+                    await asyncio.wait({pending}, timeout=0.05)
+                mission_guard({"state": "executing"})
+                return pending.result()
+            finally:
+                if not pending.done():
+                    pending.cancel()
+
+        async def ensure_standing():
+            nonlocal needs_stand
+            if not needs_stand:
+                return
+            for api in (STAND_UP, BALANCE_STAND):
+                code = await guarded_await(request(api, timeout=4.0))
+                if code not in (0, None):
+                    raise MissionInterrupted(f"stand_failed:{code}")
+                await guarded_await(asyncio.sleep(1.5))
+            needs_stand = False
+
+        async def show(trick_name, trick_api, trick_settle, text, look_up=False, on_speak=None):
             """Stop, speak, perform one firmware trick, let it finish, stand back up. Never raises on a slow ack."""
             nonlocal cmd_vx, last_show
             if no_motion:
                 if text:
                     speak(text)
+                    if on_speak is not None:
+                        on_speak()
                 last_show = loop.time()
                 return "no_motion"
             send_move(0.0, 0.0)
             with contextlib.suppress(Exception):
-                await request(STOP_MOVE, priority=True, timeout=3.0)
+                await guarded_await(request(STOP_MOVE, priority=True, timeout=3.0))
             if look_up and trick_api != EULER:  # stand to attention: lift the nose so the face is in frame
                 with contextlib.suppress(Exception):
-                    await request_params(EULER, {"x": 0.0, "y": LOOK_UP_PITCH, "z": 0.0}, timeout=3.0)
-                    await asyncio.sleep(0.8)
+                    await guarded_await(request_params(EULER, {"x": 0.0, "y": LOOK_UP_PITCH, "z": 0.0}, timeout=3.0))
+                    await guarded_await(asyncio.sleep(0.8))
             if text:
                 speak(text)
+                if on_speak is not None:
+                    on_speak()
             try:
-                code = await request(trick_api, timeout=8.0)
+                code = await guarded_await(request(trick_api, timeout=8.0))
             except Exception:
                 code = "no_ack"  # long behaviours (dance) do not ack within the window; the request was sent
-            await asyncio.sleep(trick_settle)
+            await guarded_await(asyncio.sleep(trick_settle))
             with contextlib.suppress(Exception):
-                await request(BALANCE_STAND, timeout=3.0)
-            await asyncio.sleep(1.0)
+                await guarded_await(request(BALANCE_STAND, timeout=3.0))
+            await guarded_await(asyncio.sleep(1.0))
             cmd_vx = 0.0
             last_show = loop.time()
             stall.update(now_s=loop.time(), pose_xy=tel["pose"], commanded_vx=0.0)
@@ -1115,7 +1388,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     return
                 sit = build_situation(time.time(), tracks=perception.latest().get("tracks", []), ranges=tel["ranges"],
                                       home_m=math.dist(origin, tel["pose"]) if tel["pose"] else 0.0, battery=tel["soc"], mode=mode)
-                who = next(((t.get("identity") or {}).get("name") for t in perception.latest().get("tracks", []) if (t.get("identity") or {}).get("name")), None)
+                who = next((name for t in perception.latest().get("tracks", []) if (name := spoken_name(t.get("identity")))), None)
                 rep = agent_mod.converse_reply(cmd["phrase"], sit, who=who, inference=chat_client)
                 status(f"conversation: heard {cmd['phrase'][:80]!r} -> {rep['kind']}; saying {rep['text']!r} ({rep['source']})")
                 report.setdefault("conversations", []).append({"t_s": round(loop.time() - start, 1), "name": who, "asked": None,
@@ -1130,6 +1403,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 status(f"voice instruction -> {code}: {cmd['phrase'][:80]!r}")
                 speak("On it." if code == 202 else "One moment, I'm still busy.")
                 return
+            if cmd["intent"] == "stop":
+                missions.submit({"name": "stop"})
+            voice_state["resume_requested"] = cmd["intent"] != "stop"
             voice_state["intent"], voice_state["until"] = cmd["intent"], loop.time() + 12.0
             speak(f"Okay, {cmd['intent'].replace('_', ' ')}.")
 
@@ -1141,563 +1417,590 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             voice.start()
 
         while loop.time() - start < duration_s:
-            now = loop.time()
-            report["elapsed_s"] = round(now - start, 1)
-            if tel["soc"] < min_soc:
-                report["reason"] = "battery_low"
-                return report
-            if now - tel["low_t"] > stale_s or now - tel["pose_t"] > stale_s:
-                report["reason"] = "telemetry_stale"
-                return report
-            dist = math.dist(origin, tel["pose"])
-            report["max_distance_from_origin_m"] = max(report["max_distance_from_origin_m"], round(dist, 3))
-            if dist > boundary_m:
-                report["reason"] = "boundary_exceeded"
-                return report
-            diag.tick("control")
-            res = perception.latest()
-            if res["seq"] != last_seq:
-                last_seq = res["seq"]
-                tracks, fw, fh = res["tracks"], res["w"], res["h"]
-                report["frames"] = res["seq"]
-            elif res["t"] is not None and time.monotonic() - res["t"] > 1.0:
-                tracks = []  # perception stalled: do not act on old boxes
-            perception.set_context(mode=mode, ranges=tel["ranges"], battery=tel["soc"])
-            if recorder is not None and now - rec_last[0] >= 0.2:
-                rec_last[0] = now
-                with contextlib.suppress(Exception):
-                    wall = time.time()
-                    recorder.record_pose(wall, tel["pose"][0], tel["pose"][1], tel["yaw"])
-                    front_r = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
-                    if tracks and fw:
-                        people_world = []
-                        for t in tracks:
-                            x1, y1, x2, y2 = t["box"]
-                            cx = (x1 + x2) / 2.0 / float(fw)
-                            hfrac = max(0.05, (y2 - y1) / float(fh or 480))
-                            bearing = (0.5 - cx) * math.radians(100.0)  # Go2 front camera is roughly 100 deg wide
-                            dist = front_r if (front_r is not None and abs(cx - 0.5) < 0.18) else min(6.0, 0.55 / hfrac)
-                            ang = tel["yaw"] + bearing
-                            ident = (t.get("identity") or {}).get("name")
-                            people_world.append({"track_id": t.get("track_id"), "x": tel["pose"][0] + dist * math.cos(ang),
-                                                 "y": tel["pose"][1] + dist * math.sin(ang), "z": 0.9,
-                                                 "label": ident or f"person {t.get('track_id')}", "identity": ident,
-                                                 "posture": t.get("posture")})
-                    else:
-                        people_world = []
-                    objs = res.get("objects") or []
-                    object_world = []
-                    if objs and fw and objects_mod is not None and res.get("objects_seq", 0) != rec_objects_seq[0]:
-                        rec_objects_seq[0] = res["objects_seq"]  # place each detection list once, at this pose
-                        objs = objects_mod.not_people(objs, [t["box"] for t in res.get("raw_tracks", [])])  # a lying person is not a couch
-                        objs = [o for o in objs if o.get("hits", 1) >= 2]  # drop one-frame hallucinations
-                        placed = objects_mod.place(objs, fw, fh or 480, tel["pose"], tel["yaw"], front_range_m=front_r)
-                        object_world = objects_mod.sightings(placed, int(wall * 1000))
-                    last_people_world = people_world
-                    if people_world or object_world:
-                        recorder.record_people(wall, people_world + object_world)  # one call: it replaces "now"
-                    if graph is not None:
-                        with contextlib.suppress(Exception):
-                            graph.ingest_pose(wall, tel["pose"][0], tel["pose"][1], tel["yaw"])
-                            if people_world or object_world:
-                                graph.ingest_people(wall, [dict(p, kind="person") for p in people_world]
-                                                    + [dict(o, kind="object") for o in object_world])
-            if now - last_diag >= diag_every_s:
-                last_diag = now
-                status(f"diag {diag.line()}")
-                view.update(diag=diag.snapshot())
-            ranges = tel["ranges"]
-            if lidar and (tel["ranges_t"] is None or now - tel["ranges_t"] > lidar_stale_s):
-                ranges = None  # unknown: the planner treats missing sectors as clear, stall detection still covers us
-                report["lidar"]["stale_ticks"] += 1
-            map_age = None if tel["ranges_t"] is None else now - tel["ranges_t"]
-            # camera guard: a detected object filling most of the frame height with its bottom near the frame's
-            # bottom edge is right at the nose, whatever the LiDAR band says (chair seats, boxes, low tables)
-            cam_block = None
             try:
-                latest_res = perception.latest()
-                fh_ = fh or 480
-                for o in latest_res.get("objects") or []:
-                    x1, y1, x2, y2 = o["box"]
-                    if (y2 - y1) > 0.55 * fh_ and y2 > 0.85 * fh_ and o.get("hits", 1) >= 2:
-                        cam_block = o.get("label")
-                        break
-            except Exception:
-                cam_block = None
-            if cam_block is not None and mode not in ("follow", "greet"):
-                ranges = dict(ranges or {"left": float("inf"), "right": float("inf")})
-                ranges["front"] = min(ranges.get("front", float("inf")), 0.4)
-                if now - guard_state.get("cam_log", 0.0) > 5.0:
-                    guard_state["cam_log"] = now
-                    status(f"t={now-start:5.1f}s camera guard: {cam_block} fills the view, treating the front as 0.4 m")
-            front_now = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
-            action, tid = policy.step(tracks, fw or 640, fh or 480, now_s=now, front_m=front_now) if fw else ("patrol", None)
-            # ---- missions from the family app (body-command shape); they pre-empt greeting and idle tricks
-            if missions.consume_stop():
-                send_move(0.0, 0.0)
-                with contextlib.suppress(Exception):
-                    await request(STOP_MOVE, priority=True, timeout=3.0)
-                mission_state.clear()
-                status(f"t={now-start:5.1f}s mission stop: StopMove sent")
-            new_mission = missions.take()
-            if new_mission is not None:
-                name, margs = new_mission["name"], new_mission["args"]
-                status(f"t={now-start:5.1f}s mission {name} {margs if margs else ''}")
-                report["missions"].append({"t_s": round(now - start, 1), "name": name, "args": margs})
-                if name == "instruct":
-                    sit = build_situation(time.time(), tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode, max_age_s=0.0)
-                    instruct_state.update(receipt=new_mission, plan=None)
-                    instruct_state["thread"] = threading.Thread(target=plan_instruct, args=(new_mission, sit), daemon=True, name="instruct")
-                    instruct_state["thread"].start()
-                    missions.progress(new_mission, step="planning")
-                    continue
-                if name == "turn":
-                    target = wrap_angle(tel["yaw"] + math.radians(margs["degrees"]))
-                    deadline = loop.time() + min(10.0, abs(margs["degrees"]) / 30.0 + 2.0)
-                    while loop.time() < deadline:
-                        err = wrap_angle(target - tel["yaw"])
-                        if abs(err) < 0.12:
-                            break
-                        send_move(0.0, math.copysign(max(0.8, min(1.0, 1.5 * abs(err))), err))
-                        await asyncio.sleep(0.1)
-                    send_move(0.0, 0.0)
-                    err = math.degrees(wrap_angle(target - tel["yaw"]))
-                    missions.finish(new_mission, result={"turned_deg": round(margs["degrees"] - err, 1), "remaining_deg": round(err, 1)})
-                    continue
-                if name == "look_for":
-                    # Scan in 60-degree stops; at each stop ask the local vision model whether the thing is in view and
-                    # where (left/centre/right). Then face it and walk up to it with the LiDAR guard. Pure camera + VLM:
-                    # this is how "the door" gets a bearing although no detector class exists for it.
-                    thing = margs["thing"]
-                    seen_at, answers = None, []
-                    for stop in range(6):
-                        if missions.consume_stop():
-                            break
-                        jpeg = view.jpeg if view.port else None
-                        ans = await loop.run_in_executor(None, lambda j=jpeg: agent_mod.spot(thing, j))
-                        answers.append({"stop": stop, **{k: ans.get(k) for k in ("seen", "where", "latency_ms", "error")}})
-                        status(f"t={now-start:5.1f}s look_for {thing!r}: stop {stop} -> {ans.get('where') if ans.get('seen') else 'not here'} ({ans.get('latency_ms', '?')} ms)")
-                        if ans.get("seen"):
-                            seen_at = ans
-                            break
-                        target = wrap_angle(tel["yaw"] + math.radians(60))
-                        deadline = loop.time() + 4.0
-                        while loop.time() < deadline and abs(wrap_angle(target - tel["yaw"])) > 0.12:
-                            send_move(0.0, 0.9)
-                            await asyncio.sleep(0.1)
-                        send_move(0.0, 0.0)
-                        await asyncio.sleep(0.4)  # let the stream catch up before the next picture
-                    if seen_at is None:
-                        missions.finish(new_mission, result={"found": False, "thing": thing, "stops": answers})
-                        continue
-                    nudge = {"left": 35.0, "centre": 0.0, "right": -35.0}.get(seen_at.get("where"), 0.0)
-                    if nudge:
-                        target = wrap_angle(tel["yaw"] + math.radians(nudge))
-                        deadline = loop.time() + 3.0
-                        while loop.time() < deadline and abs(wrap_angle(target - tel["yaw"])) > 0.12:
-                            send_move(0.0, math.copysign(0.9, nudge))
-                            await asyncio.sleep(0.1)
-                        send_move(0.0, 0.0)
-                    p0, stopped_by, deadline = tel["pose"], None, loop.time() + 12.0
-                    while loop.time() < deadline and not missions.consume_stop():
-                        fr = (tel["ranges"] or {}).get("front", float("inf"))
-                        if fr < 0.6:
-                            stopped_by = f"something {fr:.2f} m ahead"
-                            break
-                        if math.dist(p0, tel["pose"]) >= 2.5:
-                            stopped_by = "walked 2.5 m; look again"
-                            break
-                        send_move(0.3, 0.0)
-                        await asyncio.sleep(0.1)
-                    send_move(0.0, 0.0)
-                    missions.finish(new_mission, result={"found": True, "thing": thing, "where": seen_at.get("where"),
-                                                          "walked_m": round(math.dist(p0, tel["pose"]), 2), "stopped_by": stopped_by, "stops": answers})
-                    continue
-                if name == "walk":
-                    p0, want, forward = tel["pose"], abs(margs["metres"]), margs["metres"] > 0
-                    deadline = loop.time() + want / 0.2 + 2.0
-                    stopped_by = None
-                    while loop.time() < deadline:
-                        gone = math.dist(p0, tel["pose"])
-                        if gone >= want:
-                            break
-                        fr = (tel["ranges"] or {}).get("front", float("inf"))
-                        if forward and fr < 0.45:
-                            stopped_by = f"obstacle {fr:.2f} m ahead"
-                            break
-                        send_move(min(0.35, max(0.2, 0.4 * (want - gone))) if forward else -0.2, 0.0)
-                        await asyncio.sleep(0.1)
-                    send_move(0.0, 0.0)
-                    missions.finish(new_mission, result={"walked_m": round(math.dist(p0, tel["pose"]), 2), "stopped_by": stopped_by})
-                    continue
-                if name == "dance" and tel["ranges"] and tel["ranges"].get("front", float("inf")) < 0.5:
-                    missions.finish(new_mission, error=f"too close to something ({tel['ranges']['front']:.2f} m ahead) to dance safely")
-                    continue
-                if name in ("hello", "dance", "heart", "stretch", "sit", "stand"):
-                    api = {"sit": 1009, "stand": STAND_UP, "dance": 1022, "hello": HELLO, "heart": 1036, "stretch": 1017}[name]
-                    settle = {"sit": 3.0, "stand": 2.0, "dance": 10.0, "hello": 4.0, "heart": 6.0, "stretch": 5.0}[name]
-                    code = await show(name, api, settle, None)
-                    missions.finish(new_mission, result={"codes": {name: code}, "note": "firmware acknowledgment, not evidence the motion happened"})
-                    continue
-                if name == "say":
-                    send_move(0.0, 0.0)
-                    played = await loop.run_in_executor(None, lambda: speak_blocking(margs["text"]))
-                    missions.finish(new_mission, result={"played": bool(played), "where": "host speaker"})
-                    continue
-                if name == "listen":
-                    send_move(0.0, 0.0)
-                    try:
-                        heard = await loop.run_in_executor(None, lambda: listen_blocking(margs["max_s"]))
-                        missions.finish(new_mission, result={**heard, "where": "host microphone"})
-                    except Exception as exc:
-                        missions.finish(new_mission, error=f"listen failed: {type(exc).__name__}")
-                    continue
-                if name == "move":
-                    missions.finish(new_mission, error="move is not offered by the patrol process; use patrol/go_home")
-                    continue
-                if name == "patrol":
-                    voice_state["intent"], voice_state["until"] = "explore", now + margs["duration_s"]
-                    missions.finish(new_mission, result={"note": "exploring", "duration_s": margs["duration_s"]})
-                    continue
-                if name == "go_home":
-                    voice_state["intent"], voice_state["until"], voice_state["source"] = "go_home", now + 90.0, "mission"
-                    missions.finish(new_mission, result={"note": "heading home for up to 90 s", "home_m": round(dist, 2)})
-                    continue
-                if name == "find_person":
-                    mission_state.update(receipt=new_mission, name=(margs["name"] or "").lower() or None,
-                                         deadline=now + margs["timeout_s"], approach=margs["approach"], found=None, since=now)
-            if instruct_state["receipt"] is not None and instruct_state["plan"] is not None:
-                rec, plan = instruct_state["receipt"], instruct_state["plan"]
-                instruct_state.update(receipt=None, plan=None, thread=None)
-                status(f"t={now-start:5.1f}s instruct ({plan.get('source')}, {plan.get('latency_ms')} ms): {len(plan['steps'])} steps "
-                       f"{[st['name'] for st in plan['steps']]}; reply {plan.get('reply')!r}"
-                       + (f"; rejected {plan['rejected']}" if plan.get("rejected") else ""))
-                report.setdefault("instructions", []).append({"t_s": round(now - start, 1), "text": rec["args"]["text"], "source": plan.get("source"),
-                                                              "steps": [st["name"] for st in plan["steps"]], "reply": plan.get("reply")})
-                if plan.get("reply"):
-                    speak(plan["reply"])
-                missions.chain(rec, plan["steps"], reply=plan.get("reply", ""), source=plan.get("source", ""))
-            mission = missions.executing()
-            if mission is not None and mission_state.get("receipt") is mission:
-                wanted = mission_state["name"]
-                named = [t for t in tracks if wanted and ((t.get("identity") or {}).get("name") or "").lower() == wanted]
-                anybody = [t for t in tracks if t.get("track_id") is not None]
-                pool = named or ([] if wanted and now - mission_state["since"] < 25.0 else anybody)  # 25 s for the named one first
-                if pool:
-                    best = max(pool, key=lambda t: t["box"][3] - t["box"][1])
-                    if mission_state["found"] is None:
-                        mission_state["found"] = {"track_id": best.get("track_id"), "identity": best.get("identity"),
-                                                  "matched": bool(named), "posture": best.get("posture")}
-                        missions.progress(mission, found=mission_state["found"])
-                        status(f"t={now-start:5.1f}s mission find_person: found track {best.get('track_id')} "
-                               f"({'named ' + wanted if named else 'closest person'})")
-                    # "approached" must be reachable by the follow controller: it holds at box height 0.5 / LiDAR 0.6 m
-                    approached = (not mission_state["approach"]) or (front_now is not None and front_now <= 0.75) \
-                        or (best["box"][3] - best["box"][1]) / float(fh or 480) >= 0.47
-                    if approached:
-                        f = mission_state["found"]
-                        missions.finish(mission, result={"found": True, "track_id": f["track_id"], "identity": f["identity"],
-                                                         "matched_name": f["matched"], "posture": f["posture"], "approached": True,
-                                                         "searched_s": round(now - mission_state["since"], 1)})
-                        send_move(0.0, 0.0)
-                        policy.greeted[f["track_id"]] = now  # the errand does the talking: no "hello there" on top
-                        mission_hold_until[0] = now + 60.0  # and keep following them quietly while the errand speaks/listens
-                        mission_state.clear()
-                        mode = "cruise"
-                        await asyncio.sleep(tick)
-                        continue
-                    action, tid = "follow", best.get("track_id")  # walk up to them; the follow branch below does the driving
-                else:
-                    action, tid = "patrol", None  # keep searching (bandit + brain pull toward the last sighting)
-                if now > mission_state["deadline"]:
-                    missions.finish(mission, result={"found": False, "track_id": None, "identity": None, "matched_name": False,
-                                                     "posture": None, "approached": False,
-                                                     "searched_s": round(now - mission_state["since"], 1)})
-                    mission_state.clear()
-                    continue
-            if (mission is not None or now < mission_hold_until[0]) and action in ("greet", "checkin"):
-                action = "follow" if tid is not None else "patrol"  # no tricks or questions while on / just after a mission
-            if now < mission_hold_until[0] and action == "patrol" and not tracks:
-                send_move(0.0, 0.0)  # stay put by the person the errand is talking to instead of wandering off
-                await asyncio.sleep(tick)
-                continue
-            if action in ("follow", "greet") and not bandit_state["rewarded"] and bandit.current is not None:
-                bandit.reward(1.0)  # this heading found someone
-                bandit_state["rewarded"] = True
-            if action == "greet" and memory.greeted_here_recently(tel["pose"], tel["yaw"], now=now, within_s=300.0):
-                action = "follow"  # same spot, same heading, moments ago: that is the person we already greeted
-            if tracks and now - memory_last_seen[0] > 5.0:
-                memory_last_seen[0] = now
-                named = next(((t.get("identity") or {}).get("name") for t in tracks if t.get("identity")), None)
-                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="seen", people=len(tracks), note=named)
-                grid["map"].mark(tel["pose"][0], tel["pose"][1], "seen")
-            # voice commands: a bounded override of what the dog is doing (guardrails still apply below)
-            intent = voice_state["intent"] if now < voice_state["until"] else None
-            if intent in ("sit", "stand", "dance", "hello", "heart", "stretch"):
-                voice_state["intent"] = None
-                api = {"sit": 1009, "stand": STAND_UP, "dance": 1022, "hello": HELLO, "heart": 1036, "stretch": 1017}[intent]
-                settle = {"sit": 3.0, "stand": 2.0, "dance": 10.0, "hello": 4.0, "heart": 6.0, "stretch": 5.0}[intent]
-                status(f"t={now-start:5.1f}s voice: {intent}")
-                await show(intent, api, settle, None)
-                continue
-            if intent == "stop":
-                send_move(0.0, 0.0)
-                mode = "voice_stop"
-                await asyncio.sleep(tick)
-                continue
-            if intent in ("follow", "approach") and action == "patrol":
-                action = "patrol"  # nobody visible: keep looking (brain/scan), the follow branch takes over when seen
-            if brain is not None and action == "patrol" and not brain_state["busy"] \
-                    and (brain_state["last"] is None or now - brain_state["last"] >= brain_period_s):
-                brain_state["busy"] = True
-                threading.Thread(target=brain_think, daemon=True, name="brain").start()
-            view.update(mode=mode, action=action, tracks=tracks, ranges=ranges, battery=tel["soc"], t_s=now - start,
-                        greetings=len(report["greetings"]), checkins=len(report["checkins"]), home_m=dist,
-                        fps=diag.rate("processed"))
-            if action == "patrol" and mission is None and now - last_remark_check >= 5.0 and voice is not None:
-                last_remark_check = now
-                wall = time.time()
-                sit = build_situation(wall, tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode)
-                remark = narrator.remark(sit, now=wall)
-                if remark:
-                    line = await loop.run_in_executor(None, lambda: agent_mod.compose_line(
-                        "remark on something you just noticed while exploring", sit, inference=chat_client, fallback=remark, extra=f"Noticed: {remark}"))
-                    remark = line["text"]
-                    status(f"t={now-start:5.1f}s remark ({line['source']}): {remark!r}")
-                    report.setdefault("remarks", []).append({"t_s": round(now - start, 1), "text": remark})
-                    memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="remark", people=len(tracks), note=remark[:60])
-                    speak(remark)
-            if action == "greet":
-                track = next(t for t in tracks if t.get("track_id") == tid)
-                wall = time.time()
-                world = next(((p["x"], p["y"]) for p in (last_people_world or []) if p.get("track_id") == tid), None)
-                if world is None and tel["pose"] is not None:
-                    fr = (tel["ranges"] or {}).get("front")
-                    d0 = fr if fr is not None and fr != float("inf") else 1.0
-                    world = (tel["pose"][0] + d0 * math.cos(tel["yaw"]), tel["pose"][1] + d0 * math.sin(tel["yaw"]))
-                sit = build_situation(wall, tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode)
-                decision = agent_mod.greeting_decision(dict(track, world=world), sit, now=wall)
-                if not decision["greet"]:
-                    policy.greeted[tid] = now  # known already: no repeat greeting, keep exploring
-                    status(f"t={now-start:5.1f}s person (track {tid}) ahead: not greeting again ({decision['reason']})")
-                    continue
-                who = (track.get("identity") or {}).get("name")
-                line = await loop.run_in_executor(None, lambda: agent_mod.compose_line(
-                    f"greet {who or 'this person'} who is right in front of you", sit, inference=chat_client, fallback=decision["text"],
-                    extra=f"Person in front: {who or 'someone you do not know by name'}; nearby objects: "
-                          f"{', '.join(o['name'] for o in sit['objects'][:3]) or 'none known'}."))
-                text = line["text"]
-                trick_name, trick_api, trick_settle = GREET_TRICKS[len(report["greetings"]) % len(GREET_TRICKS)]
-                status(f"t={now-start:5.1f}s person (track {tid}) ahead: stopping, {trick_name}, saying {text!r} "
-                       f"({decision['reason']}; line by {line['source']}, {line['latency_ms']} ms)")
-                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="greet", people=len(tracks),
-                           note=((track.get("identity") or {}).get("name")) or trick_name)
-                grid["map"].mark(tel["pose"][0], tel["pose"][1], "greet")
-                code = await show(trick_name, trick_api, trick_settle, text, look_up=True)
-                # A conversation turn: the greeting asked how they are; listen, answer in character, escalate concern.
-                heard_text, reply_text, reply_kind = None, None, "none"
-                if voice is not None and not no_motion:
-                    try:
-                        heard = await loop.run_in_executor(None, lambda: listen_blocking(6.0))
-                        heard_text = heard.get("transcript")
-                    except Exception:
-                        heard_text = None
-                    if heard_text:
-                        rep = await loop.run_in_executor(None, lambda: agent_mod.converse_reply(heard_text, sit, who=who, inference=chat_client))
-                        reply_text, reply_kind = rep["text"], rep["kind"]
-                        status(f"t={now-start:5.1f}s heard {who or 'them'}: {heard_text[:80]!r} -> {reply_kind}; saying {reply_text!r} ({rep['source']})")
-                        if reply_text:
-                            await loop.run_in_executor(None, lambda: speak_blocking(reply_text))
-                        if reply_kind == "concern":
-                            report.setdefault("concerns", []).append({"t_s": round(now - start, 1), "t": wall, "name": who, "heard": heard_text[:200]})
-                            memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="concern", people=len(tracks), note=(who or "person") + ": " + heard_text[:50])
+                now = loop.time()
+                report["elapsed_s"] = round(now - start, 1)
+                if tel["soc"] < min_soc:
+                    report["reason"] = "battery_low"
+                    return report
+                if now - tel["low_t"] > stale_s or now - tel["pose_t"] > stale_s:
+                    report["reason"] = "telemetry_stale"
+                    return report
+                dist = math.dist(origin, tel["pose"])
+                report["max_distance_from_origin_m"] = max(report["max_distance_from_origin_m"], round(dist, 3))
+                if dist > boundary_m:
+                    report["reason"] = "boundary_exceeded"
+                    return report
+                diag.tick("control")
+                diag.tick("safety")
+                res = perception.latest()
+                if res["seq"] != last_seq:
+                    last_seq = res["seq"]
+                    tracks, fw, fh = res["tracks"], res["w"], res["h"]
+                    report["frames"] = res["seq"]
+                elif res["t"] is not None and time.monotonic() - res["t"] > 1.0:
+                    tracks = []  # perception stalled: do not act on old boxes
+                perception.set_context(mode=mode, ranges=tel["ranges"], battery=tel["soc"])
+                if recorder is not None and now - rec_last[0] >= 0.2:
+                    rec_last[0] = now
+                    with contextlib.suppress(Exception):
+                        wall = time.time()
+                        recorder.record_pose(wall, tel["pose"][0], tel["pose"][1], tel["yaw"])
+                        front_r = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
+                        if tracks and fw:
+                            people_world = []
+                            for t in tracks:
+                                x1, y1, x2, y2 = t["box"]
+                                cx = (x1 + x2) / 2.0 / float(fw)
+                                hfrac = max(0.05, (y2 - y1) / float(fh or 480))
+                                bearing = (0.5 - cx) * math.radians(100.0)  # Go2 front camera is roughly 100 deg wide
+                                dist = front_r if (front_r is not None and abs(cx - 0.5) < 0.18) else min(6.0, 0.55 / hfrac)
+                                ang = tel["yaw"] + bearing
+                                ident = (t.get("identity") or {}).get("name")
+                                people_world.append({"track_id": t.get("track_id"), "x": tel["pose"][0] + dist * math.cos(ang),
+                                                     "y": tel["pose"][1] + dist * math.sin(ang), "z": 0.9,
+                                                     "label": ident or f"person {t.get('track_id')}", "identity": ident,
+                                                     "posture": t.get("posture")})
+                        else:
+                            people_world = []
+                        objs = res.get("objects") or []
+                        object_world = []
+                        if objs and fw and objects_mod is not None and res.get("objects_seq", 0) != rec_objects_seq[0]:
+                            rec_objects_seq[0] = res["objects_seq"]  # place each detection list once, at this pose
+                            objs = objects_mod.not_people(objs, [t["box"] for t in res.get("raw_tracks", [])])  # a lying person is not a couch
+                            objs = [o for o in objs if o.get("hits", 1) >= 2]  # drop one-frame hallucinations
+                            placed = objects_mod.place(objs, fw, fh or 480, tel["pose"], tel["yaw"], front_range_m=front_r)
+                            object_world = objects_mod.sightings(placed, int(wall * 1000))
+                        last_people_world = people_world
+                        if people_world or object_world:
+                            recorder.record_people(wall, people_world + object_world)  # one call: it replaces "now"
+                        if graph is not None:
                             with contextlib.suppress(Exception):
-                                if graph is not None:
-                                    graph.ingest_event(wall, tel["pose"][0], tel["pose"][1], "concern", heard_text[:120])
-                report.setdefault("conversations", []).append({"t_s": round(now - start, 1), "name": who, "asked": text, "heard": heard_text,
-                                                               "reply": reply_text, "kind": reply_kind})
-                report["greetings"].append({"t_s": round(now - start, 1), "t": wall, "track_id": tid, "text": text,
-                                            "trick": trick_name, "hello_code": code, "identity": track.get("identity"),
-                                            "name": (track.get("identity") or {}).get("name"),
-                                            "x": None if world is None else round(world[0], 2), "y": None if world is None else round(world[1], 2)})
-                continue
-            if action == "checkin":
-                # A lying person is a posture estimate, not a diagnosis: stop, ask, wave, and keep an eye out.
-                status(f"t={now-start:5.1f}s person (track {tid}) appears to be lying down: stopping and asking")
-                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="checkin", people=len(tracks))
-                code = await show("hello", HELLO, 4.0, "Hey, are you alright? Please say okay or help.")
-                report["checkins"].append({"t_s": round(now - start, 1), "track_id": tid, "hello_code": code})
-                if stop_on_checkin:
-                    report["reason"] = "checkin_raised"
-                    return report  # hand over to the incident flow
-                continue
-            if action == "follow":
-                track = next(t for t in tracks if t.get("track_id") == tid)
-                vx, wz, reason = follow_command(track["box"], fw or 640, fh or 480, target_height_frac=0.5,
-                                                too_close_frac=0.9, max_vx=0.5, max_wz=1.0, k_yaw=2.2, k_dist=1.8)
-                cx = (track["box"][0] + track["box"][2]) / 2.0 / float(fw or 640)
-                centred = abs(cx - 0.5) <= 0.18
-                front_m = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
-                if centred and front_m is not None:
-                    # depth from the LiDAR beats box size: fast while far, ease off with distance, hold at ~0.75 m
-                    if front_m < 0.6:
-                        vx, reason = 0.0, "lidar_close"
-                    elif reason != "too_close":
-                        vx = min(0.5, max(0.2, 0.4 * (front_m - 0.6)))  # 2 m -> 0.5, 1.1 m -> 0.2
-                        reason = "lidar_far" if front_m > 1.1 else "lidar_near"
-                if 0.0 < vx < 0.2:
-                    vx = 0.2  # walking deadband: either walk properly or hold
-                last_seen.update(tid=tid, t=now, side=1.0 if cx < 0.5 else -1.0)
-                holding = reason in ("centered", "too_close") or abs(vx) < 0.05
-                if holding and follow_hold["tid"] == tid and follow_hold["since"] is not None:
-                    if now - follow_hold["since"] > follow_hold_s and tid in policy.greeted:
-                        policy.ignore(tid, now_s=now)
-                        status(f"t={now-start:5.1f}s track {tid} is standing still and already greeted: resuming patrol")
-                        follow_hold.update(tid=None, since=None)
-                        mode = "cruise"
-                        send_move(0.0, 0.0)
-                        await asyncio.sleep(tick)
+                                graph.ingest_pose(wall, tel["pose"][0], tel["pose"][1], tel["yaw"])
+                                if people_world or object_world:
+                                    graph.ingest_people(wall, [dict(p, kind="person") for p in people_world]
+                                                        + [dict(o, kind="object") for o in object_world])
+                if now - last_diag >= diag_every_s:
+                    last_diag = now
+                    status(f"diag {diag.line()}")
+                    view.update(diag=diag.snapshot())
+                ranges = tel["ranges"]
+                if lidar and (tel["ranges_t"] is None or now - tel["ranges_t"] > lidar_stale_s):
+                    ranges = None  # unknown: send_move rejects forward requests until a fresh map arrives
+                    report["lidar"]["stale_ticks"] += 1
+                map_age = None if tel["ranges_t"] is None else now - tel["ranges_t"]
+                # camera guard: a detected object filling most of the frame height with its bottom near the frame's
+                # bottom edge is right at the nose, whatever the LiDAR band says (chair seats, boxes, low tables)
+                cam_block = None
+                try:
+                    latest_res = perception.latest()
+                    fh_ = fh or 480
+                    for o in latest_res.get("objects") or []:
+                        x1, y1, x2, y2 = o["box"]
+                        if (y2 - y1) > 0.55 * fh_ and y2 > 0.85 * fh_ and o.get("hits", 1) >= 2:
+                            cam_block = o.get("label")
+                            break
+                except Exception:
+                    cam_block = None
+                if cam_block is not None and mode not in ("follow", "greet"):
+                    ranges = dict(ranges or {"left": float("inf"), "right": float("inf")})
+                    ranges["front"] = min(ranges.get("front", float("inf")), 0.4)
+                    if now - guard_state.get("cam_log", 0.0) > 5.0:
+                        guard_state["cam_log"] = now
+                        status(f"t={now-start:5.1f}s camera guard: {cam_block} fills the view, treating the front as 0.4 m")
+                front_now = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
+                current_places, current_radii = _person_places(tracks, fw or 640, fh or 480, tel["pose"], tel["yaw"], front_now)
+                policy.observe(tracks, current_places, now_s=now)
+                action, tid = policy.step(tracks, fw or 640, fh or 480, now_s=now, front_m=front_now,
+                                          place_by_tid=current_places, radius_by_tid=current_radii) if fw else ("patrol", None)
+                # ---- missions from the family app (body-command shape); they pre-empt greeting and idle tricks
+                if missions.stop_requested:
+                    mission_paused = True
+                    report["paused"] = mission_paused
+                    await process_stop_requests()
+                    mission_state.clear()
+                    status(f"t={now-start:5.1f}s mission stop: StopMove sent")
+                if voice_state.pop("resume_requested", False) and not no_motion:
+                    await ensure_standing()
+                    mission_paused = False
+                    report["paused"] = mission_paused
+                new_mission = missions.take()
+                if mission_paused and new_mission is None and missions.executing() is None and instruct_state["receipt"] is None:
+                    send_move(0.0, 0.0)
+                    await asyncio.sleep(tick)
+                    continue
+                if new_mission is not None:
+                    name, margs = new_mission["name"], new_mission["args"]
+                    wants_motion = name in ("turn", "walk", "look_for", "move", "patrol", "go_home", "hello", "dance", "heart", "stretch", "sit", "stand") or (name == "find_person" and margs.get("approach", False))
+                    if no_motion and wants_motion:
+                        missions.finish(new_mission, error="no_motion: movement disabled")
+                        mission_paused = True
+                        report["paused"] = mission_paused
                         continue
-                elif holding:
-                    follow_hold.update(tid=tid, since=now)
-                else:
-                    follow_hold.update(tid=tid, since=None)
-                if ranges and ranges["front"] < 0.4 and reason != "lidar_far":
-                    vx = min(vx, 0.0)  # LiDAR says something is right there: turn, do not push
-                stalled = stall.update(now_s=now, pose_xy=tel["pose"], commanded_vx=max(vx, 0.0))
+                    if wants_motion:
+                        await ensure_standing()
+                        mission_paused = False
+                        report["paused"] = mission_paused
+                    status(f"t={now-start:5.1f}s mission {name} {margs if margs else ''}")
+                    report["missions"].append({"t_s": round(now - start, 1), "name": name, "args": margs})
+                    if name == "instruct":
+                        sit = build_situation(time.time(), tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode, max_age_s=0.0)
+                        instruct_state.update(receipt=new_mission, plan=None)
+                        instruct_state["thread"] = threading.Thread(target=plan_instruct, args=(new_mission, sit), daemon=True, name="instruct")
+                        instruct_state["thread"].start()
+                        missions.progress(new_mission, step="planning")
+                        continue
+                    if name in ("turn", "walk", "look_for"):
+                        try:
+                            mission_guard(new_mission, moving=True)
+                            if name == "turn":
+                                err = await mission_turn(new_mission, margs["degrees"],
+                                                         min(10.0, abs(margs["degrees"]) / 30.0 + 2.0))
+                                result = {"turned_deg": round(margs["degrees"] - err, 1), "remaining_deg": round(err, 1)}
+                            elif name == "walk":
+                                gone = await mission_walk(new_mission, margs["metres"], abs(margs["metres"]) / 0.2 + 2.0)
+                                result = {"walked_m": round(gone, 2), "stopped_by": None}
+                            else:
+                                thing, seen_at, answers = margs["thing"], None, []
+                                for stop in range(6):
+                                    ans = await mission_spot(new_mission, thing, view.jpeg if view.port else None)
+                                    answers.append({"stop": stop, **{k: ans.get(k) for k in ("seen", "where", "latency_ms", "error")}})
+                                    if ans.get("error"):
+                                        raise MissionInterrupted("vision failed")
+                                    if ans.get("seen"):
+                                        seen_at = ans
+                                        break
+                                    if stop < 5:
+                                        await mission_turn(new_mission, 60.0, 4.0)
+                                        await mission_wait(new_mission, 0.4)
+                                if seen_at is None:
+                                    raise MissionInterrupted("target not found")
+                                nudge = {"left": 35.0, "centre": 0.0, "right": -35.0}.get(seen_at.get("where"))
+                                if nudge is None:
+                                    raise MissionInterrupted("vision bearing unavailable")
+                                if nudge:
+                                    await mission_turn(new_mission, nudge, 3.0)
+                                # A generic range hit cannot establish that the requested object was reached.
+                                # Report the bounded approach separately from the visual detection.
+                                gone = await mission_walk(new_mission, 2.5, 12.0)
+                                missions.progress(new_mission, found=True, thing=thing, where=seen_at.get("where"),
+                                                  walked_m=round(gone, 2), approached=False, stops=answers)
+                                raise MissionInterrupted("approach limit reached: target arrival unverified")
+                            mission_guard(new_mission)
+                            missions.finish(new_mission, result=result)
+                        except MissionInterrupted as exc:
+                            mission_paused = True
+                            report["paused"] = mission_paused
+                            voice_state["resume_requested"] = False
+                            missions.finish(new_mission, error=str(exc))
+                            await process_stop_requests(force=True)
+                            if str(exc) in ("duration_complete", "battery_low", "telemetry_stale", "boundary_exceeded"):
+                                report["reason"] = str(exc)
+                                return report
+                        continue
+                    if name == "dance" and tel["ranges"] and tel["ranges"].get("front", float("inf")) < 0.5:
+                        missions.finish(new_mission, error=f"too close to something ({tel['ranges']['front']:.2f} m ahead) to dance safely")
+                        continue
+                    if name in ("hello", "dance", "heart", "stretch", "sit", "stand"):
+                        api = {"sit": 1009, "stand": STAND_UP, "dance": 1022, "hello": HELLO, "heart": 1036, "stretch": 1017}[name]
+                        settle = {"sit": 3.0, "stand": 2.0, "dance": 10.0, "hello": 4.0, "heart": 6.0, "stretch": 5.0}[name]
+                        if no_motion:
+                            missions.finish(new_mission, error="no_motion: movement disabled")
+                            continue
+                        code = await show(name, api, settle, None)
+                        missions.finish(new_mission, result={"codes": {name: code}, "note": "firmware acknowledgment, not evidence the motion happened"})
+                        continue
+                    if name == "say":
+                        send_move(0.0, 0.0)
+                        played = await guarded_await(loop.run_in_executor(None, lambda: blocking_speak(margs["text"])))
+                        missions.finish(new_mission, result={"played": bool(played), "where": audio_where or "host speaker", "source": "simulation" if audio_where else source})
+                        continue
+                    if name == "listen":
+                        send_move(0.0, 0.0)
+                        try:
+                            heard = await guarded_await(loop.run_in_executor(None, lambda: blocking_listen(margs["max_s"])))
+                            missions.finish(new_mission, result={**heard, "where": audio_where or "host microphone", "source": "simulation" if audio_where else source})
+                        except Exception as exc:
+                            missions.finish(new_mission, error=f"listen failed: {type(exc).__name__}")
+                        continue
+                    if name == "move":
+                        missions.finish(new_mission, error="move is not offered by the patrol process; use patrol/go_home")
+                        continue
+                    if name == "patrol":
+                        voice_state["intent"], voice_state["until"] = "explore", now + margs["duration_s"]
+                        missions.finish(new_mission, result={"note": "exploring", "duration_s": margs["duration_s"]})
+                        continue
+                    if name == "go_home":
+                        voice_state["intent"], voice_state["until"], voice_state["source"] = "go_home", now + 90.0, "mission"
+                        missions.finish(new_mission, result={"note": "heading home for up to 90 s", "home_m": round(dist, 2)})
+                        continue
+                    if name == "find_person":
+                        mission_state.update(receipt=new_mission, name=(margs["name"] or "").lower() or None,
+                                             deadline=now + margs["timeout_s"], approach=margs["approach"], found=None, since=now, identities={})
+                if instruct_state["receipt"] is not None and instruct_state["plan"] is None:
+                    send_move(0.0, 0.0)
+                    await asyncio.sleep(tick)
+                    continue
+                if instruct_state["receipt"] is not None and instruct_state["plan"] is not None:
+                    rec, plan = instruct_state["receipt"], instruct_state["plan"]
+                    instruct_state.update(receipt=None, plan=None, thread=None)
+                    status(f"t={now-start:5.1f}s instruct ({plan.get('source')}, {plan.get('latency_ms')} ms): {len(plan['steps'])} steps "
+                           f"{[st['name'] for st in plan['steps']]}; reply {plan.get('reply')!r}"
+                           + (f"; rejected {plan['rejected']}" if plan.get("rejected") else ""))
+                    report.setdefault("instructions", []).append({"t_s": round(now - start, 1), "text": rec["args"]["text"], "source": plan.get("source"),
+                                                                  "steps": [st["name"] for st in plan["steps"]], "reply": plan.get("reply")})
+                    if plan.get("reply"):
+                        speak(plan["reply"])
+                    missions.chain(rec, plan["steps"], reply=plan.get("reply", ""), source=plan.get("source", ""))
+                mission = missions.executing()
+                if mission is not None and mission_state.get("receipt") is mission:
+                    if now > mission_state["deadline"]:
+                        missions.finish(mission, error="find_person timeout: target not reached", result={"found": False, "track_id": None, "identity": None, "matched_name": False,
+                                                         "posture": None, "approached": False,
+                                                         "searched_s": round(now - mission_state["since"], 1)})
+                        mission_state.clear()
+                        continue
+                    wanted = mission_state["name"]
+                    pool = _mission_person_pool(tracks, wanted, mission_state["identities"], now)
+                    if pool:
+                        best = max(pool, key=lambda t: t["box"][3] - t["box"][1])
+                        found = {"track_id": best.get("track_id"), "identity": best.get("identity"),
+                                 "matched": bool(wanted), "posture": best.get("posture")}
+                        if found != mission_state["found"]:
+                            missions.progress(mission, found=found)
+                            status(f"t={now-start:5.1f}s mission find_person: found track {best.get('track_id')}")
+                        mission_state["found"] = found
+                        # "approached" must be reachable by the follow controller: it holds at box height 0.5 / LiDAR 0.6 m
+                        approached = (not mission_state["approach"]) or (front_now is not None and front_now <= 0.75) \
+                            or (best["box"][3] - best["box"][1]) / float(fh or 480) >= 0.47
+                        if approached:
+                            f = mission_state["found"]
+                            missions.finish(mission, result={"found": True, "track_id": f["track_id"], "identity": f["identity"],
+                                                             "matched_name": f["matched"], "posture": f["posture"], "approached": bool(mission_state["approach"]),
+                                                             "searched_s": round(now - mission_state["since"], 1)})
+                            send_move(0.0, 0.0)
+                            policy.greeted[f["track_id"]] = now  # the errand does the talking: no "hello there" on top
+                            mission_hold_until[0] = now + 60.0  # and keep following them quietly while the errand speaks/listens
+                            mission_state.clear()
+                            mode = "cruise"
+                            await asyncio.sleep(tick)
+                            continue
+                        action, tid = "follow", best.get("track_id")  # walk up to them; the follow branch below does the driving
+                    else:
+                        action, tid = "patrol", None  # keep searching (bandit + brain pull toward the last sighting)
+                if mission_paused:
+                    send_move(0.0, 0.0)
+                    await asyncio.sleep(tick)
+                    continue
+                if (mission is not None or now < mission_hold_until[0]) and action in ("greet", "checkin"):
+                    action = "follow" if tid is not None else "patrol"  # no tricks or questions while on / just after a mission
+                if now < mission_hold_until[0] and action == "patrol" and not tracks:
+                    send_move(0.0, 0.0)  # stay put by the person the errand is talking to instead of wandering off
+                    await asyncio.sleep(tick)
+                    continue
+                if action in ("follow", "greet") and not bandit_state["rewarded"] and bandit.current is not None:
+                    bandit.reward(1.0)  # this heading found someone
+                    bandit_state["rewarded"] = True
+                if action == "greet" and memory.greeted_here_recently(tel["pose"], tel["yaw"], now=now, within_s=300.0):
+                    action = "follow"  # same spot, same heading, moments ago: that is the person we already greeted
+                if tracks and now - memory_last_seen[0] > 5.0:
+                    memory_last_seen[0] = now
+                    named = next(((t.get("identity") or {}).get("name") for t in tracks if t.get("identity")), None)
+                    memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="seen", people=len(tracks), note=named)
+                    grid["map"].mark(tel["pose"][0], tel["pose"][1], "seen")
+                # voice commands: a bounded override of what the dog is doing (guardrails still apply below)
+                intent = voice_state["intent"] if now < voice_state["until"] else None
+                if intent in ("sit", "stand", "dance", "hello", "heart", "stretch"):
+                    voice_state["intent"] = None
+                    api = {"sit": 1009, "stand": STAND_UP, "dance": 1022, "hello": HELLO, "heart": 1036, "stretch": 1017}[intent]
+                    settle = {"sit": 3.0, "stand": 2.0, "dance": 10.0, "hello": 4.0, "heart": 6.0, "stretch": 5.0}[intent]
+                    status(f"t={now-start:5.1f}s voice: {intent}")
+                    await show(intent, api, settle, None)
+                    continue
+                if intent == "stop":
+                    send_move(0.0, 0.0)
+                    mode = "voice_stop"
+                    await asyncio.sleep(tick)
+                    continue
+                if intent in ("follow", "approach") and action == "patrol":
+                    action = "patrol"  # nobody visible: keep looking (brain/scan), the follow branch takes over when seen
+                if brain is not None and action == "patrol" and not brain_state["busy"] \
+                        and (brain_state["last"] is None or now - brain_state["last"] >= brain_period_s):
+                    brain_state["busy"] = True
+                    threading.Thread(target=brain_think, daemon=True, name="brain").start()
+                view.update(mode=mode, action=action, tracks=tracks, ranges=ranges, battery=tel["soc"], t_s=now - start,
+                            greetings=len(report["greetings"]), checkins=len(report["checkins"]), home_m=dist,
+                            fps=diag.rate("processed"))
+                if action == "patrol" and mission is None and now - last_remark_check >= 5.0 and voice is not None:
+                    last_remark_check = now
+                    wall = time.time()
+                    sit = build_situation(wall, tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode)
+                    remark = narrator.remark(sit, now=wall)
+                    if remark:
+                        send_move(0.0, 0.0)
+                        line = await guarded_await(loop.run_in_executor(None, lambda: agent_mod.compose_line(
+                            "remark on something you just noticed while exploring", sit, inference=chat_client, fallback=remark, extra=f"Noticed: {remark}")))
+                        remark = line["text"]
+                        status(f"t={now-start:5.1f}s remark ({line['source']}): {remark!r}")
+                        report.setdefault("remarks", []).append({"t_s": round(now - start, 1), "text": remark})
+                        memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="remark", people=len(tracks), note=remark[:60])
+                        speak(remark)
+                if action == "greet":
+                    track = next(t for t in tracks if t.get("track_id") == tid)
+                    wall = time.time()
+                    world = next(((p["x"], p["y"]) for p in (last_people_world or []) if p.get("track_id") == tid), None)
+                    if world is None and tel["pose"] is not None:
+                        fr = (tel["ranges"] or {}).get("front")
+                        d0 = fr if fr is not None and fr != float("inf") else 1.0
+                        world = (tel["pose"][0] + d0 * math.cos(tel["yaw"]), tel["pose"][1] + d0 * math.sin(tel["yaw"]))
+                    sit = build_situation(wall, tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode)
+                    decision = agent_mod.greeting_decision(dict(track, world=world), sit, now=wall)
+                    if not decision["greet"]:
+                        policy.greeted[tid] = now  # known already: no repeat greeting, keep exploring
+                        status(f"t={now-start:5.1f}s person (track {tid}) ahead: not greeting again ({decision['reason']})")
+                        continue
+                    who = spoken_name(track.get("identity"))
+                    send_move(0.0, 0.0)
+                    line = await guarded_await(loop.run_in_executor(None, lambda: agent_mod.compose_line(
+                        f"greet {who or 'this person'} who is right in front of you", sit, inference=chat_client, fallback=decision["text"],
+                        extra=f"Person in front: {who or 'someone you do not know by name'}; nearby objects: "
+                              f"{', '.join(o['name'] for o in sit['objects'][:3]) or 'none known'}.")))
+                    text = line["text"]
+                    trick_name, trick_api, trick_settle = GREET_TRICKS[len(report["greetings"]) % len(GREET_TRICKS)]
+                    status(f"t={now-start:5.1f}s person (track {tid}) ahead: stopping, {trick_name}, saying {text!r} "
+                           f"({decision['reason']}; line by {line['source']}, {line['latency_ms']} ms)")
+                    memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="greet", people=len(tracks),
+                               note=((track.get("identity") or {}).get("name")) or trick_name)
+                    grid["map"].mark(tel["pose"][0], tel["pose"][1], "greet")
+                    code = await show(trick_name, trick_api, trick_settle, text, look_up=True)
+                    # A conversation turn: the greeting asked how they are; listen, answer in character, escalate concern.
+                    heard_text, reply_text, reply_kind = None, None, "none"
+                    if (voice is not None or audio is not None) and not no_motion:
+                        try:
+                            heard = await guarded_await(loop.run_in_executor(None, lambda: blocking_listen(6.0)))
+                            heard_text = heard.get("transcript")
+                        except Exception:
+                            heard_text = None
+                        if heard_text:
+                            rep = await guarded_await(loop.run_in_executor(None, lambda: agent_mod.converse_reply(heard_text, sit, who=who, inference=chat_client)))
+                            reply_text, reply_kind = rep["text"], rep["kind"]
+                            status(f"t={now-start:5.1f}s heard {who or 'them'}: {heard_text[:80]!r} -> {reply_kind}; saying {reply_text!r} ({rep['source']})")
+                            if reply_text:
+                                await guarded_await(loop.run_in_executor(None, lambda: blocking_speak(reply_text)))
+                            if reply_kind == "concern":
+                                report.setdefault("concerns", []).append({"t_s": round(now - start, 1), "t": wall, "name": who, "heard": heard_text[:200]})
+                                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="concern", people=len(tracks), note=(who or "person") + ": " + heard_text[:50])
+                                with contextlib.suppress(Exception):
+                                    if graph is not None:
+                                        graph.ingest_event(wall, tel["pose"][0], tel["pose"][1], "concern", heard_text[:120])
+                    report.setdefault("conversations", []).append({"t_s": round(now - start, 1), "name": who, "asked": text, "heard": heard_text,
+                                                                   "reply": reply_text, "kind": reply_kind, "source": "simulation" if audio_where else source, "mocked_audio": bool(audio_where)})
+                    report["greetings"].append({"t_s": round(now - start, 1), "t": wall, "track_id": tid, "text": text,
+                                                "trick": trick_name, "hello_code": code, "identity": track.get("identity"),
+                                                "name": (track.get("identity") or {}).get("name"),
+                                                "x": None if world is None else round(world[0], 2), "y": None if world is None else round(world[1], 2)})
+                    continue
+                if action == "checkin":
+                    # A lying person is a posture estimate, not a diagnosis: stop, ask, wave, and keep an eye out.
+                    track = next(t for t in tracks if t.get("track_id") == tid)
+                    mission_guard({"state": "executing"})
+                    status(f"t={now-start:5.1f}s person (track {tid}) appears to be lying down: stopping and asking")
+                    memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="checkin", people=len(tracks))
+                    code = await show("hello", HELLO, 4.0, "Hey, are you alright? Please say okay or help.",
+                                      on_speak=lambda: policy.mark_checkin(track, current_places.get(tid),
+                                                                         now_s=loop.time(), radius_m=current_radii.get(tid)))
+                    report["checkins"].append({"t_s": round(now - start, 1), "track_id": tid, "hello_code": code})
+                    if stop_on_checkin:
+                        report["reason"] = "checkin_raised"
+                        return report  # hand over to the incident flow
+                    continue
+                if action == "follow":
+                    track = next(t for t in tracks if t.get("track_id") == tid)
+                    vx, wz, reason = follow_command(track["box"], fw or 640, fh or 480, target_height_frac=0.5,
+                                                    too_close_frac=0.9, max_vx=0.5, max_wz=1.0, k_yaw=2.2, k_dist=1.8)
+                    cx = (track["box"][0] + track["box"][2]) / 2.0 / float(fw or 640)
+                    centred = abs(cx - 0.5) <= 0.18
+                    front_m = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
+                    if centred and front_m is not None:
+                        # depth from the LiDAR beats box size: fast while far, ease off with distance, hold at ~0.75 m
+                        if front_m < 0.6:
+                            vx, reason = 0.0, "lidar_close"
+                        elif reason != "too_close":
+                            vx = min(0.5, max(0.2, 0.4 * (front_m - 0.6)))  # 2 m -> 0.5, 1.1 m -> 0.2
+                            reason = "lidar_far" if front_m > 1.1 else "lidar_near"
+                    if 0.0 < vx < 0.2:
+                        vx = 0.2  # walking deadband: either walk properly or hold
+                    last_seen.update(tid=tid, t=now, side=1.0 if cx < 0.5 else -1.0)
+                    holding = reason in ("centered", "too_close") or abs(vx) < 0.05
+                    if holding and follow_hold["tid"] == tid and follow_hold["since"] is not None:
+                        if now - follow_hold["since"] > follow_hold_s and tid in policy.greeted:
+                            policy.ignore(tid, now_s=now)
+                            status(f"t={now-start:5.1f}s track {tid} is standing still and already greeted: resuming patrol")
+                            follow_hold.update(tid=None, since=None)
+                            mode = "cruise"
+                            send_move(0.0, 0.0)
+                            await asyncio.sleep(tick)
+                            continue
+                    elif holding:
+                        follow_hold.update(tid=tid, since=now)
+                    else:
+                        follow_hold.update(tid=tid, since=None)
+                    if ranges and ranges["front"] < 0.4 and reason != "lidar_far":
+                        vx = min(vx, 0.0)  # LiDAR says something is right there: turn, do not push
+                    vx, wz = guarded_velocity(vx, wz)
+                    stalled = stall.update(now_s=now, pose_xy=tel["pose"], commanded_vx=max(vx, 0.0))
+                    if stalled:
+                        report["collisions"].append({"t_s": round(now - start, 1), "mode": "follow", "front_m": None})
+                        status(f"t={now-start:5.1f}s COLLISION while following: stopping")
+                        vx = 0.0
+                    cmd_vx = max(vx, 0.0)
+                    if mode != "follow":
+                        status(f"t={now-start:5.1f}s mode {mode}->follow (track {tid}, {reason})")
+                        mode = "follow"
+                    report["modes"]["follow"] = report["modes"].get("follow", 0) + 1
+                    send_move(vx, wz)
+                    if now - last_print >= 2.0:
+                        last_print = now
+                        status(f"t={now-start:5.1f}s follow track {tid} v={vx:+.2f} w={wz:+.2f} ({reason}) "
+                               f"people={len(tracks)} battery={tel['soc']:.0f}%")
+                    await asyncio.sleep(tick)
+                    continue
+                if mode == "follow" and last_seen["t"] is not None and now - last_seen["t"] < 2.0 and not tracks:
+                    # lost them a moment ago: turn toward where they went instead of wandering off
+                    wz = 0.7 * last_seen["side"]
+                    cmd_vx = 0.0
+                    send_move(0.0, wz)
+                    report["modes"]["search"] = report["modes"].get("search", 0) + 1
+                    if now - last_print >= 2.0:
+                        last_print = now
+                        status(f"t={now-start:5.1f}s search: lost track {last_seen['tid']}, turning {'left' if wz > 0 else 'right'}")
+                    await asyncio.sleep(tick)
+                    continue
+                if mode == "follow":
+                    mode = "cruise"  # lost them for good: back to the wander planner
+                if idle_trick_s and mission is None and mode.startswith(("cruise", "brain:")) and now - last_show >= idle_trick_s:
+                    trick_name, trick_api, trick_settle = GREET_TRICKS[(len(report["greetings"]) + len(report["checkins"])) % len(GREET_TRICKS)]
+                    status(f"t={now-start:5.1f}s nobody new for {idle_trick_s:.0f}s: {trick_name} for fun")
+                    report.setdefault("idle_tricks", []).append({"t_s": round(now - start, 1), "trick": trick_name,
+                                                                 "code": await show(trick_name, trick_api, trick_settle, None)})
+                    continue
+                stalled = stall.update(now_s=now, pose_xy=tel["pose"], commanded_vx=cmd_vx)
                 if stalled:
-                    report["collisions"].append({"t_s": round(now - start, 1), "mode": "follow", "front_m": None})
-                    status(f"t={now-start:5.1f}s COLLISION while following: stopping")
-                    vx = 0.0
-                cmd_vx = max(vx, 0.0)
-                if mode != "follow":
-                    status(f"t={now-start:5.1f}s mode {mode}->follow (track {tid}, {reason})")
-                    mode = "follow"
-                report["modes"]["follow"] = report["modes"].get("follow", 0) + 1
-                send_move(vx, wz)
-                if now - last_print >= 2.0:
-                    last_print = now
-                    status(f"t={now-start:5.1f}s follow track {tid} v={vx:+.2f} w={wz:+.2f} ({reason}) "
-                           f"people={len(tracks)} battery={tel['soc']:.0f}%")
-                await asyncio.sleep(tick)
-                continue
-            if mode == "follow" and last_seen["t"] is not None and now - last_seen["t"] < 2.0 and not tracks:
-                # lost them a moment ago: turn toward where they went instead of wandering off
-                wz = 0.7 * last_seen["side"]
-                cmd_vx = 0.0
-                send_move(0.0, wz)
-                report["modes"]["search"] = report["modes"].get("search", 0) + 1
-                if now - last_print >= 2.0:
-                    last_print = now
-                    status(f"t={now-start:5.1f}s search: lost track {last_seen['tid']}, turning {'left' if wz > 0 else 'right'}")
-                await asyncio.sleep(tick)
-                continue
-            if mode == "follow":
-                mode = "cruise"  # lost them for good: back to the wander planner
-            if idle_trick_s and mission is None and mode.startswith(("cruise", "brain:")) and now - last_show >= idle_trick_s:
-                trick_name, trick_api, trick_settle = GREET_TRICKS[(len(report["greetings"]) + len(report["checkins"])) % len(GREET_TRICKS)]
-                status(f"t={now-start:5.1f}s nobody new for {idle_trick_s:.0f}s: {trick_name} for fun")
-                report.setdefault("idle_tricks", []).append({"t_s": round(now - start, 1), "trick": trick_name,
-                                                             "code": await show(trick_name, trick_api, trick_settle, None)})
-                continue
-            stalled = stall.update(now_s=now, pose_xy=tel["pose"], commanded_vx=cmd_vx)
-            if stalled:
-                report["collisions"].append({"t_s": round(now - start, 1), "mode": mode,
-                                             "front_m": None if not ranges else round(min(ranges["front"], 99.0), 2)})
-                front = "?" if not ranges else f"{min(ranges['front'], 99.0):.2f}"
-                status(f"t={now-start:5.1f}s COLLISION: no progress while driving (front={front} m); "
-                       "backing off and turning")
-            if now >= bandit_state["until"]:  # pick the next heading to explore (UCB over sectors)
-                def prior(a, _g=grid["map"], _p=tel["pose"]):
-                    free = _g.free_ahead(_p[0], _p[1], bandit.sector_heading(a))
-                    if free < 0.7:
-                        return -1.0  # known wall/desk that way
-                    bonus = 0.0
-                    if identifier is not None:  # pull toward where the named target was last seen but not yet greeted
-                        seen = memory.last_seen_named(identifier.name, now=now)
-                        if seen and not seen["greeted"]:
-                            heading_to = math.atan2(seen["y"] - _p[1], seen["x"] - _p[0])
-                            if abs(wrap_angle(heading_to - bandit.sector_heading(a))) < math.pi / bandit.n_arms:
-                                bonus = 1.0
-                    goal = frontier["goal"]
-                    if goal is not None:  # dimOS frontier exploration: prefer the sector that points at the next frontier
-                        to_goal = math.atan2(goal[1] - _p[1], goal[0] - _p[0])
-                        if abs(wrap_angle(to_goal - bandit.sector_heading(a))) < math.pi / bandit.n_arms:
-                            bonus += 0.8
-                    return bonus + 0.3 * min(free, 3.0) / 3.0 + 0.5 * _g.unvisited_ahead(_p[0], _p[1], bandit.sector_heading(a))
-                if frontier["planner"] is not None and now - frontier["t"] > 8.0:
-                    frontier["t"] = now
-                    try:  # ~0.4 s of pure Python: run it off the loop
-                        goal = await loop.run_in_executor(None, lambda: frontier["planner"].next_goal(
-                            grid["map"], tel["pose"], tel["yaw"], clear_range_m=1.5))
-                        frontier["goal"] = goal
-                        if goal is not None:
-                            report["frontier"]["goals"] += 1
-                            status(f"t={now-start:5.1f}s frontier (dimOS): next goal {goal[0]:.1f},{goal[1]:.1f}")
-                    except Exception as exc:
-                        frontier["goal"] = None
-                        report["frontier"]["error"] = type(exc).__name__
-                arm = bandit.choose(prior=prior)
-                planner.target_heading = bandit.sector_heading(arm)
-                bandit_state.update(until=now + 12.0, rewarded=False)
-                report["bandit"] = bandit.snapshot()
-                status(f"t={now-start:5.1f}s bandit: explore heading sector {arm} ({math.degrees(planner.target_heading):+.0f} deg)"
-                       f" values={[round(v, 1) for v in bandit.value]}")
-            cmd_vx, cmd_wz, new_mode = planner.step(now_s=now, ranges=ranges, pose_xy=tel["pose"], yaw=tel["yaw"],
-                                                    origin_xy=origin, stalled=stalled)
-            if cmd_vx > 0 and (map_age is None or map_age > 0.8):  # old or no map: creep, do not cruise blind
-                cmd_vx = min(cmd_vx, 0.2)
-            if new_mode in ("blocked", "backoff") and not bandit_state["rewarded"]:
-                bandit.reward(0.0)  # this heading is a wall
-                bandit_state.update(rewarded=True, until=now + 1.0)  # re-choose soon after clearing
-                blocked_times.append(now)
-                blocked_times[:] = [t for t in blocked_times if now - t < 20.0]
-                if len(blocked_times) >= 3:  # stuck against something (wall, desk): escape toward the freest known direction
-                    g = grid["map"]
-                    best = max(range(bandit.n_arms), key=lambda a: g.free_ahead(tel["pose"][0], tel["pose"][1], bandit.sector_heading(a)))
-                    planner.target_heading = bandit.sector_heading(best)
-                    bandit.current = best
+                    report["collisions"].append({"t_s": round(now - start, 1), "mode": mode,
+                                                 "front_m": None if not ranges else round(min(ranges["front"], 99.0), 2)})
+                    front = "?" if not ranges else f"{min(ranges['front'], 99.0):.2f}"
+                    status(f"t={now-start:5.1f}s COLLISION: no progress while driving (front={front} m); "
+                           "backing off and turning")
+                if now >= bandit_state["until"]:  # pick the next heading to explore (UCB over sectors)
+                    def prior(a, _g=grid["map"], _p=tel["pose"]):
+                        free = _g.free_ahead(_p[0], _p[1], bandit.sector_heading(a))
+                        if free < 0.7:
+                            return -1.0  # known wall/desk that way
+                        bonus = 0.0
+                        if identifier is not None:  # pull toward where the named target was last seen but not yet greeted
+                            seen = memory.last_seen_named(identifier.name, now=now)
+                            if seen and not seen["greeted"]:
+                                heading_to = math.atan2(seen["y"] - _p[1], seen["x"] - _p[0])
+                                if abs(wrap_angle(heading_to - bandit.sector_heading(a))) < math.pi / bandit.n_arms:
+                                    bonus = 1.0
+                        goal = frontier["goal"]
+                        if goal is not None:  # dimOS frontier exploration: prefer the sector that points at the next frontier
+                            to_goal = math.atan2(goal[1] - _p[1], goal[0] - _p[0])
+                            if abs(wrap_angle(to_goal - bandit.sector_heading(a))) < math.pi / bandit.n_arms:
+                                bonus += 0.8
+                        return bonus + 0.3 * min(free, 3.0) / 3.0 + 0.5 * _g.unvisited_ahead(_p[0], _p[1], bandit.sector_heading(a))
+                    if frontier["planner"] is not None and now - frontier["t"] > 8.0:
+                        frontier["t"] = now
+                        try:  # ~0.4 s of pure Python: run it off the loop
+                            goal = await guarded_await(loop.run_in_executor(None, lambda: frontier["planner"].next_goal(
+                                grid["map"], tel["pose"], tel["yaw"], clear_range_m=1.5)))
+                            frontier["goal"] = goal
+                            if goal is not None:
+                                report["frontier"]["goals"] += 1
+                                status(f"t={now-start:5.1f}s frontier (dimOS): next goal {goal[0]:.1f},{goal[1]:.1f}")
+                        except Exception as exc:
+                            frontier["goal"] = None
+                            report["frontier"]["error"] = type(exc).__name__
+                    arm = bandit.choose(prior=prior)
+                    planner.target_heading = bandit.sector_heading(arm)
                     bandit_state.update(until=now + 12.0, rewarded=False)
-                    blocked_times.clear()
-                    memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="collision", note="stuck")
-                    status(f"t={now-start:5.1f}s stuck: 3 blocks in 20 s, escaping toward sector {best} "
-                           f"({math.degrees(planner.target_heading):+.0f} deg, {g.free_ahead(tel['pose'][0], tel['pose'][1], planner.target_heading):.1f} m free)")
-            decision = brain_state["decision"] if brain is not None and now < brain_state["until"] else None
-            if intent in ("scan", "explore", "go_home") and now < voice_state["until"]:
-                decision = {"action": intent, "ok": True}
-            if decision and new_mode == "cruise":  # guardrail modes (blocked/backoff/homing) always win
-                act = decision["action"]
-                if act in ("turn_left", "turn_right", "scan"):
-                    cmd_vx, cmd_wz = 0.0, (planner.turn_rps if act != "turn_right" else -planner.turn_rps)
-                elif act == "wait":
-                    cmd_vx, cmd_wz = 0.0, 0.0
-                elif act == "go_home":
-                    err = wrap_angle(math.atan2(origin[1] - tel["pose"][1], origin[0] - tel["pose"][0]) - tel["yaw"])
-                    cmd_wz = max(-planner.turn_rps, min(planner.turn_rps, 1.2 * err))
-                    cmd_vx = planner.cruise_mps if abs(err) < math.pi / 3 else 0.0
-                    if dist < 0.4:
+                    report["bandit"] = bandit.snapshot()
+                    status(f"t={now-start:5.1f}s bandit: explore heading sector {arm} ({math.degrees(planner.target_heading):+.0f} deg)"
+                           f" values={[round(v, 1) for v in bandit.value]}")
+                cmd_vx, cmd_wz, new_mode = planner.step(now_s=now, ranges=ranges, pose_xy=tel["pose"], yaw=tel["yaw"],
+                                                        origin_xy=origin, stalled=stalled)
+                if cmd_vx > 0 and (map_age is None or map_age > 0.8):  # slow aging maps; send_move holds once stale
+                    cmd_vx = min(cmd_vx, 0.2)
+                if new_mode in ("blocked", "backoff") and not bandit_state["rewarded"]:
+                    bandit.reward(0.0)  # this heading is a wall
+                    bandit_state.update(rewarded=True, until=now + 1.0)  # re-choose soon after clearing
+                    blocked_times.append(now)
+                    blocked_times[:] = [t for t in blocked_times if now - t < 20.0]
+                    if len(blocked_times) >= 3:  # stuck against something (wall, desk): escape toward the freest known direction
+                        g = grid["map"]
+                        best = max(range(bandit.n_arms), key=lambda a: g.free_ahead(tel["pose"][0], tel["pose"][1], bandit.sector_heading(a)))
+                        planner.target_heading = bandit.sector_heading(best)
+                        bandit.current = best
+                        bandit_state.update(until=now + 12.0, rewarded=False)
+                        blocked_times.clear()
+                        memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="collision", note="stuck")
+                        status(f"t={now-start:5.1f}s stuck: 3 blocks in 20 s, escaping toward sector {best} "
+                               f"({math.degrees(planner.target_heading):+.0f} deg, {g.free_ahead(tel['pose'][0], tel['pose'][1], planner.target_heading):.1f} m free)")
+                decision = brain_state["decision"] if brain is not None and now < brain_state["until"] else None
+                if intent in ("scan", "explore", "go_home") and now < voice_state["until"]:
+                    decision = {"action": intent, "ok": True}
+                if decision and new_mode == "cruise":  # guardrail modes (blocked/backoff/homing) always win
+                    act = decision["action"]
+                    if act in ("turn_left", "turn_right", "scan"):
+                        cmd_vx, cmd_wz = 0.0, (planner.turn_rps if act != "turn_right" else -planner.turn_rps)
+                    elif act == "wait":
                         cmd_vx, cmd_wz = 0.0, 0.0
-                # explore / approach: the planner's cruise velocities (already obstacle-aware)
-                new_mode = f"brain:{act}"
-            if new_mode != mode:
-                front = "?" if not ranges else f"{min(ranges['front'], 99.0):.2f}"
-                status(f"t={now-start:5.1f}s mode {mode}->{new_mode} (front={front} m, home={dist:.2f} m)")
-                mode = new_mode
-            report["modes"][mode] = report["modes"].get(mode, 0) + 1
-            send_move(cmd_vx, cmd_wz)
-            if now - last_print >= 2.0:
-                last_print = now
-                front = "?" if not ranges else f"{min(ranges['front'], 99.0):.2f}"
-                status(f"t={now-start:5.1f}s {mode} v={cmd_vx:+.2f} w={cmd_wz:+.2f} front={front} m "
-                       f"home={dist:.2f} m people={len(tracks)} battery={tel['soc']:.0f}%")
-            await asyncio.sleep(tick)
+                    elif act == "go_home":
+                        err = wrap_angle(math.atan2(origin[1] - tel["pose"][1], origin[0] - tel["pose"][0]) - tel["yaw"])
+                        cmd_wz = max(-planner.turn_rps, min(planner.turn_rps, 1.2 * err))
+                        cmd_vx = planner.cruise_mps if abs(err) < math.pi / 3 else 0.0
+                        if dist < 0.4:
+                            cmd_vx, cmd_wz = 0.0, 0.0
+                    # explore / approach: the planner's cruise velocities (already obstacle-aware)
+                    new_mode = f"brain:{act}"
+                if new_mode != mode:
+                    front = "?" if not ranges else f"{min(ranges['front'], 99.0):.2f}"
+                    status(f"t={now-start:5.1f}s mode {mode}->{new_mode} (front={front} m, home={dist:.2f} m)")
+                    mode = new_mode
+                report["modes"][mode] = report["modes"].get(mode, 0) + 1
+                send_move(cmd_vx, cmd_wz)
+                if now - last_print >= 2.0:
+                    last_print = now
+                    front = "?" if not ranges else f"{min(ranges['front'], 99.0):.2f}"
+                    status(f"t={now-start:5.1f}s {mode} v={cmd_vx:+.2f} w={cmd_wz:+.2f} front={front} m "
+                           f"home={dist:.2f} m people={len(tracks)} battery={tel['soc']:.0f}%")
+                await asyncio.sleep(tick)
+            except MissionInterrupted as exc:
+                if str(exc) != "stopped by operator":
+                    raise
+                # Abandon this action without a completion receipt. Keep the link and
+                # HTTP service alive; only a subsequent operator command releases hold.
+                mission_paused = True
+                report["paused"] = mission_paused
+                voice_state["resume_requested"] = False
+                mission_state.clear()
+                await process_stop_requests(force=True)
+                continue
         report["reason"] = "duration_complete"
+    except MissionInterrupted as exc:
+        report["reason"] = "operator_cancelled" if str(exc) == "stopped by operator" else str(exc)
     except asyncio.CancelledError:
         report["reason"] = "operator_cancelled"
     except Exception as exc:
         report["reason"] = f"error:{type(exc).__name__}"
         report["error"] = safe_error(exc)
     finally:
+        active_mission = missions.executing()
+        if active_mission is not None:
+            missions.finish(active_mission, error=f"patrol ended: {report['reason']}")
+        if conn is not None and report["connection"]["status"] == "connected":
+            with contextlib.suppress(Exception):
+                send_move(0.0, 0.0)
         stopped = True
         perception.stop()
         if voice is not None:
@@ -1708,12 +2011,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             with contextlib.suppress(Exception):
                 report["graph"] = {"places": len(graph.places()), "summary": graph.summary(now=time.time(), limit=6).get("sentences", [])}
         if conn is not None and report["connection"]["status"] == "connected":
-            if commanded:
+            if commanded or missions.stop_requested:
                 report["stop"]["requested"] = True
-                t0 = loop.time()
-                with contextlib.suppress(Exception):
-                    report["stop"]["code"] = await request(STOP_MOVE, priority=True, timeout=2.0)
-                    report["stop"]["ack_ms"] = round((loop.time() - t0) * 1000, 1)
+                outcome = await process_stop_requests(force=True)
+                report["stop"]["code"], report["stop"]["ack_ms"] = outcome["code"], outcome["ack_ms"]
             with contextlib.suppress(Exception):
                 conn.datachannel.switchVideoChannel(False)
             try:
@@ -1721,6 +2022,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 report["connection"]["disconnected"] = True
             except Exception as exc:
                 report["connection"]["disconnected"] = False
+        remaining_stops = missions.take_stops()
+        if remaining_stops:
+            missions.finish_stops(remaining_stops, code=None, ack_ms=None, error="Connection closed before StopMove acknowledgment")
         report["completed"] = report["reason"] in ("duration_complete", "operator_cancelled", "checkin_raised") \
             and report["connection"].get("disconnected", False)
     return report
@@ -1739,6 +2043,7 @@ def main(argv=None):
     parser.add_argument("--view-port", type=int, default=8011, help="live camera/boxes page; 0 disables")
     parser.add_argument("--view-host", default="127.0.0.1", help="bind address; beyond loopback requires ANNIE_BODY_TOKEN "
                         "and ANNIE_VIEW_HOSTS (comma list of this machine's addresses the page may be opened on)")
+    parser.add_argument("--start-paused", "--manual-on-demand", action="store_true", help="wait for an explicit command; do not stand or patrol at startup")
     parser.add_argument("--no-motion", action="store_true", help="perception-only: never move or perform tricks")
     parser.add_argument("--imgsz", type=int, default=320, help="tracker inference size (multiple of 32); 320 keeps up with the 14 fps stream on this Mac")
     parser.add_argument("--diag-every", type=float, default=5.0, help="seconds between diagnostic lines")
@@ -1752,7 +2057,15 @@ def main(argv=None):
     parser.add_argument("--output")
     parser.add_argument("--sim", nargs="?", const="seated", choices=("seated", "floor", "empty"), default=None,
                         help="no robot: drive the simulated dog in the MuJoCo apartment (docs/SIM_DOG.md); report source = simulation")
+    parser.add_argument("--mock-audio", action="store_true", help="simulation only: scripted audio, no mic/speaker/providers")
+    parser.add_argument("--mock-transcript", default="I'm doing well, thank you.")
     args = parser.parse_args(argv)
+    if args.mock_audio and (not args.sim or args.voice):
+        parser.error("--mock-audio requires --sim and cannot be combined with --voice")
+    mock_audio = None
+    if args.mock_audio:
+        from robot.dog.sim_audio import MockAudio
+        mock_audio = MockAudio(args.mock_transcript)
     if not 0.05 <= args.speed <= 0.45:
         parser.error("--speed must be 0.05-0.45")
     sim_conn_factory = None
@@ -1768,21 +2081,31 @@ def main(argv=None):
     for key in [k for k in os.environ if k.lower() in ("http_proxy", "https_proxy", "all_proxy")]:
         os.environ.pop(key)
     os.environ["NO_PROXY"] = "*"
-    for line in Path(".env").read_text().splitlines() if Path(".env").exists() else []:  # voice keys only
-        if line.startswith(("ELEVENLABS_", "DEEPGRAM_")) and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"'))
+    if not args.mock_audio:
+        for line in Path(".env").read_text().splitlines() if Path(".env").exists() else []:  # voice keys only
+            if line.startswith(("ELEVENLABS_", "DEEPGRAM_")) and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"'))
     if args.view_host not in ("127.0.0.1", "localhost", "::1") and not os.environ.get("ANNIE_BODY_TOKEN"):
         parser.error("--view-host beyond loopback requires ANNIE_BODY_TOKEN (fail closed: anyone on the LAN could move the robot)")
-    _say(f"voice: {voice().enabled} (cloud when a key is set; local say/Whisper otherwise)")
+    if mock_audio is not None:
+        _say("voice: simulation mock (no audio devices or providers)")
+    else:
+        _say(f"voice: {voice().enabled} (cloud when a key is set; local say/Whisper otherwise)")
     logging.disable(logging.CRITICAL)
+    previous_signals = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    # Shell background jobs may inherit ignored SIGINT. TERM from the supervisor must
+    # unwind asyncio too, so cancellation runs the neutral/StopMove/disconnect cleanup.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
+    if previous_signals[signal.SIGINT] == signal.SIG_IGN:
+        signal.signal(signal.SIGINT, signal.default_int_handler)
     try:
         report = asyncio.run(run_patrol_greet(ip=args.ip, aes_key=os.environ.get("UNITREE_AES_128_KEY"),
-                                              conn_factory=sim_conn_factory, source="simulation" if args.sim else "hardware",
+                                              conn_factory=sim_conn_factory, source="simulation" if args.sim else "hardware", audio=mock_audio,
                                               duration_s=args.duration, speed_mps=args.speed, boundary_m=args.boundary,
                                               lidar=not args.no_lidar, firmware_avoid=args.firmware_avoid,
                                               stop_on_checkin=args.stop_on_checkin, idle_trick_s=args.idle_trick,
-                                              view=LiveView(port=args.view_port, host=args.view_host), no_motion=args.no_motion,
+                                              view=LiveView(port=args.view_port, host=args.view_host), no_motion=args.no_motion, start_paused=args.start_paused,
                                               imgsz=args.imgsz, diag_every_s=args.diag_every,
                                               brain=VisionBrain() if args.brain else None, brain_period_s=args.brain_period,
                                               memory=SightingMemory(args.memory_file),
@@ -1793,6 +2116,9 @@ def main(argv=None):
     except KeyboardInterrupt:
         _say("interrupted")
         return 130
+    finally:
+        for sig, handler in previous_signals.items():
+            signal.signal(sig, handler)
     payload = json.dumps(report)
     if args.output:
         Path(args.output).write_text(payload + "\n", encoding="utf-8")

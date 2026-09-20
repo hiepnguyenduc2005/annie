@@ -87,8 +87,75 @@ def test_overlapping_missions_wait_their_turn_and_stop_clears_the_line():
     assert second["command_id"] == r2["command_id"] and second["state"] == "executing"
     assert board.get(r3["command_id"])["state"] == "queued"
     code, stop = board.submit({"name": "stop"})
-    assert code == 200 and board.get(r2["command_id"])["state"] == "cancelled" and board.get(r3["command_id"])["state"] == "cancelled"
+    assert code == 202 and stop["state"] == "accepted" and board.get(r2["command_id"])["state"] == "cancelled" and board.get(r3["command_id"])["state"] == "cancelled"
     assert board.take() is None
     for i in range(9):
         board.submit({"name": "hello", "command_id": f"h{i}"})
     assert board.submit({"name": "hello", "command_id": "overflow"})[0] == 409  # bounded line
+
+
+def test_stop_batches_are_correlated_and_new_commands_cannot_overwrite_ack():
+    board = MissionBoard(clock=lambda: 12.0)
+    for cid in ("stop-1", "stop-2"):
+        code, receipt = board.submit({"name": "stop", "command_id": cid})
+        assert code == 202 and receipt["state"] == "accepted"
+        assert receipt["stop_code"] is None and receipt["processed_at_ms"] is None and receipt["result"] is None
+    batch = board.take_stops()
+    assert len(batch) == 2 and all(r["state"] == "executing" for r in batch)
+    board.submit({"name": "stop", "command_id": "later-stop"})
+    board.submit({"name": "say", "command_id": "later-command", "args": {"text": "hello"}})
+    board.finish_stops(batch, code=0, ack_ms=3.4)
+    for cid in ("stop-1", "stop-2"):
+        receipt = board.get(cid)
+        assert receipt["state"] == "completed" and receipt["stop_code"] == 0
+        assert receipt["processed_at_ms"] == 12000 and receipt["result"]["stop_code"] == 0
+    assert board.get("later-stop")["state"] == "accepted"
+    assert board.take() is None  # subsequent motion waits for its preceding stop to be processed
+    board.finish_stops(board.take_stops(), code=9, ack_ms=1)
+    assert board.get("later-stop")["state"] == "failed"
+    assert board.take()["command_id"] == "later-command"
+    assert board.get("stop-1")["state"] == "completed"
+
+
+def test_unacknowledged_stop_fails_without_inventing_code_zero():
+    board = MissionBoard()
+    board.submit({"name": "stop", "command_id": "missing"})
+    board.finish_stops(board.take_stops(), code=None, ack_ms=2000, error="StopMove failed: TimeoutError")
+    receipt = board.get("missing")
+    assert receipt["state"] == "failed" and receipt["stop_code"] is None
+    assert receipt["processed_at_ms"] is not None and "TimeoutError" in receipt["error"]
+
+
+def test_stop_http_returns_correlated_pending_receipt_then_poll_reports_ack():
+    import socket
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    view = LiveView(port=port)
+    view.missions, view.commands = MissionBoard(), {}
+    url = view.start()
+    try:
+        req = urllib.request.Request(url + "stop", data=b'{"command_id":"http-stop"}',
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=2) as response:
+            receipt = json.load(response)
+            assert response.status == 202
+        assert receipt["command_id"] == "http-stop" and receipt["state"] == "accepted"
+        assert receipt["stop_code"] is None and receipt["processed_at_ms"] is None
+        view.missions.finish_stops(view.missions.take_stops(), code=0, ack_ms=2.1)
+        _, _, payload = _get(url + "command/http-stop")
+        receipt = json.loads(payload)
+        assert receipt["state"] == "completed" and receipt["stop_code"] == 0
+        assert receipt["processed_at_ms"] is not None
+        assert "not proof" in receipt["result"]["note"]
+    finally:
+        view.server.shutdown()
+        view.server.server_close()
+
+
+def test_boolean_false_is_not_stop_code_zero():
+    board = MissionBoard()
+    board.submit({"name": "stop", "command_id": "boolean-code"})
+    board.finish_stops(board.take_stops(), code=False, ack_ms=1)
+    receipt = board.get("boolean-code")
+    assert receipt["state"] == "failed" and receipt["stop_code"] is False

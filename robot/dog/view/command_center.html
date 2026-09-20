@@ -126,7 +126,7 @@
 
   <section class="grid two">
     <div class="card">
-      <div class="card-head"><div><p class="eyebrow">Pipeline</p><h2>Latency</h2></div><span class="sub" id="ctrl">- Hz control</span></div>
+      <div class="card-head"><div><p class="eyebrow">Pipeline</p><h2>Latency</h2></div><span class="sub" id="ctrl">Safety checks: waiting</span></div>
       <div class="spark" id="spark"></div>
     </div>
     <div class="card">
@@ -440,7 +440,14 @@
     var ob = $("objects"); ob.hidden = !(t.objects && t.objects.length); ob.textContent = (t.objects || []).join(", ");
     var r = s.ranges || {}; $("r-front").innerHTML = fmtRange(r.front); $("r-left").innerHTML = fmtRange(r.left); $("r-right").innerHTML = fmtRange(r.right);
     $("home").innerHTML = (s.home_m || 0).toFixed(1) + "<small> m</small>"; $("greetings").textContent = s.greetings || 0; $("checkins").textContent = s.checkins || 0;
-    if (s.diag) { feedSparks(s.diag); $("ctrl").textContent = (s.diag.control_hz || 0).toFixed(1) + " Hz control"; }
+    if (s.diag) {
+      feedSparks(s.diag);
+      var checks = s.diag.safety_hz, gap = s.diag.safety_max_gap_ms;
+      $("ctrl").textContent = (checks == null ? "Safety checks: unavailable" : checks.toFixed(1) + " Hz safety checks")
+        + " · " + (s.diag.control_hz || 0).toFixed(1) + " Hz behaviour"
+        + (gap == null ? "" : " · " + gap.toFixed(0) + " ms max check gap");
+      $("ctrl").title = "Actual safety evaluations, outer behaviour updates, and worst recent check gap. Speech and tricks pause behaviour updates. These are software measurements, not hardware stop guarantees.";
+    }
     if (t.map && !mapMeta) { mapMeta = t.map; if (window.THREE) setFloor(mapMeta); }
     var fr = t.frontier || {}; $("goal").textContent = fr.goal ? fr.goal[0].toFixed(1) + ", " + fr.goal[1].toFixed(1) : (fr.available ? "none" : "off");
     $("places").textContent = t.places != null ? t.places : 0;

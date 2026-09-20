@@ -30,7 +30,7 @@ class Diag:
     def __init__(self, window_s=3.0, keep=300):
         self.window_s, self.keep = window_s, keep
         self.lock = threading.Lock()
-        self.stamps = {"received": [], "processed": [], "control": []}
+        self.stamps = {"received": [], "processed": [], "control": [], "safety": [], "motion_tx": []}
         self.samples = {"convert_ms": [], "track_ms": [], "annotate_ms": [], "age_ms": [], "loop_lag_ms": [],
                         "voxel_ms": [], "queue_ms": []}
         self.counts = {"received": 0, "processed": 0, "dropped": 0, "errors": 0}
@@ -66,8 +66,17 @@ class Diag:
     def snapshot(self):
         now = time.monotonic()
         out = {"received_fps": round(self.rate("received", now), 1), "processed_fps": round(self.rate("processed", now), 1),
-               "control_hz": round(self.rate("control", now), 1)}
+               "control_hz": round(self.rate("control", now), 1),
+               "safety_hz": round(self.rate("safety", now), 1),
+               "motion_tx_hz": round(self.rate("motion_tx", now), 1)}
         with self.lock:
+            # control_hz is the outer behaviour loop, which pauses for speech/tricks.
+            # Count actual guard evaluations separately; a heartbeat is not a safety check.
+            guards = self.stamps["safety"]
+            age = max(0.0, now - guards[-1]) if guards else None
+            gaps = [b - a for a, b in zip(guards, guards[1:]) if now - b <= self.window_s]
+            out["safety_age_ms"] = None if age is None else round(age * 1000, 1)
+            out["safety_max_gap_ms"] = None if age is None else round(max([age, *gaps]) * 1000, 1)
             out.update(self.counts)
             for name, lst in self.samples.items():
                 if lst:
@@ -82,7 +91,8 @@ class Diag:
         def ms(k):
             v = s.get(k)
             return "-" if not v else f"{v['mean']:.0f}/{v['p95']:.0f}"
-        return (f"recv={s['received_fps']:.1f}fps proc={s['processed_fps']:.1f}fps ctrl={s['control_hz']:.1f}Hz "
+        return (f"recv={s['received_fps']:.1f}fps proc={s['processed_fps']:.1f}fps behaviour={s['control_hz']:.1f}Hz "
+                f"safety={s['safety_hz']:.1f}Hz gap={s['safety_max_gap_ms']}ms "
                 f"age={ms('age_ms')}ms conv={ms('convert_ms')} track={ms('track_ms')} ann={ms('annotate_ms')} "
                 f"loop_lag={ms('loop_lag_ms')} voxel={ms('voxel_ms')} dropped={s['dropped']} errors={s['errors']}")
 

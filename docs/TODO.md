@@ -6,6 +6,13 @@ as work progresses and record a reason for blocked work.
 
 ## Now
 
+- [x] Add shared Annie speech mute to the family app and operator dashboard. Controls use
+  confirmed server state; muting cancels owned Mac playback and queued synthesis, closes
+  the open conversation window, and preserves microphone commands and robot controls.
+  Muted spoken missions fail honestly. Verified with mocked voice/device/runtime/API tests
+  and a signed physical iPhone build. The separate phone-audio socket cannot cancel bytes
+  already sent. Physical setup remains subject to the telemetry dropout noted in TASK-019.
+
 - [ ] TASK-019: Qualify the user-authorized autonomous demo end to end on hardware (SPEC "Demo casting"; DEC-016).
   Current mode: `--demo-everyone-grandma --autonomous-demo --voice --idle-trick 45 --speed 0.2
   --boundary 5 --target ''` (user override): every visible person is labeled Jeanine
@@ -33,10 +40,13 @@ as work progresses and record a reason for blocked work.
     unsupported flip/rollover guard passed 41 planner tests. Keep still between errand
     approach/say/listen and the 8 s blocked-follow guard are implemented and documented
     (SPEC, DEC-016).
-  - Pending qualification (on disk, not yet in the running process): the converse → rule_plan
-    removal and the unsupported-flip guard in the planner take effect at the next restart; the
-    running session predates them. Root-cause work on the voice-echo accidental stop from the
-    background listener remains open until verified.
+  - The converse → rule_plan removal, unsupported-flip guard, and voice capture-generation
+    fix have been reloaded. Full physical voice qualification remains open. During the mute
+    rollout, held/manual sessions received camera, LiDAR and battery (59–60%), then stopped
+    because pose or lowstate telemetry exceeded its one-second freshness guard. Five ping
+    samples measured 7–816 ms with no loss; that does not establish control-link stability.
+    An independently restarted controller was also observed during reconnects; single
+    controller ownership and stable telemetry remain open. Do not resume motion until resolved.
   - Not done: no full autonomous patrol qualification, no all-green claim, no production
     signoff. Source evidence stays in ignored `.data/hardware/` logs (autonomous-demo and
     interactive-demo sessions); private info, secrets, and machine URLs are not copied into

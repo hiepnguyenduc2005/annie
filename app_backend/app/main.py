@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import StrictBool, BaseModel, ConfigDict, Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .companion import AskRequest, CompanionService, NewReminder
@@ -71,6 +71,7 @@ class PersonIn(BaseModel):
 
 class VoiceSettingsIn(BaseModel):
     """Family-app voice settings; keys are forwarded to the dog process and held in memory only."""
+    muted: StrictBool | None = None
     cloud: bool | None = None
     eleven_key: str | None = Field(default=None, max_length=200)
     deepgram_key: str | None = Field(default=None, max_length=200)
@@ -341,8 +342,8 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
     async def _dog_get(path: str, timeout=2.0):
         url = os.getenv('ANNIE_DOG_VIEW_URL', 'http://127.0.0.1:8011').rstrip('/')
         import httpx
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            return await client.get(url + path)
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            return await client.get(url + path, **({'headers': _dog_headers()} if path == '/voice' else {}))
 
     def _dog_headers():
         return {'X-Body-Token': os.getenv('ANNIE_BODY_TOKEN', '')} if os.getenv('ANNIE_BODY_TOKEN') else {}
@@ -445,7 +446,7 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
         payload = {k: v for k, v in body.model_dump().items() if v is not None}
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=3.0, trust_env=False) as client:
                 r = await client.post(url + '/voice', json=payload, headers=_dog_headers())
         except Exception:
             raise HTTPException(503, 'The dog process is not reachable') from None

@@ -39,6 +39,16 @@ struct DogControlsCard: View {
                 Spacer()
                 if state.live {
                     Button {
+                        guard let muted = state.voice?.muted else { return }
+                        Task { await state.updateVoice(VoiceSettingsUpdate(muted: !muted), saved: muted ? "Audio on" : "Audio muted") }
+                    } label: {
+                        Label(state.voiceSaving ? "Saving…" : state.voice?.muted == true ? "Unmute" : state.voice?.muted == false ? "Mute" : "Audio unavailable",
+                              systemImage: state.voice?.muted == true ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .disabled(state.voiceSaving || state.voice?.muted == nil)
+                    .accessibilityHint("Controls robot and Mac speech; microphone stays on")
+                    Button {
                         Task { await state.pauseTasks() }
                     } label: {
                         Label(state.pausing ? "Pausing…" : "Pause", systemImage: "pause.fill")
@@ -65,7 +75,16 @@ struct DogControlsCard: View {
                 }
             }
 
+            if let note = state.voiceNote {
+                Text(note.text).font(.footnote).foregroundStyle(note.isError ? Palette.alert : Palette.steel)
+            }
             DogStatusLine(dog: state.dog, live: state.live, brief: compact)
+                .task {
+                    while !Task.isCancelled {
+                        await state.loadVoiceSettings()
+                        do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { break }
+                    }
+                }
 
             if !compact {
                 LazyVGrid(columns: columns, spacing: 10) {

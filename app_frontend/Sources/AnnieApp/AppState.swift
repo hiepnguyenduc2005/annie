@@ -106,6 +106,7 @@ final class AppState: ObservableObject {
     @Published private(set) var voice: VoiceSettings?
     @Published var voiceNote: CommandNote?
     @Published private(set) var voiceSaving = false
+    private var voiceRevision = UUID()
 
     /// A short line of feedback under a control: what happened, in words.
     struct CommandNote: Equatable {
@@ -653,11 +654,16 @@ final class AppState: ObservableObject {
     // MARK: Voice settings
 
     func loadVoiceSettings() async {
+        guard !voiceSaving else { return }
         guard live else {
             voice = nil
             return
         }
-        voice = (try? await api.voiceSettings()) ?? .unavailable
+        let revision = voiceRevision
+        let loaded = (try? await api.voiceSettings()) ?? .unavailable
+        guard !voiceSaving, revision == voiceRevision else { return }
+        voice = loaded
+        if voice?.muted == true { synthesizer.stopSpeaking(at: .immediate) }
     }
 
     /// Send only what changed. Returns true when the dog took the change, so a
@@ -668,10 +674,17 @@ final class AppState: ObservableObject {
             voiceNote = CommandNote(text: "Not connected to Annie. Set the server under Advanced.", isError: true)
             return false
         }
+        guard !voiceSaving else { return false }
         voiceSaving = true
+        voiceRevision = UUID()
         defer { voiceSaving = false }
         do {
             voice = try await api.updateVoiceSettings(update)
+            if voice?.muted == true { synthesizer.stopSpeaking(at: .immediate) }
+            if let expected = update.muted, voice?.muted != expected {
+                voiceNote = CommandNote(text: "Audio change was not confirmed. Please retry.", isError: true)
+                return false
+            }
             voiceNote = CommandNote(text: message, isError: false)
             return true
         } catch {
@@ -684,6 +697,7 @@ final class AppState: ObservableObject {
     /// System speech synthesis stands in for ElevenLabs until it's wired in.
     func speak(_ text: String) {
         synthesizer.stopSpeaking(at: .immediate)
+        guard voice?.muted != true else { return }
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = 0.48
         synthesizer.speak(utterance)

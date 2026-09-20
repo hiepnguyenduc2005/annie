@@ -473,6 +473,7 @@ struct AudioDevice: Decodable, Identifiable, Equatable, Hashable {
 /// `GET/POST /api/settings/voice`. API keys are write-only: the backend only
 /// ever reports whether one is set (`elevenlabs`, `deepgram`).
 struct VoiceSettings: Decodable, Equatable {
+    let muted: Bool?
     let available: Bool
     let cloud: Bool
     let elevenlabs: Bool
@@ -487,12 +488,13 @@ struct VoiceSettings: Decodable, Equatable {
                                            speak_via: "off", hear_via: "off", devices: [], input: nil, output: nil)
 
     private enum Keys: String, CodingKey {
-        case available, cloud, elevenlabs, deepgram, speak_via, hear_via, devices, input, output
+        case muted, available, cloud, elevenlabs, deepgram, speak_via, hear_via, devices, input, output
     }
     private enum DeviceKeys: String, CodingKey { case devices, input, output }
 
     init(available: Bool, cloud: Bool, elevenlabs: Bool, deepgram: Bool, speak_via: String, hear_via: String,
-         devices: [AudioDevice], input: String?, output: String?) {
+         devices: [AudioDevice], input: String?, output: String?, muted: Bool? = nil) {
+        self.muted = muted
         self.available = available; self.cloud = cloud; self.elevenlabs = elevenlabs; self.deepgram = deepgram
         self.speak_via = speak_via; self.hear_via = hear_via; self.devices = devices
         self.input = input; self.output = output
@@ -500,6 +502,7 @@ struct VoiceSettings: Decodable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
+        muted = try c.decodeIfPresent(Bool.self, forKey: .muted)
         available = (try? c.decode(Bool.self, forKey: .available)) ?? false
         cloud = (try? c.decode(Bool.self, forKey: .cloud)) ?? false
         elevenlabs = (try? c.decode(Bool.self, forKey: .elevenlabs)) ?? false
@@ -531,6 +534,7 @@ struct VoiceSettings: Decodable, Equatable {
 
 /// Only the fields being changed are sent; nil fields are omitted from the JSON.
 struct VoiceSettingsUpdate: Encodable {
+    var muted: Bool?
     var cloud: Bool?
     var eleven_key: String?
     var deepgram_key: String?

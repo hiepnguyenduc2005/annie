@@ -122,6 +122,17 @@ def test_duplicate_active_message_returns_the_same_run():
         assert post(client, 'drink some water', reminder_id=3).json()['run_id'] != first.json()['run_id']
 
 
+def test_snapshot_includes_other_family_members_and_their_correlated_reminder():
+    family = FamilyService(robot_backend_url='http://robot.example', dispatch_fn=ok_dispatch)
+    with make_client(family) as client:
+        response = client.post('/api/messages', json={'author_id': 'ellis', 'text': 'Charge your phone', 'reminder_id': 4})
+        run_id = response.json()['run_id']
+        snapshot = client.get('/api/family/snapshot').json()
+        assert snapshot['thread'][0]['run_id'] == snapshot['runs'][0]['run_id'] == run_id
+        assert snapshot['runs'][0]['reminder_id'] == 4
+        assert snapshot['thread'][0]['author_id'] == 'ellis'
+
+
 def test_identical_resend_after_terminal_outcome_is_a_new_run():
     async def refused(url, payload, timeout):
         raise httpx.ConnectError('connection refused')

@@ -42,5 +42,10 @@ struct DeliveryStateChecks {
         expect(legacy.motion_enabled == nil && legacy.isSimulated, "Legacy simulator telemetry remains compatible and labeled")
         let pauseReceipt = try decoder.decode(FamilyPauseReceipt.self, from: Data(#"{"paused":true,"cancelled_runs":["r1"],"stop_confirmed":false}"#.utf8))
         expect(!pauseReceipt.stop_confirmed && pauseReceipt.cancelled_runs == ["r1"], "Task cancellation remains distinct from confirmed body stop")
+        let snapshotData = try JSONSerialization.data(withJSONObject: ["thread": [], "runs": [
+            ["run_id": "external", "author_id": "ellis", "text": "Charge your phone", "status": "queued", "created_at": 2, "events": [], "reminder_id": 4]
+        ]])
+        let snapshot = try decoder.decode(FamilySnapshot.self, from: snapshotData)
+        expect(snapshot.runs.first?.reminder_id == 4 && snapshot.runs.first?.author_id == "ellis", "Another family client's reminder is decoded for the same screen")
     }
 }

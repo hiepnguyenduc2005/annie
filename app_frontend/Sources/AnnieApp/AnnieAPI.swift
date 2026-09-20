@@ -133,6 +133,10 @@ struct AnnieAPI {
             from: try await sendJSON("api/family/pause", method: "POST", body: [String: Bool](), timeout: 10))
     }
 
+    func familySnapshot() async throws -> FamilySnapshot {
+        try JSONDecoder().decode(FamilySnapshot.self, from: try await send("api/family/snapshot", method: "GET", timeout: 3))
+    }
+
     // MARK: The dog: live status and direct controls
 
     func dogStatus() async throws -> DogStatus {

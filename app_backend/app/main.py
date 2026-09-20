@@ -303,6 +303,11 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
     async def get_thread():
         return app.state.family.thread
 
+    @router.get('/api/family/snapshot')
+    async def family_snapshot():
+        """One bounded, consistent refresh for family clients, including other phones' runs."""
+        return app.state.family.recent_history()
+
     @router.get('/api/reminders')
     async def list_reminders():
         return app.state.companion.reminders

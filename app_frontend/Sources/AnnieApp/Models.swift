@@ -68,6 +68,11 @@ struct FamilyPauseReceipt: Decodable {
     let stop_confirmed: Bool
 }
 
+struct FamilySnapshot: Decodable {
+    let thread: [ThreadMessage]
+    let runs: [FamilyRun]
+}
+
 struct DispatchAck: Codable {
     let run_id: String
     let status: String

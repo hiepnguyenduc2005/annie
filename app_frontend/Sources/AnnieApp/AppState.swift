@@ -125,6 +125,7 @@ final class AppState: ObservableObject {
     private var seenConversations: Set<String> = []
     private var dogRun = 0
     private var lastDogClock: Double?
+    private var familyPollTask: Task<Void, Never>?
 
     /// A run that has said nothing for this long stops being polled; the
     /// errand itself takes 60-90 s, so this is generous without being forever.
@@ -161,6 +162,7 @@ final class AppState: ObservableObject {
             startDogPolling()
             await refreshRuns()
             watchUnfinishedRuns()
+            startFamilyPolling()
         } catch {
             live = false
             dog = nil
@@ -192,6 +194,25 @@ final class AppState: ObservableObject {
     private func refreshMemory() async {
         guard live, let fresh = try? await api.memory() else { return }
         memory = fresh
+    }
+
+    /// Other relatives and robot callbacks must update this phone even when
+    /// its owner has not pressed Send. Fetch thread and run states together.
+    private func startFamilyPolling() {
+        familyPollTask?.cancel()
+        familyPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refreshFamily()
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    private func refreshFamily() async {
+        guard live, let snapshot = try? await api.familySnapshot() else { return }
+        thread = snapshot.thread
+        for run in snapshot.runs { runs[run.run_id] = run }
+        if let fresh = try? await api.reminders() { reminders = fresh }
     }
 
     // MARK: Reminders

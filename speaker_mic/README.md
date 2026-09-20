@@ -28,10 +28,16 @@ mic packets are dropped instead of building latency. Audio is never written to d
 
 1. Open `SpeakerMic.xcodeproj` (iOS 17+). Pick your Team under Signing & Capabilities,
    or create a gitignored `Local.xcconfig` (see `Config.xcconfig`).
-2. **Set the backend address** in `SpeakerMic/AudioConnection.swift`
-   (`AudioServerConfig.serverURL`). Use the computer's LAN IP, never `127.0.0.1`.
-   The phone and computer must share a Wi-Fi network. iOS asks for Local Network
-   permission on first connect; plain `ws://` is allowed for local addresses only.
+2. Connection settings are built into the app; there are no address or key fields.
+   Simulator defaults to `ws://127.0.0.1:8080/audio`. For a physical phone, set
+   `ANNIE_AUDIO_SERVER_URL = ws:/$()/YOUR-MAC-LAN-IP:8080/audio` in the ignored
+   `Local.xcconfig`, then rebuild. The `$()` prevents `//` becoming an xcconfig comment.
+   Set `ANNIE_PHONE_API_KEY` there only if the audio backend requires it; this
+   development credential is embedded in the installed app, so do not distribute
+   that build. Never commit the local configuration.
+   Start **robot_backend**, which owns `/audio`, on port 8080; `app_backend` is
+   a separate service and has no audio route. `0.0.0.0` is a bind address, not
+   the phone's destination. Both devices must be on a reachable network.
 3. Run on a device, tap **Connect**, then **Start Audio** (allow the microphone).
 
 To try it without the real backend:

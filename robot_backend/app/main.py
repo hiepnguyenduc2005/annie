@@ -14,6 +14,8 @@ from .services.agent import Agent
 from .services.dedicated_server import DedicatedServer, DeliveryError
 from .services.qwen import QwenClient, QwenError
 from .services.deepgram import DeepgramClient, SpeechError
+from .services.deepgram_live import DeepgramLive
+from .services.live_audio import AudioHub
 from .sessions.manager import InMemorySessionManager, SessionError
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,7 @@ def create_app(
     sink=None,
     sessions=None,
     speech=None,
+    live_speech=None,
 ) -> FastAPI:
     settings = settings or Settings()
 
@@ -51,6 +54,8 @@ def create_app(
                 speech or DeepgramClient(settings, client),
             )
             app.state.agent = agent
+            app.state.audio_hub = AudioHub()
+            app.state.live_speech = live_speech or DeepgramLive(settings)
             tasks = [
                 asyncio.create_task(
                     periodic(agent.maintain, settings.maintenance_interval_seconds)

@@ -6,4 +6,8 @@
 //
 // (Or just pick a Team under Signing & Capabilities in Xcode.)
 PRODUCT_BUNDLE_IDENTIFIER = app.annie.audio
+// Override these in Local.xcconfig for a physical phone. The default is for Simulator.
+// Use ws:/$()/HOST:8080/audio so xcconfig does not interpret // as a comment.
+ANNIE_AUDIO_SERVER_URL = ws:/$()/127.0.0.1:8080/audio
+ANNIE_PHONE_API_KEY =
 #include? "Local.xcconfig"

@@ -12,7 +12,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		B20000000000000000000010 /* Exceptions for "SpeakerMic" folder in "SpeakerMic" target */ = {
+		B20000000000000000000010 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -22,14 +22,7 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		B2000000000000000000000C /* SpeakerMic */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				B20000000000000000000010 /* Exceptions for "SpeakerMic" folder in "SpeakerMic" target */,
-			);
-			path = SpeakerMic;
-			sourceTree = "<group>";
-		};
+		B2000000000000000000000C /* SpeakerMic */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (B20000000000000000000010 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = SpeakerMic; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -170,6 +163,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3K8489VMKU;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SpeakerMic/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Annie Audio";
@@ -196,6 +190,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3K8489VMKU;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SpeakerMic/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Annie Audio";

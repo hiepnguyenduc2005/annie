@@ -35,6 +35,9 @@ final class AudioController: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var interrupted = false
     private var recentRestarts: [Date] = []
+    private var playbackTurnID: String?
+    private var expectedReplyBytes = 0
+    private var receivedReplyBytes = 0
 
     init() {
         // Re-publish connection changes so one observed object drives the UI.
@@ -42,7 +45,21 @@ final class AudioController: ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
-        connection.onAudioReceived = { [playback] data in playback.enqueue(data) }
+        connection.onAudioReceived = { [weak self] data in
+            guard let self, self.isRunning, self.playbackTurnID != nil else { return }
+            guard data.count % 2 == 0, self.receivedReplyBytes + data.count <= self.expectedReplyBytes else {
+                self.stopAudio()
+                self.speaker = StatusLine(text: "Invalid reply audio", level: .error)
+                return
+            }
+            self.receivedReplyBytes += data.count
+            self.playback.enqueue(data)
+        }
+        connection.onControlReceived = { [weak self] event in self?.handleControl(event) }
+        connection.onConnectionLost = { [weak self] in
+            self?.playback.clear()
+            self?.playbackTurnID = nil
+        }
 
         // Audio thread -> main queue (FIFO, so packet order is preserved).
         capture.onPacket = { [weak connection] data in
@@ -69,10 +86,23 @@ final class AudioController: ObservableObject {
 
     var isConnectionActive: Bool { connection.state != .disconnected }
 
+    var conversationStatus: StatusLine {
+        let value = connection.conversationState
+        switch value {
+        case "listening": return StatusLine(text: "Listening", level: .ok)
+        case "thinking": return StatusLine(text: "Thinking…", level: .warning)
+        case "speaking": return StatusLine(text: "Speaking", level: .ok)
+        default: return StatusLine(text: "Stopped", level: .off)
+        }
+    }
+
     // MARK: Actions
 
     func toggleConnection() {
-        if isConnectionActive { connection.disconnect() } else { connection.connect() }
+        if isConnectionActive {
+            stopAudio()
+            connection.disconnect()
+        } else { connection.connect() }
     }
 
     func toggleAudio() {
@@ -112,9 +142,12 @@ final class AudioController: ObservableObject {
             microphone = StatusLine(text: "Active (no echo cancellation)", level: .warning)
         }
         speaker = StatusLine(text: "Ready", level: .ok)
+        connection.startConversation()
     }
 
     func stopAudio() {
+        connection.stopConversation()
+        playbackTurnID = nil
         teardownAudio()
         isRunning = false
         UIApplication.shared.isIdleTimerDisabled = false
@@ -132,6 +165,46 @@ final class AudioController: ObservableObject {
         guard isRunning else { return }
         Self.log.debug("Playback \(playing ? "started" : "finished")")
         speaker = StatusLine(text: playing ? "Playing" : "Ready", level: .ok)
+    }
+
+    private func handleControl(_ event: AudioServerEvent) {
+        switch event.type {
+        case "audio_start":
+            guard isRunning, event.sampleRate == 16000, let count = event.bytes,
+                  count > 0, count <= 16000 * 2 * 90, count % 2 == 0,
+                  let turnID = event.turnID else {
+                stopAudio()
+                speaker = StatusLine(text: "Unsupported reply audio", level: .error)
+                return
+            }
+            playback.clear()
+            playbackTurnID = turnID
+            expectedReplyBytes = count
+            receivedReplyBytes = 0
+        case "audio_end":
+            guard let turnID = playbackTurnID, event.turnID == turnID,
+                  receivedReplyBytes == expectedReplyBytes else { return }
+            playback.finishUtterance { [weak self] in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard let self, self.isRunning, self.playbackTurnID == turnID else { return }
+                        self.playbackTurnID = nil
+                        self.connection.acknowledgePlayback(turnID: turnID)
+                    }
+                }
+            }
+        case "state" where event.state == "stopped":
+            if isRunning {
+                // Server stopped after an error/timeout; don't send another stop.
+                teardownAudio()
+                isRunning = false
+                UIApplication.shared.isIdleTimerDisabled = false
+                playbackTurnID = nil
+                microphone = StatusLine(text: "Off", level: .off)
+                speaker = StatusLine(text: "Off", level: .off)
+            }
+        default: break
+        }
     }
 
     // MARK: System events

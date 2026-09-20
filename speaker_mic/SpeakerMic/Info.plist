@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>AnnieAudioServerURL</key>
+	<string>$(ANNIE_AUDIO_SERVER_URL)</string>
+	<key>AnniePhoneAPIKey</key>
+	<string>$(ANNIE_PHONE_API_KEY)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Annie Audio uses this iPhone's microphone to transmit live audio to the Annie companion.</string>
 	<!-- Shown the first time the app connects to a device on the local network. -->

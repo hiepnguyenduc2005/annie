@@ -12,13 +12,11 @@ struct ContentView: View {
                 StatusRow(title: "Server", status: controller.serverStatus)
                 StatusRow(title: "Microphone", status: controller.microphone)
                 StatusRow(title: "Speaker", status: controller.speaker)
+                StatusRow(title: "Conversation", status: controller.conversationStatus)
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(controller.connection.serverURLString)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                if let error = controller.connection.lastError, controller.connection.state != .connected {
+                if let error = controller.connection.lastError {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
                 if controller.microphoneDenied {
@@ -54,7 +52,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(controller.isRunning ? .red : .accentColor)
-                .disabled(controller.isStarting)
+                .disabled(controller.isStarting || controller.connection.state != .connected)
 
                 Button {
                     controller.toggleConnection()

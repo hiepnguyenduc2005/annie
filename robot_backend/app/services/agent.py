@@ -45,7 +45,12 @@ class Agent:
         )
 
     async def generate(
-        self, session_id: str | None, content: list[dict], start: bool = False
+        self,
+        session_id: str | None,
+        content: list[dict],
+        start: bool = False,
+        *,
+        sample_rate: int = 24000,
     ) -> GenerateResponse:
         if not content and not (start and session_id):
             raise SessionError(
@@ -87,7 +92,9 @@ class Agent:
                 spoken_text = await self.model.reply(
                     prompts.conversation_messages(session, current)
                 )
-                audio = await self.speech.synthesize(spoken_text)
+                audio = await self.speech.synthesize(
+                    spoken_text, sample_rate=sample_rate
+                )
             except (QwenError, SpeechError):
                 if created:
                     await self.sessions.discard(session.session_id)
@@ -97,9 +104,9 @@ class Agent:
                     prompts.analysis_messages(session, current, spoken_text),
                     TurnAnalysis,
                 )
-            except QwenError:
+            except QwenError as exc:
                 logger.warning(
-                    "Turn analysis unavailable; returning audio with conservative state"
+                    "Turn analysis unavailable (%s); returning audio with conservative state", exc
                 )
                 text = " ".join(
                     part["text"] for part in current if part["type"] == "text"

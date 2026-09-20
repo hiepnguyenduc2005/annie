@@ -4,6 +4,7 @@ See README for source references; live GB10 inference remains a deployment check
 """
 
 import base64
+import json
 from typing import Protocol, TypeVar
 
 import httpx
@@ -73,9 +74,29 @@ class QwenClient:
         return await self._request(messages, max_tokens=500)
 
     async def structured(self, messages: list[dict], schema: type[T]) -> T:
-        text = await self._request(messages, max_tokens=1600)
+        # End with an explicit analysis request rather than an assistant reply
+        # that the chat model may simply continue. No server-specific extensions.
+        instruction = (
+            "Analyze the preceding session data. Return only one JSON object "
+            "matching this schema. Do not continue the conversation or invent "
+            "evidence. Use inconclusive/active and false when unsupported. Schema: "
+            + json.dumps(schema.model_json_schema())
+        )
+        text = await self._request(
+            [*messages, {"role": "user", "content": instruction}], max_tokens=1600
+        )
+        # Accept a single enclosing JSON code fence, but never fish an object
+        # out of arbitrary prose or fill in missing evidence-bearing fields.
+        lines = text.splitlines()
+        if len(lines) >= 3 and lines[0].strip() in {"```json", "```"} and lines[-1].strip() == "```":
+            text = "\n".join(lines[1:-1])
         try:
-            # No assumed JSON-schema extension or extraction from mixed prose.
             return schema.model_validate_json(text)
-        except ValidationError:
-            raise QwenError("Qwen returned invalid internal analysis") from None
+        except ValidationError as exc:
+            # Error codes only: locations, input values and messages can contain
+            # private model output. A response reached us before this validation.
+            codes = sorted({error["type"] for error in exc.errors(include_input=False, include_context=False)})
+            raise QwenError(
+                "Qwen responded, but internal analysis failed validation: "
+                + ", ".join(codes)
+            ) from None

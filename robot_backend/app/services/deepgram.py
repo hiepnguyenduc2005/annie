@@ -1,6 +1,8 @@
 """Deepgram REST speech adapters. Only current audio and spoken reply leave here."""
 
 import base64
+import io
+import wave
 from typing import Protocol
 
 import httpx
@@ -16,7 +18,7 @@ class SpeechError(Exception):
 
 class SpeechClient(Protocol):
     async def transcribe(self, audio: bytes, mime: str) -> str: ...
-    async def synthesize(self, text: str) -> str: ...
+    async def synthesize(self, text: str, *, sample_rate: int = 24000) -> str: ...
 
 
 class DeepgramClient:
@@ -76,7 +78,9 @@ class DeepgramClient:
             raise SpeechError("No speech was recognized; please try again", 422)
         return text.strip()
 
-    async def synthesize(self, text: str) -> str:
+    async def synthesize(self, text: str, *, sample_rate: int = 24000) -> str:
+        if sample_rate not in {16000, 24000}:
+            raise SpeechError("Unsupported speech sample rate")
         if not text.strip() or len(text) > 2000:
             raise SpeechError(
                 "Spoken reply is empty or exceeds the speech length limit"
@@ -86,12 +90,20 @@ class DeepgramClient:
             params={
                 "model": self.settings.deepgram_tts_model,
                 "encoding": "linear16",
-                "container": "wav",
-                "sample_rate": "24000",
+                "container": "none",
+                "sample_rate": str(sample_rate),
             },
             json={"text": text},
             limit=32 * 1024 * 1024,
         )
-        if len(data) <= 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
-            raise SpeechError("Deepgram returned invalid WAV audio")
-        return base64.b64encode(data).decode("ascii")
+        # Request raw PCM and write a finalized WAV ourselves. Streaming WAV
+        # headers may declare placeholder lengths that strict readers reject.
+        if not data or len(data) % 2 or data.startswith(b"RIFF"):
+            raise SpeechError("Deepgram returned invalid PCM audio")
+        output = io.BytesIO()
+        with wave.open(output, "wb") as target:
+            target.setnchannels(1)
+            target.setsampwidth(2)
+            target.setframerate(sample_rate)
+            target.writeframes(data)
+        return base64.b64encode(output.getvalue()).decode("ascii")

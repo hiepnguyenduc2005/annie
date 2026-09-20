@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     deepgram_tts_model: str = "aura-2-thalia-en"
     deepgram_language: str = "en"
     deepgram_request_timeout: float = Field(30, gt=0, le=180)
+    audio_endpointing_ms: int = Field(700, ge=300, le=2000)
+    audio_playback_grace_seconds: float = Field(10, ge=1, le=30)
+    final_result_delivery_enabled: bool = False
     dedicated_server_url: str = ""
     dedicated_server_api_key: SecretStr = SecretStr("")
     phone_api_key: SecretStr = SecretStr("")

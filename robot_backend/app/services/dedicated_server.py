@@ -1,5 +1,6 @@
 """Durable summary-only outbox. No transcript, prompt or media is stored here."""
 
+import asyncio
 import logging
 import sqlite3
 import time
@@ -24,6 +25,7 @@ class FinalEventSink(Protocol):
 
 class DedicatedServer:
     def __init__(self, settings: Settings, client: httpx.AsyncClient):
+        self._delivery_lock = asyncio.Lock()
         self.settings = settings
         self.client = client
         settings.outbox_path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,6 +36,10 @@ class DedicatedServer:
             delivered_at REAL
         )""")
         self.db.commit()
+        if not settings.final_result_delivery_enabled:
+            logger.info("Final-result API delivery disabled; summaries remain local")
+        elif not settings.dedicated_server_url:
+            logger.warning("DEDICATED_SERVER_URL is unset; final results will remain in the local outbox")
 
     async def enqueue(self, event: FinalEvent) -> None:
         try:
@@ -48,7 +54,11 @@ class DedicatedServer:
             ) from None
 
     async def deliver_pending(self) -> None:
-        if not self.settings.dedicated_server_url:
+        async with self._delivery_lock:
+            await self._deliver_pending()
+
+    async def _deliver_pending(self) -> None:
+        if not self.settings.final_result_delivery_enabled or not self.settings.dedicated_server_url:
             return
         rows = self.db.execute(
             "SELECT session_id, payload, attempts FROM outbox WHERE delivered_at IS NULL AND next_attempt <= ? LIMIT 10",
@@ -82,6 +92,7 @@ class DedicatedServer:
                     )
                 logger.warning("Final-result delivery failed; retry scheduled")
             else:
+                logger.info("Final-result API accepted delivery (HTTP %s)", response.status_code)
                 with self.db:
                     self.db.execute(
                         "UPDATE outbox SET payload=NULL, delivered_at=? WHERE session_id=?",

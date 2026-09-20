@@ -174,7 +174,12 @@ Errors and routine application logs do not echo model bodies or private inputs.
 
 ## Dedicated-server delivery
 
-`DEDICATED_SERVER_URL` is the **complete final-event endpoint**, not a base URL.
+API delivery is disabled by default (`FINAL_RESULT_DELIVERY_ENABLED=false`).
+Stop Audio still ends the session and saves its summary locally; no Swift change
+or reinstall is required. To enable delivery later, set the flag to `true` and
+configure `DEDICATED_SERVER_URL` as the **complete final-event endpoint**, not a
+base URL. Enabling delivery also sends retained pending summaries. Stop Audio
+attempts delivery after finalization when enabled; failed requests remain queued.
 Only this schema crosses that boundary:
 
 ```json
@@ -235,3 +240,16 @@ The speech regression tests use standard-library unittest and mocked HTTP.
 Use the API examples above with synthetic media for deployment checks. Syntax and
 mocked HTTP checks do not establish model quality, actual audio playback, real
 phone delivery or physical robot behavior.
+
+Internal Qwen analysis requests include the exact JSON schema and end with an
+explicit analysis instruction. A single enclosing JSON code fence is accepted;
+missing fields and mixed prose still fail validation. Logs report validation
+error codes without provider text. Invalid analysis uses active/unsupported
+fallback state rather than inventing completion. These paths are tested with
+mocked Qwen responses; live model compliance remains a deployment check.
+
+Speech synthesis requests raw `linear16` PCM (`container=none`) from Deepgram
+and creates a finalized WAV locally, avoiding dependence on streaming WAV
+length headers. The phone path requests 16 kHz; REST retains 24 kHz WAV.
+Reference: https://developers.deepgram.com/docs/tts-media-output-settings
+Mocked tests check exact PCM sample preservation and finalized WAV lengths.

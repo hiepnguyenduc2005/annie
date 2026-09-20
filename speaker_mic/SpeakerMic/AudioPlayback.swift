@@ -20,6 +20,7 @@ final class AudioPlayback {
     private var queuedBuffers = 0
     /// Odd trailing byte of the previous chunk (samples are 2 bytes).
     private var carryByte: UInt8?
+    private var drainCompletion: (() -> Void)?
 
     /// Adds the player node to `engine`. Call before the engine starts.
     func prepare(engine: AVAudioEngine) {
@@ -31,6 +32,7 @@ final class AudioPlayback {
             player = node
             queuedBuffers = 0
             carryByte = nil
+            drainCompletion = nil
         }
     }
 
@@ -46,7 +48,35 @@ final class AudioPlayback {
             player = nil
             queuedBuffers = 0
             carryByte = nil
+            drainCompletion = nil
         }
+    }
+
+    /// Drop unplayed audio after a disconnect or cancelled turn.
+    func clear() {
+        queue.sync {
+            generation += 1
+            player?.stop()
+            player?.play()
+            queuedBuffers = 0
+            carryByte = nil
+            drainCompletion = nil
+        }
+    }
+
+    /// Called after the server's audio_end, after all enqueue calls. The serial
+    /// queue prevents an early acknowledgment while buffers await scheduling.
+    func finishUtterance(_ completion: @escaping () -> Void) {
+        queue.async { [self] in
+            drainCompletion = completion
+            notifyDrained()
+        }
+    }
+
+    private func notifyDrained() {
+        guard queuedBuffers == 0, let completion = drainCompletion else { return }
+        drainCompletion = nil
+        completion()
     }
 
     /// Queues one received binary frame. Safe to call from any thread.
@@ -85,6 +115,7 @@ final class AudioPlayback {
                     guard let self, self.generation == scheduledIn else { return }
                     self.queuedBuffers -= 1
                     if self.queuedBuffers == 0 { self.onPlayingChange?(false) }
+                    self.notifyDrained()
                 }
             }
         }

@@ -133,3 +133,13 @@ sequence the five supported tricks by execution receipts, and summarize stack
 status. Each step reports measured elapsed time and has a bounded wait. A trick
 is an optional planner action for celebrating a reassured resident; execution
 still uses the simulator's motion gates. These are simulator workflows only.
+
+## Standalone audio phone configuration
+
+The `speaker_mic` app uses a build-configured `robot_backend` WebSocket URL
+(port 8080, `/audio`) without asking the operator to enter connection settings
+on the phone. Machine-specific settings remain in ignored `Local.xcconfig`.
+
+Standalone companion final-result API delivery is disabled by default. Explicit
+Stop Audio still finalizes and retains a summary locally. Delivery requires
+`FINAL_RESULT_DELIVERY_ENABLED=true` and a configured destination.

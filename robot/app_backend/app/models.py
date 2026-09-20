@@ -90,7 +90,7 @@ class Command(StrictModel):
 
 class CommandReceipt(StrictModel):
     status: Literal['accepted', 'executing', 'completed', 'failed']
-    source: Literal['simulation']
+    source: Literal['simulation', 'host']  # host: audio played on the computer attached to the robot
     detail: str | None = Field(default=None, max_length=500)
 
 class Ack(StrictModel):

@@ -249,6 +249,19 @@ of Wi-Fi and Bluetooth range from the host and its last battery reading was
   command. 10 fakes-only tests. Capture times are host receipt times paired
   with odometry by receipt time, not calibrated synchronization.
 
+- `robot/go2_host_voice.py`: the viewer's audio role for hardware. It polls the
+  app for queued `say` commands, renders them with the offline `say` adapter,
+  plays them on this host and reports `accepted/executing/completed/failed`
+  receipts with `source: host`; when the app opens a reply window it runs the
+  live VAD-gated microphone listener once per event. Motion commands are left
+  in the queue and counted. Measured 2026-09-19 on this Mac against a throwaway
+  app with `ANNIE_REQUIRE_AUDIO_RECEIPT=true`: ready in ~2 s, the check-in was
+  spoken and completed inside the 8 s audio watchdog, the reply window opened,
+  the microphone heard no speech in a quiet room, and the app recorded
+  `checkin_no_reply` then `fall_confirmed`. A daemon started after the fall
+  misses the watchdog while Whisper warms up, so start it first. 8 fakes-only
+  tests.
+
 ## Verification and outstanding work
 
 - [x] Host inventory executes in the existing Mac runtime.

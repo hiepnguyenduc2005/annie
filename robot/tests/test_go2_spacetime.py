@@ -11,7 +11,7 @@ from go2_spacetime import SpacetimeRecorder, load_jsonl, spacetime_http  # noqa:
 
 np = pytest.importorskip("numpy")
 
-VIEWER = Path(__file__).resolve().parents[1] / "spacetime_viewer.html"
+VIEWER = Path(__file__).resolve().parents[1] / "dog" / "view" / "spacetime_viewer.html"
 
 
 def _cloud(n, offset=0.0):

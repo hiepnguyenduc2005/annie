@@ -257,14 +257,22 @@ working robot connection.
 - `robot/go2_tricks.py`: firmware sport-mode tricks (stand, sit, hello,
   stretch, dance, flips) by api id, with the 40% floor and a 60% floor for the
   acrobatic tier. Hello and stretch acknowledged (code 0) on the dog at 50%.
-- `robot/go2_patrol_greet.py`: patrol and greet. Motion from
-  `robot/go2_smart_patrol.py` (LiDAR voxel-map sector ranges + odometry stall
-  detector -> cruise / blocked / backoff / homing), greeting each new upright
-  person with the firmware Hello and host speech, and a check-in question for
-  a lying person. First live run greeted 7 people in 100 s; the LiDAR ranges
-  and stall backoff have only been verified against the simulated dog so far.
-  `--firmware-avoid` additionally switches on the robot's own obstacle-avoid
-  service; `--no-lidar` leaves stall detection as the only collision source.
+- `robot/go2_patrol_greet.py`: the live patrol (v0.3, verified on the dog
+  2026-09-20). Follows the nearest upright person (LiDAR front range fused
+  with box size: fast while far, hold at ~0.75 m), greets only when close and
+  centred with a rotating firmware trick and host speech, never re-greets the
+  same person/spot for minutes, checks on a lying person ("are you alright?"),
+  turns toward a lost person, resumes patrol after holding on a stationary
+  greeted person. Patrol motion is `robot/go2_smart_patrol.py`: UCB heading
+  bandit with an occupancy-grid prior on top of the LiDAR / stall / leash /
+  battery guardrails. `--brain` lets a local VLM (`robot/go2_patrol_brain.py`,
+  loopback only) propose explore/turn/scan/approach/go_home/wait every few
+  seconds; guardrails and people-in-view always win. `--voice` listens for
+  "Annie, <command>" on the host microphone (`robot/go2_voice_commands.py`).
+  Live view with boxes, skeletons, diagnostics and the LiDAR map at
+  `http://127.0.0.1:8011/`. Perception is `robot/go2_perception_pipeline.py`
+  (threaded convert/track/annotate; `diag` lines every 5 s). `--no-motion`
+  runs perception only for bounded benchmarking.
 - `robot/go2_follow.py`: follow the nearest tracked person by visual servo on
   the bounding box (turn to centre, walk to a target height, stop when too
   close). Written and unit-tested; not yet run on the dog.

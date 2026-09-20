@@ -6,10 +6,46 @@ as work progresses and record a reason for blocked work.
 
 ## Now
 
+- [ ] TASK-019: Qualify the user-authorized autonomous demo end to end on hardware (SPEC "Demo casting"; DEC-016).
+  Current mode: `--demo-everyone-grandma --autonomous-demo --voice --idle-trick 45 --speed 0.2
+  --boundary 5 --target ''` (user override): every visible person is labeled Jeanine
+  (`demo_role`, no identity recognition); `--autonomous-demo` requires everyone mode and is
+  rejected with manual-control or paused startup; everyone mode alone (and clothing selection)
+  keeps the held/manual start. Model inference is ON via the local Ollama text planner
+  `annie-qwen3-vl:2b`; Deepgram/ElevenLabs cloud voice is configured, with mic/speaker on the
+  Mac host, not the robot (so "no cloud provider" means the model only).
+  - Physical evidence: stand completed with code 0 and the user confirmed the dog upright; a
+    short autonomous patrol measured 0.19 m, then the autonomous pose measured ~1.5 m from
+    origin; no full patrol/navigation qualification yet. Physical wave and Mac speech were
+    confirmed earlier by the user. Interactive-restart stop ran with code 0 and a 38.4 ms
+    firmware ack; an acknowledgment is not a measured stop. Runtime is currently held/manual
+    between commands (restored for the upright check); the operator's active Go/explore requests
+    still work in that state.
+  - Verified family delivery: real iPhone requests reached the robot through app API :8021 →
+    errand :8022 → dog :8011. The reminder run completed (found/speaking/listening/heard/
+    completed); the captured speech was ambient conversation, so the reply is recorded unclear,
+    not an intended Grandma response. The check-in run likewise heard ambient speech
+    ("unclear"). Transcripts stay out of tracked files.
+  - Verified in code/tests (fake bodies): latest social/control suites 11 pass; the two new
+    runtime regression tests passed separately; agent planning/conversation checks were 88 pass
+    previously. Voice listener and host-voice checks passed 26 mocked tests; a separate runtime check confirms
+    unaddressed dialogue cannot enqueue movement. The
+    unsupported flip/rollover guard passed 41 planner tests. Keep still between errand
+    approach/say/listen and the 8 s blocked-follow guard are implemented and documented
+    (SPEC, DEC-016).
+  - Pending qualification (on disk, not yet in the running process): the converse → rule_plan
+    removal and the unsupported-flip guard in the planner take effect at the next restart; the
+    running session predates them. Root-cause work on the voice-echo accidental stop from the
+    background listener remains open until verified.
+  - Not done: no full autonomous patrol qualification, no all-green claim, no production
+    signoff. Source evidence stays in ignored `.data/hardware/` logs (autonomous-demo and
+    interactive-demo sessions); private info, secrets, and machine URLs are not copied into
+    tracked files.
+
 - [ ] TASK-018: Finish the physical-phone acceptance pass after unlock ([handoff](PHONE_DELIVERY.md)).
   - Implemented and committed: inline reminder progress, shared family refresh, duplicate suppression, bounded missing-event failure, Pause, correlated firmware stop receipts, and visible ElevenLabs/Deepgram configuration.
   - Verified: 108 family API checks, 344 robot app/backend checks, 111 errand checks, native builds and model/router checks; API-driven native simulator shows executing → cancelled → a fresh request delivered in 24.909 s with mock audio. Physical family Pause acknowledged in 129.7 ms. Updated signed app installed.
-  - Remaining: unlock the Mac/iPhone for direct native-button testing and physical app launch; real voice delivery and sustained physical operation are not established by the mock-audio demonstration.
+  - Physical follow-up: actual iPhone requests now reach the physical robot and Mac audio; see TASK-019. The intended resident reply and sustained physical operation still need qualification.
 
 - [ ] TASK-017: Complete the Claude handoff as an iPhone demo backed by the executing simulator.
   - Scope: conversation with mocked audio, People/re-identification, MCP/care skills, app polish, isolated launch, and seeded message/fall scenarios. See [runbook](SIM_DOG.md).

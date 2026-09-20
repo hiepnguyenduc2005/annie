@@ -229,6 +229,54 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
   and a transient half. The robot side of the three inbound calls is not
   implemented yet, so nothing writes to them in production.
 
+## DEC-015: Demo clothing selection is session-only pointing, never identity
+
+- Date: 2026-09-20.
+- Status: Adopted for the physical demo; the current default casting is instead
+  [DEC-016](#dec-016-autonomous-everyone-as-grandma-demo-is-the-authorized-mode); clothing
+  selection remains the documented per-person alternative.
+- Context: The demo needs the dog to address Jeanine by name without enrolling her face, and the
+  operator must be able to correct a misidentified track instantly while the robot is standing
+  still. The tracker already assigns expiring `Guest N` clothing identities to unnamed people.
+- Decision: With `--require-grandma-selection`, movement is held until the operator assigns a
+  currently visible `Guest N` as Jeanine via `POST /people/assign` (robot connected and paused,
+  fresh observation, both garment samples). The selected track keeps its clothing-only match for
+  the session: no face lookup or enrollment, the guest clothing record is consumed rather than
+  promoted, nothing is written to the faces store, and a restart clears the assignment. Stale,
+  lost, or ambiguous matches void the selection and hold movement until reselection.
+- Alternatives: Promote the guest to a permanent named record; rejected because permanent naming
+  is an enrollment that requires the person's agreement through the family app. Face matching for
+  the selection; rejected because the demo actor is not enrolled and enrollment is out of scope.
+- Consequences: Simultaneous clothing matches trigger a held state plus reselection. A similarly
+  dressed bystander alone can still match the selected sample, so this requires operator supervision.
+  The resident-facing behavior is demo-scoped and does not add a persistent identity mechanism.
+
+## DEC-016: Autonomous everyone-as-Grandma demo is the authorized mode
+
+- Date: 2026-09-20.
+- Status: Adopted following explicit user direction; revisable.
+- Context: The staged demo previously started the dog held in manual control, so every move
+  needed an operator command. The user authorized an autonomous idle demo instead: the dog
+  patrols, greets, and does an occasional gesture on its own while every visible person is
+  treated as Grandma (DEC-015's clothing pointing superseded as the default; no identity
+  recognition either way). The text planner runs on the local Ollama model `annie-qwen3-vl:2b`;
+  Deepgram and ElevenLabs are configured for cloud voice, with the microphone and speaker on the
+  Mac host rather than the robot. No OpenAI key is configured, so no sponsor model API is in
+  use or claimed.
+- Decision: `--demo-everyone-grandma --autonomous-demo` is the current demo mode. The launcher
+  rejects `--autonomous-demo` unless everyone-as-Grandma is selected and both manual-control and
+  paused startup are off; everyone-as-Grandma alone, clothing selection, and manual or paused
+  startups keep the held/manual behavior. While an errand is speaking or listening to a person,
+  the dog holds still between approach, say, and listen steps, and a follow that stays blocked
+  toward an already-greeted person for 8 s resumes patrol instead of hovering.
+- Alternatives: Keeping the held/manual start; rejected because the user explicitly asked for
+  the autonomous idle demo. Generalizing "no cloud" to the whole stack; rejected because cloud
+  voice is configured and used, so the claim would be false.
+- Consequences: The demo no longer waits for an operator to release motion, so the boundary,
+  LiDAR, obstacle, and Pause guards carry the safety case; Pause still holds in every mode.
+  A measured full autonomous patrol is not yet qualified (see TODO TASK-019), so no production
+  or completeness signoff follows from this mode being authorized.
+
 ## Future entries
 
 Use the next `DEC-NNN` ID. Include date, status, context, decision, alternatives,

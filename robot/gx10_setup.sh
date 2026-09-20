@@ -2,7 +2,7 @@
 # Cold start of Annie's brain side on the ASUS GX10 (Ubuntu ARM64, NVIDIA GB10). Idempotent; re-run freely.
 # Usage (on the GX10): bash robot/gx10_setup.sh            # from a clone of this repository
 #   or:                curl -fsSL <raw url of this file> | bash -s -- --clone
-# What it does: git safety net for ~/robot-dog, system packages, uv + Python 3.12 venv, Python deps for
+# What it does: system packages, uv + Python 3.12 venv, Python deps for
 # the errand service and robot_backend brain, .env from the template, a systemd-free start script.
 # What it does NOT do: touch the LLM server already running on :8091, join networks, or start anything
 # that moves the dog (the body service stays on the machine that holds the dog's WebRTC link).
@@ -23,11 +23,8 @@ else
   cd "$(dirname "$0")/.."; ROOT="$(pwd)"
 fi
 
-log "git safety net for the existing ~/robot-dog folder (no repo there yet, per the handover)"
-if [[ -d "$HOME/robot-dog" && ! -d "$HOME/robot-dog/.git" ]]; then
-  ( cd "$HOME/robot-dog" && git init -q && git add -A && git -c user.name=annie -c user.email=annie@local commit -qm "baseline before Annie setup" ) \
-    && echo "baseline commit made in ~/robot-dog" || echo "could not baseline ~/robot-dog (continuing)"
-fi
+# Do not initialize or commit the operator's surrounding directories. They may
+# contain credentials and unrelated work; this script only manages its checkout.
 
 log "system packages"
 if command -v apt-get >/dev/null; then
@@ -51,6 +48,7 @@ ANNIE_VISION_MODE=local
 ANNIE_VISION_BASE_URL=http://127.0.0.1:8091/v1
 ANNIE_VISION_MODEL=Qwen/Qwen2.5-Omni-3B
 EOF
+chmod 600 .env   # local secrets (ANNIE_INTERNAL_SECRET etc.); never world-readable
 
 log "checks"
 .venv/bin/python -c "import fastapi, httpx, uvicorn; print('python deps ok')"

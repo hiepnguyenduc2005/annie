@@ -196,6 +196,32 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: One composer, two paths
+
+    /// Whatever was typed, spoken, or tapped on a chip. A question is answered
+    /// instantly from what Annie remembers and never moves the dog; anything
+    /// else is an instruction and becomes a mission.
+    func submit(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if Self.isQuestion(trimmed) {
+            await ask(trimmed)
+        } else {
+            await send(trimmed)
+        }
+    }
+
+    /// Ends in "?" or opens with a question word. Deliberately conservative:
+    /// "Check on Grandma" and "Tell Grandma..." are instructions.
+    static func isQuestion(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        if lowered.hasSuffix("?") { return true }
+        let openers = ["where", "what", "when", "who", "why", "how", "which", "did", "does", "do", "is", "are",
+                       "was", "were", "has", "have", "had", "can", "could", "will", "would", "should"]
+        guard let first = lowered.split(whereSeparator: { !$0.isLetter }).first else { return false }
+        return openers.contains(String(first))
+    }
+
     // MARK: Messages to Annie
 
     /// Hand the message to the backend and start watching the run it created.
@@ -209,17 +235,19 @@ final class AppState: ObservableObject {
         defer { sending = false }
 
         guard live else {
-            sendError = "Not connected to Annie. Set the server address in Profile."
+            sendError = "Not connected to Annie. Set the server under Profile, Settings, Advanced."
             return
         }
         do {
             _ = try await api.sendMessage(authorID: authorID, text: trimmed)
             thread = (try? await api.thread()) ?? thread
             await refreshRuns()
-            watchActiveRun()
+            watchUnfinishedRuns()
         } catch {
-            sendError = "Couldn't send that. Check the server address in Profile."
-            live = false
+            sendError = humanMessage(for: error)
+            // Only a request that never arrived means the backend is gone. A
+            // "busy" or "not understood" answer is the backend working.
+            if isTransportFailure(error) { live = false }
         }
     }
 
@@ -230,29 +258,112 @@ final class AppState: ObservableObject {
 
     func run(for message: ThreadMessage) -> FamilyRun? { runs[message.run_id] }
 
+    /// Total beats across the runs on screen; the conversation scrolls when it grows.
+    var visibleBeatCount: Int { runs.values.reduce(0) { $0 + $1.events.count } }
+
     private func refreshRuns() async {
         // Only the most recent handful matter on screen; older ones stay in
         // whatever state they were last seen in.
-        for message in thread.suffix(5) {
+        for message in thread.suffix(8) {
             if let run = try? await api.run(id: message.run_id) {
                 runs[run.run_id] = run
             }
         }
     }
 
-    /// Poll the newest run until it reaches a terminal state, so the beats
-    /// appear as the robot reports them.
-    private func watchActiveRun() {
+    /// Poll every recent run that has not reached a terminal state, so beats
+    /// appear as the robot reports them — including an earlier errand still
+    /// under way when a second message is sent. Stops when all are finished,
+    /// or after `runWatchLimit` with no run finishing.
+    private func watchUnfinishedRuns() {
         runPollTask?.cancel()
-        guard let runID = thread.last?.run_id else { return }
         runPollTask = Task { [weak self] in
-            while !Task.isCancelled {
+            let deadline = Date().addingTimeInterval(Self.runWatchLimit)
+            while !Task.isCancelled, Date() < deadline {
                 guard let self else { return }
-                guard let run = try? await self.api.run(id: runID) else { return }
-                self.runs[runID] = run
-                if run.finished { return }
-                try? await Task.sleep(nanoseconds: 700_000_000)
+                let pending = self.thread.suffix(8)
+                    .map(\.run_id)
+                    .filter { !(self.runs[$0]?.finished ?? false) }
+                if pending.isEmpty { return }
+                for runID in pending {
+                    if let run = try? await self.api.run(id: runID) {
+                        self.runs[runID] = run
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 800_000_000)
             }
+        }
+    }
+
+    // MARK: The dog: status and direct controls
+
+    /// The Controls card's status line, refreshed every 3 s while connected.
+    private func startDogPolling() {
+        dogPollTask?.cancel()
+        dogPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refreshDog()
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
+    }
+
+    private func refreshDog() async {
+        guard live else { return }
+        // Any failure reads as "dog offline": the card must never show a
+        // stale "Following, 63%" for a dog that has stopped answering.
+        dog = (try? await api.dogStatus()) ?? .offline
+    }
+
+    /// A Controls button. Stop is never blocked behind another command.
+    func command(_ action: DogAction) async {
+        guard live else {
+            commandNote = CommandNote(text: "Not connected to Annie. Set the server under Profile, Settings, Advanced.", isError: true)
+            return
+        }
+        if commandInFlight != nil && action != .stop { return }
+        commandInFlight = action
+        defer { commandInFlight = nil }
+        do {
+            try await api.dogCommand(action)
+            // Accepted by the dog process. Whether she has actually done it
+            // shows up in the status line, not here.
+            commandNote = CommandNote(text: action.acknowledgement, isError: false)
+            await refreshDog()
+        } catch {
+            commandNote = CommandNote(text: humanMessage(for: error), isError: true)
+            if isTransportFailure(error) { live = false }
+        }
+    }
+
+    // MARK: Voice settings
+
+    func loadVoiceSettings() async {
+        guard live else {
+            voice = nil
+            return
+        }
+        voice = (try? await api.voiceSettings()) ?? .unavailable
+    }
+
+    /// Send only what changed. Returns true when the dog took the change, so a
+    /// caller holding a just-typed key knows whether it was delivered.
+    @discardableResult
+    func updateVoice(_ update: VoiceSettingsUpdate, saved message: String) async -> Bool {
+        guard live else {
+            voiceNote = CommandNote(text: "Not connected to Annie. Set the server under Advanced.", isError: true)
+            return false
+        }
+        voiceSaving = true
+        defer { voiceSaving = false }
+        do {
+            voice = try await api.updateVoiceSettings(update)
+            voiceNote = CommandNote(text: message, isError: false)
+            return true
+        } catch {
+            voiceNote = CommandNote(text: humanMessage(for: error), isError: true)
+            if isTransportFailure(error) { live = false }
+            return false
         }
     }
 

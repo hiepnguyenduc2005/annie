@@ -49,6 +49,13 @@ enum AppConfiguration {
     }
 
     /// Where the API server is right now.
+    /// The Dev tab (dog feed) shows only when the app points at a real server, not the loopback default.
+    static var devFeedAvailable: Bool {
+        let host = apiBaseURL.host ?? ""
+        return !host.isEmpty && host != "127.0.0.1" && host != "localhost"
+            || ProcessInfo.processInfo.environment["ANNIE_DEV_FEED"] == "1"
+    }
+
     static var apiBaseURL: URL {
         if let url = environmentOverride { return url }
         if let saved = UserDefaults.standard.string(forKey: savedURLKey), let url = normalizedURL(saved) {

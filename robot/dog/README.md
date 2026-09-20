@@ -12,7 +12,7 @@ timestamped, positioned diary the agent queries before it decides.
 | `perception/` | threaded convert→track→annotate pipeline, red-shirt target id, object detection, hardware perception loop | `go2_perception_pipeline`, `go2_target_id`, `go2_perception` |
 | `planning/` | smart patrol (LiDAR sectors, stall, bandit, occupancy grid), the patrol brain context/decision, the mission board | `go2_smart_patrol`, `go2_patrol_brain`, `go2_missions` |
 | `missions/` | the family-message coordinator (`errand`), dimOS skills | `go2_errand`, `dimos_skills` |
-| `voice/` | cloud voice (ElevenLabs/Deepgram with local fallback), wake-word commands, host voice loop | `go2_voice_*`, `go2_host_voice` |
+| `voice/` | cloud voice (ElevenLabs/Deepgram with local fallback), wake-word commands, host voice loop, mic/speaker selection by name (`devices.py`) incl. the `speaker/mic` iPhone app as `iPhone (Annie Audio)` over WebSocket :8030 (`phone_audio.py`) | `go2_voice_*`, `go2_host_voice` |
 | `memory/` | space-time recorder + JSON API, Elasticsearch indexer, the 4D graph | `go2_spacetime`, `go2_spacetime_elastic` |
 | `view/` | command-center page (`command_center.html`, served at `/` by the dog process), the 4D viewer, `replay.py` (page from a recording), vendored Three.js | — |
 | `runtime/` | the dog process (`patrol`: explore/greet idle, missions on request, live view) and the standalone body service | `go2_patrol_greet`, `go2_body` |

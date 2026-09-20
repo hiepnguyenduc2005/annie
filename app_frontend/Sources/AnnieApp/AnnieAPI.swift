@@ -12,6 +12,37 @@ enum APIError: Error {
     case badStatus(Int)
 }
 
+/// What to tell a family member when a request fails. Status codes and
+/// transport errors never reach the screen; this is the one place they are
+/// turned into words.
+func humanMessage(for error: Error) -> String {
+    if case APIError.badStatus(let code) = error {
+        switch code {
+        case 409: return "Annie is busy right now. Give her a moment and try again."
+        case 401, 403: return "This phone isn't signed in to Annie's server. Check the token under Profile, Settings, Advanced."
+        case 404: return "Annie's server doesn't know how to do that yet. It may need restarting."
+        case 400, 422: return "Annie didn't understand that. Try saying it another way."
+        case 502, 503, 504: return "Annie's dog isn't answering right now. Check that she is switched on."
+        default: return "Something went wrong on Annie's side. Try again in a moment."
+        }
+    }
+    if let urlError = error as? URLError {
+        switch urlError.code {
+        case .timedOut: return "Annie is taking too long to answer. Try again in a moment."
+        case .notConnectedToInternet, .networkConnectionLost:
+            return "This phone is offline. Check Wi-Fi and try again."
+        default: return "Can't reach Annie. Check the server under Profile, Settings, Advanced."
+        }
+    }
+    return "Something went wrong. Try again in a moment."
+}
+
+/// True when the request never reached the backend (as opposed to the backend
+/// answering with an error). Only this should flip the app to demo data.
+func isTransportFailure(_ error: Error) -> Bool {
+    error is URLError
+}
+
 struct AnnieAPI {
     var baseURL: URL
     var token: String
@@ -95,5 +126,28 @@ struct AnnieAPI {
 
     func run(id: String) async throws -> FamilyRun {
         try JSONDecoder().decode(FamilyRun.self, from: try await send("api/runs/\(id)", method: "GET"))
+    }
+
+    // MARK: The dog: live status and direct controls
+
+    func dogStatus() async throws -> DogStatus {
+        try JSONDecoder().decode(DogStatus.self, from: try await send("api/dog/status", method: "GET"))
+    }
+
+    /// One of the Controls buttons. The dog's receipt is not interpreted here;
+    /// success means the dog process accepted the command, not that it has
+    /// finished (or even started) moving.
+    func dogCommand(_ action: DogAction) async throws {
+        _ = try await sendJSON("api/dog/command", method: "POST", body: DogCommandBody(action: action.rawValue))
+    }
+
+    // MARK: Voice settings
+
+    func voiceSettings() async throws -> VoiceSettings {
+        try JSONDecoder().decode(VoiceSettings.self, from: try await send("api/settings/voice", method: "GET"))
+    }
+
+    func updateVoiceSettings(_ update: VoiceSettingsUpdate) async throws -> VoiceSettings {
+        try JSONDecoder().decode(VoiceSettings.self, from: try await sendJSON("api/settings/voice", method: "POST", body: update))
     }
 }

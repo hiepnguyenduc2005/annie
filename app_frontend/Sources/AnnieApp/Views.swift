@@ -130,28 +130,72 @@ struct AddReminderView: View {
 // Activity feed
 // ---------------------------------------------------------------------------
 
+/// History: what Annie has seen, newest first. Facts the dog is reporting
+/// right now (negative ids, merged in by the backend from her live memory)
+/// sit on top under "Live from Annie"; the seeded and family-added ones sit
+/// under "Earlier".
 struct ActivityView: View {
     @EnvironmentObject private var state: AppState
 
+    // ISO 8601 strings of one fixed format sort correctly as text.
+    private var liveFacts: [MemoryFact] {
+        state.memory.filter(\.isLive).sorted { $0.timestamp > $1.timestamp }
+    }
+    private var earlierFacts: [MemoryFact] {
+        state.memory.filter { !$0.isLive }.sorted { $0.timestamp > $1.timestamp }
+    }
+
     var body: some View {
         List {
-            ForEach(state.memory.reversed()) { fact in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(fmtStamp(fact.timestamp)) \u{00b7} \(fact.room.replacingOccurrences(of: "_", with: " "))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(fact.text)
+            if !liveFacts.isEmpty {
+                Section {
+                    ForEach(liveFacts) { FactRow(fact: $0) }
+                } header: {
+                    HStack(spacing: 8) {
+                        Circle().fill(Palette.liveDot).frame(width: 9, height: 9)
+                        Eyebrow(text: "Live from Annie")
+                    }
                 }
-                .padding(.vertical, 2)
+            }
+            if !earlierFacts.isEmpty {
+                Section {
+                    ForEach(earlierFacts) { FactRow(fact: $0) }
+                } header: {
+                    Eyebrow(text: "Earlier")
+                }
             }
         }
-        .listStyle(.inset)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Palette.cream)
+        .refreshable { await state.refreshHistory() }
         .overlay {
             if state.memory.isEmpty {
-                Text("Nothing observed yet \u{2014} events appear here as Annie sees them.")
-                    .foregroundStyle(.secondary)
+                Text("Nothing observed yet. Events appear here as Annie sees them.")
+                    .foregroundStyle(Palette.steel)
+                    .multilineTextAlignment(.center)
+                    .padding(32)
             }
         }
+    }
+}
+
+private struct FactRow: View {
+    let fact: MemoryFact
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(fmtDayStamp(fact.timestamp)) \u{00b7} \(fact.room.replacingOccurrences(of: "_", with: " "))")
+                .font(.caption)
+                .foregroundStyle(Palette.steel)
+            Text(fact.text)
+                .foregroundStyle(Palette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .annieCard(padding: 12)
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
     }
 }
 
@@ -162,17 +206,21 @@ struct ActivityView: View {
 struct ProfileView: View {
     var body: some View {
         ScrollView {
-        VStack(spacing: 20) {
-            AccountSectionView()
+            VStack(alignment: .leading, spacing: 24) {
+                AccountSectionView()
 
-            ServerSettingsView()
+                SettingsSectionView()
 
-            Text("Annie is a staged assistance prototype, not a medical device or emergency response.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text("Annie is a staged assistance prototype, not a medical device or emergency response.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.steel)
+            }
+            .padding(16)
         }
-        .padding(20)
-        }
+        #if os(iOS)
+        .scrollDismissesKeyboard(.interactively)
+        #endif
+        .background(Palette.cream)
     }
 }
 
@@ -183,27 +231,32 @@ struct AccountSectionView: View {
     @State private var confirmSignOut = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Account")
-                .font(.headline)
-            if let profile = profiles.profile {
-                HStack(spacing: 12) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(Palette.slate)
+                .font(.annieHeading(22))
+                .foregroundStyle(Palette.ink)
+            HStack(spacing: 12) {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.largeTitle)
+                    .foregroundStyle(Palette.slate)
+                if let profile = profiles.profile {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(profile.member.displayName)
+                            .font(.body.weight(.semibold))
                         Text("Signed in \u{00b7} \(profile.createdAt.formatted(date: .abbreviated, time: .omitted))")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(Palette.steel)
                     }
-                    Spacer()
                 }
+                Spacer()
+                Button("Sign out") { confirmSignOut = true }
+                    .font(.callout.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .tint(Palette.slate)
+                    .confirmationDialog("Sign out of Annie on this phone?", isPresented: $confirmSignOut) {
+                        Button("Sign out", role: .destructive) { profiles.signOut() }
+                    }
             }
-            Button("Sign out", role: .destructive) { confirmSignOut = true }
-                .font(.callout)
-                .confirmationDialog("Sign out of Annie on this phone?", isPresented: $confirmSignOut) {
-                    Button("Sign out", role: .destructive) { profiles.signOut() }
-                }
+            .annieCard()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -223,7 +276,7 @@ struct ServerSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Server")
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
             HStack {
                 TextField("Mac address, e.g. 192.168.1.20:8000", text: $text)
                     .textFieldStyle(.roundedBorder)
@@ -236,6 +289,7 @@ struct ServerSettingsView: View {
                     .disabled(lockedByEnvironment)
                 Button(connecting ? "Connecting\u{2026}" : "Connect", action: connect)
                     .buttonStyle(.borderedProminent)
+                    .tint(Palette.slate)
                     .disabled(connecting || lockedByEnvironment)
             }
             // Required off-device: the backend serves non-loopback clients
@@ -245,15 +299,15 @@ struct ServerSettingsView: View {
                 .disabled(lockedByEnvironment)
                 .onSubmit(connect)
             if lockedByEnvironment {
-                Text("Set by the ANNIE_API_URL environment variable.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("Set by the ANNIE_API_URL environment variable: \(state.serverURL.absoluteString)")
+                    .font(.caption).foregroundStyle(Palette.steel)
             } else if invalid {
                 Text("Enter an address like 192.168.1.20:8000 or http://my-mac.local:8000.")
-                    .font(.caption).foregroundStyle(.red)
+                    .font(.caption).foregroundStyle(Palette.alert)
             } else {
                 Text(state.live ? "Connected to \(state.serverURL.absoluteString)"
-                                : "Not connected to \(state.serverURL.absoluteString) \u{2014} showing demo data.")
-                    .font(.caption).foregroundStyle(.secondary)
+                                : "Not connected to \(state.serverURL.absoluteString). Showing demo data.")
+                    .font(.caption).foregroundStyle(Palette.steel)
             }
         }
         .onAppear {

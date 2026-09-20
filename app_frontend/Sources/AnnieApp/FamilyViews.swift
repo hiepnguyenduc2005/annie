@@ -2,16 +2,18 @@
 //  FamilyViews.swift
 //  AnnieApp
 //
-//  One screen for everything a family member says to Annie. Most questions
-//  ("did she take her medication?") are answered instantly from what Annie
-//  already remembers — nothing moves. When Annie doesn't know, the answer
-//  says so, and a family member can explicitly ask her to check with Jeanine
-//  in person ("check if the door is shut"); that dispatches the same
-//  navigate/speak/listen/recall errand as before, reported live as it happens.
+//  One screen for everything a family member says to Annie.
 //
-//  The two never get confused for each other: asking is always instant and
-//  silent, checking in person is always an explicit tap, one real errand,
-//  reported plainly if the dog is slow, busy, or unreachable.
+//  - A question ("Where is Grandma?") is answered instantly from what Annie
+//    already remembers (POST /api/ask). Nothing moves.
+//  - Anything else ("Go wave at Grandma") is an instruction and becomes a
+//    mission (POST /api/messages): she finds the person, speaks, listens, and
+//    reports. Its beats appear under the message as the robot sends them.
+//  - The Controls card on top talks to the dog directly (DogControlsView).
+//
+//  `AppState.submit` decides which path a line of text takes. When Annie has
+//  no answer to a question, the turn offers one explicit tap to go and check
+//  in person. Failures are always said in words: busy, offline, unreachable.
 //
 
 import SwiftUI
@@ -39,13 +41,22 @@ private enum ConversationItem: Identifiable {
 
 struct AskAnnieView: View {
     @EnvironmentObject private var state: AppState
+    @StateObject private var dictation = SpeechDictation()
     @State private var draft = ""
+    /// What was already typed when the microphone was switched on; spoken
+    /// words are appended to it rather than replacing it.
+    @State private var draftBeforeDictation = ""
+    @FocusState private var composing: Bool
 
-    private let suggestions = [
-        "Did she take her medication?",
-        "Where are her glasses?",
-        "Check that the front door is shut",
-        "Tell her I'll call tonight",
+    /// Real end-to-end demo tasks, always one tap away. The question is
+    /// answered from memory; the rest are missions for the dog.
+    private let tasks = [
+        "Go wave at Grandma",
+        "Tell Grandma to plug in her phone",
+        "Check on Grandma",
+        "Where is Grandma?",
+        "Go explore",
+        "Come home",
     ]
 
     private var items: [ConversationItem] {
@@ -55,12 +66,17 @@ struct AskAnnieView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            DogControlsCard(compact: composing)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
                         if items.isEmpty {
                             EmptyConversationView()
-                                .padding(.top, 40)
+                                .padding(.top, 12)
                         }
                         ForEach(items) { item in
                             Group {
@@ -74,87 +90,149 @@ struct AskAnnieView: View {
                             .id(item.id)
                         }
                     }
-                    .padding(16)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
                 }
+                #if os(iOS)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
                 .onChange(of: items.count) { _ in
                     withAnimation { proxy.scrollTo(items.last?.id, anchor: .bottom) }
                 }
-                .onChange(of: state.activeRun?.events.count ?? 0) { _ in
+                .onChange(of: state.visibleBeatCount) { _ in
                     withAnimation { proxy.scrollTo(items.last?.id, anchor: .bottom) }
                 }
             }
 
-            Divider()
+            Rectangle().fill(Palette.line).frame(height: 1)
             composer
         }
+        .background(Palette.cream)
+        .onChange(of: dictation.transcript) { spoken in
+            guard dictation.isRecording || !spoken.isEmpty else { return }
+            draft = draftBeforeDictation.isEmpty ? spoken : draftBeforeDictation + " " + spoken
+        }
+        .onDisappear { dictation.stop() }
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let error = state.sendError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+        VStack(alignment: .leading, spacing: 10) {
+            if let problem = dictation.problem ?? state.sendError {
+                Text(problem)
+                    .font(.footnote)
+                    .foregroundStyle(Palette.alert)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12)
             }
-            if state.askTurns.isEmpty && state.thread.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(suggestions, id: \.self) { suggestion in
-                            Button(suggestion) {
-                                draft = suggestion
-                                sendDraft()
-                            }
-                            .buttonStyle(.bordered)
-                            .font(.callout)
-                        }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(tasks, id: \.self) { task in
+                        Button(task) { run(task) }
+                            .buttonStyle(TaskChipStyle())
+                            .disabled(state.sending)
                     }
-                    .padding(.horizontal, 2)
                 }
+                .padding(.horizontal, 12)
             }
-            HStack(alignment: .bottom, spacing: 10) {
-                TextField("Ask Annie\u{2026}", text: $draft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+
+            HStack(alignment: .bottom, spacing: 8) {
+                if dictation.isSupported {
+                    Button(action: toggleDictation) {
+                        Image(systemName: dictation.isRecording ? "stop.circle.fill" : "mic.circle.fill")
+                            .font(.system(size: 32))
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(dictation.isRecording ? Palette.alert : Palette.slate)
+                    .accessibilityLabel(dictation.isRecording ? "Stop listening" : "Speak to Annie")
+                }
+
+                TextField(dictation.isRecording ? "Listening\u{2026}" : "Ask or tell Annie\u{2026}", text: $draft, axis: .vertical)
                     .lineLimit(1...4)
+                    .focused($composing)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Palette.paper, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(dictation.isRecording ? Palette.alert : Palette.line, lineWidth: 1)
+                    )
                     .onSubmit(sendDraft)
+
                 Button(action: sendDraft) {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 30))
+                        .font(.system(size: 32))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(canSend ? Palette.slate : Palette.mist)
                 .disabled(!canSend)
-                .help("Ask Annie")
+                .accessibilityLabel("Send to Annie")
             }
+            .padding(.horizontal, 12)
         }
-        .padding(12)
+        .padding(.vertical, 10)
+        .background(Palette.cream)
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespaces).isEmpty
+        !draft.trimmingCharacters(in: .whitespaces).isEmpty && !state.sending
+    }
+
+    private func toggleDictation() {
+        if !dictation.isRecording { draftBeforeDictation = draft.trimmingCharacters(in: .whitespaces) }
+        dictation.toggle()
     }
 
     private func sendDraft() {
         guard canSend else { return }
+        dictation.stop()
         let text = draft
         draft = ""
-        Task { await state.ask(text) }
+        draftBeforeDictation = ""
+        composing = false
+        Task { await state.submit(text) }
+    }
+
+    private func run(_ task: String) {
+        dictation.stop()
+        composing = false
+        Task { await state.submit(task) }
+    }
+}
+
+/// A sample task: soft capsule, ink text, slate when pressed.
+private struct TaskChipStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.medium))
+            .lineLimit(1)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .foregroundStyle(configuration.isPressed ? Color.white : Palette.ink)
+            .background(configuration.isPressed ? Palette.slate : Palette.paper, in: Capsule())
+            .overlay(Capsule().stroke(Palette.line, lineWidth: 1))
+            .opacity(isEnabled ? 1 : 0.5)
     }
 }
 
 private struct EmptyConversationView: View {
     var body: some View {
-        VStack(spacing: 10) {
-            AnnieMark(height: 52)
+        VStack(spacing: 8) {
+            AnnieMark(height: 40)
                 .foregroundStyle(Palette.steel)
-            Text("Ask Annie anything about Jeanine")
-                .font(.headline)
-            Text("Most questions answer instantly from what Annie's already seen. If she doesn't know, you can ask her to check with Jeanine in person.")
+            Text("Ask Annie, or send her")
+                .font(.annieHeading(22))
+                .foregroundStyle(Palette.ink)
+            Text("Questions are answered straight away from what Annie has seen. Anything else becomes an errand: she finds Grandma, says it, listens, and reports back here.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.steel)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 20)
     }
 }
 
@@ -243,6 +321,14 @@ private struct MessageThreadItem: View {
                 ForEach(run.events) { event in
                     RunEventRow(event: event)
                 }
+            } else {
+                // Sent, but the run hasn't been read back yet.
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("Sending to Annie\u{2026}")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Palette.steel)
+                }
             }
         }
     }
@@ -254,20 +340,33 @@ private struct RunStatusChip: View {
     private var color: Color {
         switch run.status {
         case "completed": return Palette.slate
-        case "unreachable", "failed": return .red
+        case "unreachable", "failed": return Palette.alert
         default: return Palette.steel
+        }
+    }
+
+    private var symbol: String? {
+        switch run.status {
+        case "completed": return "checkmark"
+        case "unreachable", "failed": return "exclamationmark.triangle.fill"
+        default: return nil
         }
     }
 
     var body: some View {
         HStack(spacing: 6) {
             if !run.finished {
-                ProgressView().controlSize(.small)
+                ProgressView().controlSize(.mini)
+            } else if let symbol {
+                Image(systemName: symbol).font(.caption2.weight(.bold))
             }
             Text(run.statusLabel)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(color)
         }
+        .foregroundStyle(color)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(color.opacity(0.12), in: Capsule())
     }
 }
 

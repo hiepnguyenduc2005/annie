@@ -21,6 +21,7 @@ enum Keychain {
     enum Account: String {
         case elevenLabs = "elevenlabs_api_key"
         case deepgram = "deepgram_api_key"
+        case devBodyToken = "dev_body_token"
     }
 
     /// Save (or replace) a secret. Returns false if the Keychain refused.

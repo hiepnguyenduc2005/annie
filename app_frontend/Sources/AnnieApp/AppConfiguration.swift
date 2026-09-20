@@ -23,6 +23,24 @@ enum AppConfiguration {
     private static let savedURLKey = "annieAPIBaseURL"
     private static let savedTokenKey = "annieAPIToken"
 
+    /// Where the Dev tab's dog-process feed lives. It rides on the same host
+    /// as the API server (the Mac holding the dog link); the port is the one
+    /// piece that changes between a real run (:8011) and the simulator (:8111),
+    /// so the demo can point the feed at either without touching code.
+    static let defaultDogFeedPort = 8011
+    private static let savedDogFeedPortKey = "annieDevFeedPort"
+
+    static func saveDogFeedPort(_ text: String) -> Int? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let port = Int(trimmed), (1...65535).contains(port) else { return nil }
+        UserDefaults.standard.set(port, forKey: savedDogFeedPortKey)
+        return port
+    }
+
+    static var dogFeedPort: Int {
+        UserDefaults.standard.object(forKey: savedDogFeedPortKey) as? Int ?? defaultDogFeedPort
+    }
+
     /// Bearer token for the backend, when one is configured there. Empty means
     /// none, which the backend only accepts from loopback clients — so a phone
     /// on the LAN needs this set. Kept in UserDefaults alongside the address:

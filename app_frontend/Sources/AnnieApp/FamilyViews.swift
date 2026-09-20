@@ -2,13 +2,18 @@
 //  FamilyViews.swift
 //  AnnieApp
 //
-//  One screen for everything a family member says to Annie.
+//  One timeline for everything said to Annie, and everything Annie says.
 //
 //  - A question ("Where is Grandma?") is answered instantly from what Annie
 //    already remembers (POST /api/ask). Nothing moves.
-//  - Anything else ("Go wave at Grandma") is an instruction and becomes a
-//    mission (POST /api/messages): she finds the person, speaks, listens, and
-//    reports. Its beats appear under the message as the robot sends them.
+//  - Anything else is an instruction. While the dog is answering it goes
+//    straight to her (POST /api/dog/command {text}) and the item shows the
+//    mission board's receipt: queued, executing, completed or failed, with
+//    her reply. When she is not, it goes as a family errand
+//    (POST /api/messages) and its beats appear as the robot sends them. A
+//    caption under each one says which path it took.
+//  - Annie's own exchanges with whoever she meets at home arrive with the
+//    dog's status every 3 s and sit in the same timeline as small cards.
 //  - The Controls card on top talks to the dog directly (DogControlsView).
 //
 //  `AppState.submit` decides which path a line of text takes. When Annie has
@@ -23,11 +28,15 @@ import SwiftUI
 private enum ConversationItem: Identifiable {
     case ask(AskTurn)
     case message(ThreadMessage)
+    case instruction(DirectInstruction)
+    case conversation(ConversationCard)
 
     var id: String {
         switch self {
         case .ask(let turn): return "ask-\(turn.id)"
         case .message(let message): return "msg-\(message.id)"
+        case .instruction(let instruction): return "do-\(instruction.id)"
+        case .conversation(let card): return "talk-\(card.id)"
         }
     }
 
@@ -35,8 +44,25 @@ private enum ConversationItem: Identifiable {
         switch self {
         case .ask(let turn): return turn.at
         case .message(let message): return message.at
+        case .instruction(let instruction): return instruction.at
+        case .conversation(let card): return card.at
         }
     }
+}
+
+/// A first task to try, shown while the timeline is still empty.
+private struct StarterTask: Identifiable {
+    let title: String
+    let symbol: String
+    let task: String   // what is actually sent
+
+    var id: String { task }
+
+    static let all = [
+        StarterTask(title: "Wave at Grandma", symbol: "hand.wave", task: "Go wave at Grandma"),
+        StarterTask(title: "Remind her to plug in her phone", symbol: "bolt.badge.clock", task: "Tell Grandma to plug in her phone"),
+        StarterTask(title: "Check on Grandma", symbol: "heart.text.square", task: "Check on Grandma"),
+    ]
 }
 
 struct AskAnnieView: View {
@@ -47,6 +73,10 @@ struct AskAnnieView: View {
     /// words are appended to it rather than replacing it.
     @State private var draftBeforeDictation = ""
     @FocusState private var composing: Bool
+    /// The family member's own choice for the Controls card. Until they make
+    /// one it is open on an empty timeline and folded once there is a
+    /// conversation to read, so the chat is never squeezed into a sliver.
+    @State private var controlsOpen: Bool?
 
     /// Real end-to-end demo tasks, always one tap away. The question is
     /// answered from memory; the rest are missions for the dog.
@@ -60,13 +90,26 @@ struct AskAnnieView: View {
     ]
 
     private var items: [ConversationItem] {
-        (state.askTurns.map(ConversationItem.ask) + state.thread.map(ConversationItem.message))
+        (state.askTurns.map(ConversationItem.ask)
+            + state.thread.map(ConversationItem.message)
+            + state.instructions.map(ConversationItem.instruction)
+            + state.conversations.map(ConversationItem.conversation))
             .sorted { $0.at < $1.at }
+    }
+
+    private var controlsShown: Bool { controlsOpen ?? items.isEmpty }
+
+    /// Changes whenever something on the timeline grows or moves on, so the
+    /// view can follow it to the bottom.
+    private var progressKey: String {
+        let receipts = state.instructions.map { "\($0.state)\($0.reply == nil ? "" : "+")" }.joined(separator: ",")
+        return "\(state.visibleBeatCount)|\(receipts)"
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            DogControlsCard(compact: composing)
+            DogControlsCard(compact: composing || !controlsShown,
+                            toggle: composing ? nil : { controlsOpen = !controlsShown })
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 10)
@@ -75,8 +118,8 @@ struct AskAnnieView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
                         if items.isEmpty {
-                            EmptyConversationView()
-                                .padding(.top, 12)
+                            EmptyConversationView(disabled: state.sending) { run($0) }
+                                .padding(.top, 4)
                         }
                         ForEach(items) { item in
                             Group {
@@ -84,7 +127,12 @@ struct AskAnnieView: View {
                                 case .ask(let turn):
                                     AskTurnRow(turn: turn)
                                 case .message(let message):
-                                    MessageThreadItem(message: message, run: state.run(for: message))
+                                    MessageThreadItem(message: message, run: state.run(for: message),
+                                                      insteadOfDog: state.fallbackRunIDs.contains(message.run_id))
+                                case .instruction(let instruction):
+                                    InstructionItem(instruction: instruction)
+                                case .conversation(let card):
+                                    AnnieConversationCard(card: card)
                                 }
                             }
                             .id(item.id)
@@ -99,7 +147,7 @@ struct AskAnnieView: View {
                 .onChange(of: items.count) { _ in
                     withAnimation { proxy.scrollTo(items.last?.id, anchor: .bottom) }
                 }
-                .onChange(of: state.visibleBeatCount) { _ in
+                .onChange(of: progressKey) { _ in
                     withAnimation { proxy.scrollTo(items.last?.id, anchor: .bottom) }
                 }
             }
@@ -218,21 +266,78 @@ private struct TaskChipStyle: ButtonStyle {
     }
 }
 
+/// Nothing on the timeline yet: say what this screen is for in one breath,
+/// and put three real tasks one tap away.
 private struct EmptyConversationView: View {
+    let disabled: Bool
+    let start: (String) -> Void
+
     var body: some View {
-        VStack(spacing: 8) {
-            AnnieMark(height: 40)
-                .foregroundStyle(Palette.steel)
-            Text("Ask Annie, or send her")
-                .font(.annieHeading(22))
-                .foregroundStyle(Palette.ink)
-            Text("Questions are answered straight away from what Annie has seen. Anything else becomes an errand: she finds Grandma, says it, listens, and reports back here.")
-                .font(.callout)
-                .foregroundStyle(Palette.steel)
-                .multilineTextAlignment(.center)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ask Annie, or send her")
+                    .font(.annieHeading(22))
+                    .foregroundStyle(Palette.ink)
+                Text("Questions are answered from what she has seen. Anything else, she goes and does, and reports back here.")
+                    .font(.footnote)
+                    .foregroundStyle(Palette.steel)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Eyebrow(text: "Try it")
+            HStack(alignment: .top, spacing: 10) {
+                ForEach(StarterTask.all) { starter in
+                    Button {
+                        start(starter.task)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Image(systemName: starter.symbol)
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(Palette.slate)
+                                .frame(height: 24)
+                            Text(starter.title)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Palette.ink)
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(3)
+                                .minimumScaleFactor(0.85)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+                        .padding(12)
+                        .background(Palette.paper, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(Palette.line, lineWidth: 1)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(disabled)
+                    .accessibilityLabel("Try it: \(starter.title)")
+                }
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The small line under something that was sent, saying which way it went.
+private struct PathCaption: View {
+    let symbol: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Spacer(minLength: 40)
+            Image(systemName: symbol)
+            Text(text)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.caption2)
+        .foregroundStyle(Palette.steel)
     }
 }
 
@@ -305,15 +410,22 @@ private struct AskTurnRow: View {
 private struct MessageThreadItem: View {
     let message: ThreadMessage
     let run: FamilyRun?
+    /// Meant for the dog directly, but she wasn't answering when it was sent.
+    var insteadOfDog = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Spacer(minLength: 40)
-                Text(message.text)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Palette.slate.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack {
+                    Spacer(minLength: 40)
+                    Text(message.text)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Palette.slate.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
+                }
+                PathCaption(symbol: "tray.and.arrow.down",
+                            text: insteadOfDog ? "The dog wasn't answering, so this went as a family errand"
+                                               : "Sent as a family errand")
             }
 
             if let run {
@@ -330,6 +442,210 @@ private struct MessageThreadItem: View {
                         .foregroundStyle(Palette.steel)
                 }
             }
+        }
+    }
+}
+
+/// Something sent straight to the dog, and the mission board's receipt for
+/// it. The wording follows what is actually known: "accepted" and "completed"
+/// are the dog's own report, not something this app observed.
+private struct InstructionItem: View {
+    let instruction: DirectInstruction
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack {
+                    Spacer(minLength: 40)
+                    Text(instruction.text)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Palette.slate.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
+                }
+                PathCaption(symbol: "bolt.fill",
+                            text: instruction.simulated ? "Sent straight to Annie \u{00b7} simulator" : "Sent straight to Annie")
+            }
+
+            HStack(spacing: 6) {
+                if busy {
+                    ProgressView().controlSize(.mini)
+                } else if let symbol {
+                    Image(systemName: symbol).font(.caption2.weight(.bold))
+                }
+                Text(label)
+                    .font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(color)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(color.opacity(0.12), in: Capsule())
+
+            if let reply = instruction.reply {
+                HStack(alignment: .top, spacing: 8) {
+                    AnnieMark(height: 16)
+                        .foregroundStyle(Palette.slate)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Annie")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(reply)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Palette.slate.opacity(0.14), in: RoundedRectangle(cornerRadius: 14))
+            }
+
+            if let problem {
+                Text(problem)
+                    .font(.footnote)
+                    .foregroundStyle(Palette.alert)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var busy: Bool { !instruction.finished && !instruction.lostContact }
+
+    private var label: String {
+        if instruction.lostContact && !instruction.finished { return "Lost contact with Annie" }
+        switch instruction.state {
+        case "sending": return "Sending to Annie\u{2026}"
+        case "queued":
+            if let position = instruction.position, position > 0 { return "Queued \u{00b7} number \(position) in line" }
+            return "Queued behind what she is doing"
+        case "accepted": return "Annie has it"
+        case "executing":
+            if let total = instruction.stepsTotal, total > 0 {
+                let step = min(total, (instruction.stepsDone ?? 0) + 1)
+                return "Annie is on it \u{00b7} step \(step) of \(total)"
+            }
+            return "Annie is on it"
+        case "completed": return "Annie reports it done"
+        case "failed": return "Annie couldn't do it"
+        case "cancelled": return "Stopped"
+        case "unknown": return "Annie didn't report back on this"
+        default: return instruction.state.capitalized
+        }
+    }
+
+    private var symbol: String? {
+        if instruction.lostContact && !instruction.finished { return "wifi.slash" }
+        switch instruction.state {
+        case "completed": return "checkmark"
+        case "failed": return "exclamationmark.triangle.fill"
+        case "cancelled": return "stop.fill"
+        case "unknown": return "questionmark"
+        default: return nil
+        }
+    }
+
+    private var color: Color {
+        if instruction.lostContact && !instruction.finished { return Palette.alert }
+        switch instruction.state {
+        case "completed": return Palette.slate
+        case "failed": return Palette.alert
+        default: return Palette.steel
+        }
+    }
+
+    private var problem: String? {
+        if instruction.lostContact && !instruction.finished {
+            return "The dog stopped answering before this finished. It picks up here again when she is back."
+        }
+        guard instruction.state == "failed" || instruction.state == "cancelled" else { return nil }
+        return instruction.error.map(Self.plain)
+    }
+
+    /// The board's error strings are short English already ("stopped by
+    /// operator", "timed out"); they need a capital and a full stop, and any
+    /// skill name in them ("find_person") read as words.
+    private static func plain(_ error: String) -> String {
+        let trimmed = error.replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first else { return trimmed }
+        let sentence = first.uppercased() + trimmed.dropFirst()
+        return sentence.hasSuffix(".") ? sentence : sentence + "."
+    }
+}
+
+/// One exchange Annie had on her own with someone at home: what she said,
+/// what the microphone heard back (in quotes, because it is a transcript and
+/// can be wrong), and what she answered. Red appears only for a concern.
+private struct AnnieConversationCard: View {
+    let card: ConversationCard
+
+    private var exchange: DogConversation { card.exchange }
+    private var who: String { exchange.name ?? "someone at home" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                AnnieMark(height: 13)
+                    .foregroundStyle(Palette.slate)
+                Text("Annie \u{2194} \(who)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.slate)
+                    .lineLimit(1)
+                Text(fmtClock(ms: card.at))
+                    .font(.caption)
+                    .foregroundStyle(Palette.steel)
+                    .lineLimit(1)
+                    .fixedSize()
+                Spacer(minLength: 4)
+                if exchange.isConcern {
+                    Label("Concern", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2.weight(.bold))
+                        .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Palette.alert, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+            }
+
+            if let asked = exchange.asked {
+                line(speaker: "Annie", text: asked, quoted: false)
+            }
+            if let heard = exchange.heard {
+                line(speaker: exchange.name ?? "Heard", text: heard, quoted: true)
+            } else {
+                Text("No reply heard.")
+                    .font(.footnote)
+                    .foregroundStyle(Palette.steel)
+            }
+            if let reply = exchange.reply {
+                line(speaker: "Annie", text: reply, quoted: false)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.paper, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(exchange.isConcern ? Palette.alert : Palette.line, lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    private func line(speaker: String, text: String, quoted: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(speaker)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Palette.steel)
+                .lineLimit(1)
+                .frame(width: 52, alignment: .leading)
+            Text(quoted ? "\u{201c}\(text)\u{201d}" : text)
+                .font(.callout)
+                .italic(quoted)
+                .foregroundStyle(Palette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
     }
 }

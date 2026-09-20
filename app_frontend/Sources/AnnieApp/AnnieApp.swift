@@ -51,8 +51,26 @@ struct AnnieApp: App {
     }
 }
 
+/// Shown wherever the dog's state is: what is answering is the simulated dog,
+/// not the real one in the real home.
+struct SimulatorPill: View {
+    var body: some View {
+        Label("Simulator", systemImage: "cube.transparent")
+            .font(.caption2.weight(.bold))
+            .labelStyle(.titleAndIcon)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(Palette.slate)
+            .overlay(Capsule().stroke(Palette.slate, lineWidth: 1))
+            .accessibilityLabel("Simulated dog")
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var profiles: ProfileState
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,16 +80,30 @@ struct ContentView: View {
                 Text("Annie")
                     .font(.title2.bold())
                     .foregroundStyle(Palette.ink)
-                Spacer()
-                Text(state.live ? "Live \u{00b7} connected" : "Offline \u{00b7} demo data")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(
-                        (state.live ? Palette.slate : Palette.steel).opacity(0.15),
-                        in: Capsule()
-                    )
-                    .foregroundStyle(state.live ? Palette.slate : Palette.steel)
+                    .lineLimit(1)
+                    .fixedSize()
+                Spacer(minLength: 4)
+                if state.live, state.dog?.isSimulated == true {
+                    // The simulated-dog mark takes the status chip's place: one
+                    // word on where the answer is coming from, no jargon.
+                    SimulatorPill()
+                } else {
+                    Text(state.live ? "Live" : "Offline \u{00b7} demo data")
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(
+                            (state.live ? Palette.slate : Palette.steel).opacity(0.15),
+                            in: Capsule()
+                        )
+                        .foregroundStyle(state.live ? Palette.slate : Palette.steel)
+                }
+                if profiles.picture != nil {
+                    ProfileAvatar(image: profiles.picture, size: 30)
+                        .accessibilityLabel(profiles.profile.map { "Signed in as \($0.member.displayName)" } ?? "Profile picture")
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

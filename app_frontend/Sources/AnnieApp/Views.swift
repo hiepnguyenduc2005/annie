@@ -7,6 +7,7 @@
 //  FamilyViews.swift.
 //
 
+import PhotosUI
 import SwiftUI
 
 // ---------------------------------------------------------------------------
@@ -48,13 +49,20 @@ struct RemindersView: View {
                             Button {
                                 Task { await state.send("tell Grandma to \(reminder.title.prefix(1).lowercased() + reminder.title.dropFirst())") }
                             } label: {
-                                Label("Remind her", systemImage: "pawprint.fill")
-                                    .font(.caption.weight(.semibold))
-                                    .labelStyle(.titleAndIcon)
+                                // One line, always: the title wraps instead of the button.
+                                HStack(spacing: 5) {
+                                    Image(systemName: "pawprint.fill")
+                                    Text("Remind")
+                                }
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(Palette.slate)
                             .controlSize(.small)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .accessibilityLabel("Remind her: \(reminder.title)")
                         }
                     }
                     .padding(.vertical, 2)
@@ -209,6 +217,8 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: 24) {
                 AccountSectionView()
 
+                PeopleSectionView()
+
                 SettingsSectionView()
 
                 Text("Annie is a staged assistance prototype, not a medical device or emergency response.")
@@ -225,10 +235,13 @@ struct ProfileView: View {
 }
 
 /// Who this phone is signed in as, with a way to sign out and hand the
-/// phone to a different family member.
+/// phone to a different family member. The picture is chosen here, kept on
+/// this phone only, and shown again in the header.
 struct AccountSectionView: View {
     @EnvironmentObject private var profiles: ProfileState
     @State private var confirmSignOut = false
+    @State private var pick: PhotosPickerItem?
+    @State private var pictureProblem: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -236,18 +249,41 @@ struct AccountSectionView: View {
                 .font(.annieHeading(22))
                 .foregroundStyle(Palette.ink)
             HStack(spacing: 12) {
-                Image(systemName: "person.crop.circle.fill")
-                    .font(.largeTitle)
-                    .foregroundStyle(Palette.slate)
+                PhotosPicker(selection: $pick, matching: .images) {
+                    ProfileAvatar(image: profiles.picture, size: 52)
+                        .overlay(alignment: .bottomTrailing) {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 20, height: 20)
+                                .background(Palette.slate, in: Circle())
+                                .overlay(Circle().stroke(Palette.paper, lineWidth: 2))
+                                .offset(x: 3, y: 3)
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(profiles.picture == nil ? "Add a profile picture" : "Change profile picture")
+                .contextMenu {
+                    if profiles.picture != nil {
+                        Button(role: .destructive) {
+                            profiles.removePicture()
+                        } label: {
+                            Label("Remove picture", systemImage: "trash")
+                        }
+                    }
+                }
+
                 if let profile = profiles.profile {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(profile.member.displayName)
                             .font(.body.weight(.semibold))
                         Text("Signed in \u{00b7} \(profile.createdAt.formatted(date: .abbreviated, time: .omitted))")
                             .font(.caption).foregroundStyle(Palette.steel)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     }
                 }
-                Spacer()
+                Spacer(minLength: 8)
                 Button("Sign out") { confirmSignOut = true }
                     .font(.callout.weight(.semibold))
                     .buttonStyle(.bordered)
@@ -257,8 +293,24 @@ struct AccountSectionView: View {
                     }
             }
             .annieCard()
+
+            if let pictureProblem {
+                Text(pictureProblem)
+                    .font(.footnote)
+                    .foregroundStyle(Palette.alert)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: pick) { item in
+            guard let item else { return }
+            Task { @MainActor in
+                let data = try? await item.loadTransferable(type: Data.self)
+                let kept = data.map { profiles.setPicture(from: $0) } ?? false
+                pictureProblem = kept ? nil : "That picture couldn't be used. Try a different one."
+                pick = nil
+            }
+        }
     }
 }
 
@@ -324,4 +376,3 @@ struct ServerSettingsView: View {
         }
     }
 }
-

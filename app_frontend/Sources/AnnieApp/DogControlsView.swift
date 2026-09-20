@@ -9,6 +9,8 @@
 //  the dog process accepted the command — what she is actually doing is the
 //  status line's job, refreshed every 3 s. Stop here is a software stop sent
 //  over the network; it is not an emergency stop and the copy never calls it one.
+//  When the dog answering is the simulated one, the card says so: a button
+//  press there moves nothing in the real home.
 //
 
 import SwiftUI
@@ -16,9 +18,12 @@ import SwiftUI
 struct DogControlsCard: View {
     @EnvironmentObject private var state: AppState
 
-    /// While the keyboard is up the card folds down to its status line and
-    /// Stop, so the conversation keeps the screen.
+    /// Folded down to its status line and Stop, so the conversation keeps the
+    /// screen: while the keyboard is up, and once there is a conversation.
     var compact = false
+
+    /// When set, the header carries a chevron that folds or unfolds the card.
+    var toggle: (() -> Void)?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
@@ -26,8 +31,11 @@ struct DogControlsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .center, spacing: 8) {
                 Eyebrow(text: "Controls")
+                if state.live, state.dog?.isSimulated == true {
+                    SimulatorPill()
+                }
                 Spacer()
                 if compact {
                     Button {
@@ -42,9 +50,21 @@ struct DogControlsCard: View {
                     }
                     .buttonStyle(.plain)
                 }
+                if let toggle {
+                    Button(action: toggle) {
+                        Image(systemName: "chevron.down")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Palette.steel)
+                            .rotationEffect(.degrees(compact ? 0 : 180))
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(compact ? "Show all controls" : "Hide controls")
+                }
             }
 
-            DogStatusLine(dog: state.dog, live: state.live)
+            DogStatusLine(dog: state.dog, live: state.live, brief: compact)
 
             if !compact {
                 LazyVGrid(columns: columns, spacing: 10) {
@@ -81,6 +101,8 @@ struct DogControlsCard: View {
 private struct DogStatusLine: View {
     let dog: DogStatus?
     let live: Bool
+    /// Folded: the headline and who is in view, without what she remembers.
+    var brief = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -108,7 +130,7 @@ private struct DogStatusLine: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let dog, dog.available, !dog.familySentences.isEmpty {
+            if !brief, let dog, dog.available, !dog.familySentences.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Annie remembers")
                         .font(.caption.weight(.semibold))

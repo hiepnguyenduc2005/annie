@@ -261,6 +261,7 @@ private struct KeyRow: View {
         switch account {
         case .elevenLabs: return VoiceSettingsUpdate(eleven_key: key)
         case .deepgram: return VoiceSettingsUpdate(deepgram_key: key)
+        case .devBodyToken: return VoiceSettingsUpdate()
         }
     }
 

@@ -71,7 +71,7 @@ def test_planner_blocks_and_turns_toward_roomier_side_with_hysteresis():
     p = PatrolPlanner(stop_m=0.5, clear_m=0.9, min_turn_s=0.5, turn_rps=0.6)
     vx, wz, mode = p.step(now_s=0.0, ranges={"front": 0.3, "left": 0.4, "right": 2.0}, pose_xy=(0, 0), yaw=0.0,
                           origin_xy=(0, 0))
-    assert (vx, mode) == (0.0, "blocked") and wz == pytest.approx(-0.6)  # right is roomier
+    assert (vx, mode) == (0.0, "blocked") and wz == pytest.approx(-0.8)  # right is roomier; 0.6 would be under the yaw deadband
     vx, wz, mode = p.step(now_s=0.2, ranges={"front": 0.95}, pose_xy=(0, 0), yaw=0.0, origin_xy=(0, 0))
     assert mode == "blocked" and vx == 0.0  # clear but the minimum turn has not elapsed
     _, _, mode = p.step(now_s=0.7, ranges={"front": 0.7}, pose_xy=(0, 0), yaw=0.0, origin_xy=(0, 0))
@@ -83,7 +83,7 @@ def test_planner_blocks_and_turns_toward_roomier_side_with_hysteresis():
 def test_planner_backs_off_after_stall_then_turns():
     p = PatrolPlanner(backoff_s=1.0, backoff_mps=0.12)
     vx, wz, mode = p.step(now_s=0.0, ranges={}, pose_xy=(0, 0), yaw=0.0, origin_xy=(0, 0), stalled=True)
-    assert (vx, wz, mode) == (-0.12, 0.0, "backoff") and p.collisions == 1
+    assert (vx, wz, mode) == (-0.2, 0.0, "backoff") and p.collisions == 1  # reverse at the walking deadband, not below it
     vx, _, mode = p.step(now_s=0.5, ranges={}, pose_xy=(0, 0), yaw=0.0, origin_xy=(0, 0))
     assert mode == "backoff" and vx < 0
     vx, wz, mode = p.step(now_s=1.1, ranges={}, pose_xy=(0, 0), yaw=0.0, origin_xy=(0, 0))

@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import hmac
 import json
 import logging
 import math
@@ -38,6 +39,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # repository root
 from robot.dog.link.follow import follow_command  # noqa: E402
@@ -48,7 +50,16 @@ from robot.dog.link.probe import extract_lowstate, extract_pose, safe_error  # n
 from robot.dog.planning.smart_patrol import (HeadingBandit, OccupancyGrid, PatrolPlanner, StallDetector, body_frame,  # noqa: E402
                               quaternion_yaw, sector_ranges, voxel_points_world, wrap_angle)
 from robot.dog.planning.missions import MissionBoard  # noqa: E402
+from robot.dog.planning import agent as agent_mod  # noqa: E402
 from robot.dog.perception.target_id import TargetIdentifier  # noqa: E402
+try:
+    from robot.dog.memory.graph import SpacetimeGraph  # noqa: E402
+except Exception:
+    SpacetimeGraph = None
+try:
+    from robot.dog.dimos.frontier import FrontierPlanner  # noqa: E402  (dimOS venv only)
+except Exception:
+    FrontierPlanner = None
 try:
     from robot.dog.perception import objects as objects_mod  # noqa: E402
 except Exception:  # optional: object detection needs cv2/ultralytics
@@ -62,9 +73,10 @@ from robot.dog.link.walk import (MIN_OPERATING_SOC_PERCENT, MOTION_INHIBIT_PATH,
 
 SCRIPT_VERSION = "go2-patrol-greet/0.3"
 BASE_HEIGHT_M = 0.32  # Go2 standing base height above the floor; anchors the LiDAR floor estimate
-STAND_UP, BALANCE_STAND, STOP_MOVE, MOVE, HELLO = 1004, 1002, 1003, 1008, 1016
+STAND_UP, BALANCE_STAND, STOP_MOVE, MOVE, HELLO, EULER = 1004, 1002, 1003, 1008, 1016, 1007
+LOOK_UP_PITCH = -0.25  # body pitch (rad) that lifts the fixed head camera toward a close person's face; BalanceStand levels it
 # Greeting tricks, one per new person in rotation: (name, sport api id, seconds to let it finish).
-GREET_TRICKS = [("hello", 1016, 4.0), ("dance", 1022, 10.0), ("heart", 1036, 6.0), ("stretch", 1017, 5.0)]
+GREET_TRICKS = [("hello", HELLO, 4.0)]  # a quick wave only: greetings should not eat exploration time (Henry, 2026-09-20)
 TOPIC_VOXELS, TOPIC_LIDAR_SWITCH, TOPIC_SPORT_STATE = "rt/utlidar/voxel_map_compressed", "rt/utlidar/switch", "rt/lf/sportmodestate"
 TOPIC_AVOID, AVOID_SWITCH_SET, AVOID_USE_API = "rt/api/obstacles_avoid/request", 1001, 1004
 
@@ -131,7 +143,7 @@ class GreetPolicy:
     def greeting_text(track) -> str:
         identity = track.get("identity") or {}
         name = identity.get("name")
-        return f"Hi {name}!" if name else "Hello there!"
+        return f"Hi {name}, lovely to see you. How are you feeling today?" if name else "Hello there, lovely to see you. How are you doing?"
 
 
 def _default_conn_factory(ip, aes_key):
@@ -150,8 +162,22 @@ def _speak_host(text: str):
 
 
 def _say_blocking(text: str) -> bool:
-    """macOS `say` on the host and wait for it to finish (text on stdin, never as an argument)."""
+    """macOS `say` (text on stdin, never as an argument), played through the selected speaker when one is
+    chosen (rendered to a temp AIFF first), else straight to the system default; waits until done."""
     try:
+        from robot.dog.voice import devices as devices_mod
+        dev = devices_mod.shared()
+        if dev.output_name:
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".aiff", delete=False) as fh:
+                path = fh.name
+            try:
+                rc = subprocess.run(["say", "-o", path], input=text.encode("utf-8"), stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, timeout=60).returncode
+                if rc == 0:
+                    return dev.play(Path(path).read_bytes(), suffix=".aiff")
+            finally:
+                Path(path).unlink(missing_ok=True)
         return subprocess.run(["say"], input=text.encode("utf-8"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                               timeout=60).returncode == 0
     except Exception:
@@ -165,9 +191,11 @@ def _whisper_transcribe(wav_bytes: bytes) -> str | None:
 
 
 def _cloud_voice():
-    """ElevenLabs speaks / Deepgram hears when their keys are in the environment; local fallback otherwise."""
+    """ElevenLabs speaks / Deepgram hears when their keys are in the environment; local fallback otherwise.
+    Output goes through the selected speaker (AirPods, Mac speakers, the phone app...)."""
+    from robot.dog.voice import devices as devices_mod
     from robot.dog.voice.cloud import CloudVoice
-    return CloudVoice(local_speak=_say_blocking, local_transcribe=_whisper_transcribe)
+    return CloudVoice(local_speak=_say_blocking, local_transcribe=_whisper_transcribe, player=devices_mod.shared().play)
 
 
 VOICE = None  # created lazily so tests never touch the environment
@@ -180,15 +208,37 @@ def voice():
     return VOICE
 
 
+LISTENER = None  # the always-on wake-word listener of the running patrol, so speaking can mute it and open a conversation
+
+
 def speak_blocking(text: str) -> bool:
-    """Speak on the host speaker (ElevenLabs voice when configured, else macOS say); blocks until done."""
-    return voice().speak(text)
+    """Speak on the host speaker (ElevenLabs voice when configured, else macOS say); blocks until done. The
+    always-on mic ignores Annie's own voice meanwhile and then listens without a wake word for a while."""
+    lis = LISTENER
+    if lis is not None:
+        lis.mute(2.0 + 0.4 * len(text.split()))
+    ok = voice().speak(text)
+    if lis is not None:
+        lis.muted_until = 0.0
+        lis.open_conversation(45.0)
+    return ok
 
 
 def listen_blocking(max_s: float) -> dict:
     """Host microphone -> utterance (Silero VAD) -> transcript (Deepgram when configured, else local Whisper)."""
-    from robot.simulation.live_listener import capture_utterance, pcm16_to_wav, silero_vad, sounddevice_recorder
-    utterance = capture_utterance(sounddevice_recorder(), silero_vad(), max_ms=int(max_s * 1000))
+    from robot.dog.voice import devices as devices_mod
+    from robot.simulation.live_listener import capture_utterance, pcm16_to_wav, silero_vad
+    lis = LISTENER
+    if lis is not None:
+        lis.mute(max_s + 1.5)  # this call owns the reply; the always-on listener must not answer it too
+    recorder = devices_mod.shared().recorder()  # the selected microphone (AirPods, Mac, phone app...)
+    try:
+        utterance = capture_utterance(recorder, silero_vad(), max_ms=int(max_s * 1000))
+    finally:
+        with contextlib.suppress(Exception):
+            recorder.close()
+        if lis is not None:
+            lis.muted_until = 0.0
     if utterance["outcome"] != "speech":
         return {"transcript": None, "heard": False, "speech_ms": 0}
     text = voice().transcribe(pcm16_to_wav(utterance["pcm"]))
@@ -247,14 +297,67 @@ g('fps').textContent=(s.fps||0).toFixed(1);g('people').textContent=(s.tracks||[]
 g('log').textContent=(s.log||[]).join('\n');}catch(e){}},250);
 </script>"""
 
+COMMAND_CENTER_PATH = Path(__file__).resolve().parents[1] / "view" / "command_center.html"  # the operator page; VIEW_HTML is the fallback
+
 SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12), (11, 13), (13, 15), (12, 14), (14, 16)]
+
+
+def telemetry_snapshot(view) -> dict:
+    """Everything the command-center page shows in one bounded JSON: live state, the last brain decisions and
+    voice commands, greetings/check-ins/collisions, mission receipts, the frontier goal and the graph's sentences.
+    Reads the run's report dict from the server thread; every part is optional and failures degrade to empty."""
+    with view.lock:
+        state = json.loads(json.dumps(view.state))
+    report = getattr(view, "report", None) or {}
+    out = {"state": state, "connected": (report.get("connection") or {}).get("status") == "connected",
+           "source": report.get("source") or "hardware",
+           "reason": report.get("reason"), "elapsed_s": report.get("elapsed_s"),
+           "brain": {"enabled": bool((report.get("brain") or {}).get("enabled")), "period_s": getattr(view, "brain_period_s", None),
+                     "decisions": list((report.get("brain") or {}).get("decisions") or [])[-8:]},
+           "voice": {"commands": list((report.get("voice") or {}).get("commands") or [])[-6:],
+                     **({k: v for k, v in VOICE.status().items() if k != "stats"} if VOICE is not None else {})},
+           "greetings": [{"t_s": g.get("t_s"), "text": g.get("text"), "name": (g.get("identity") or {}).get("name") if isinstance(g.get("identity"), dict) else None}
+                         for g in list(report.get("greetings") or [])[-6:]],
+           "checkins": [{"t_s": c.get("t_s")} for c in list(report.get("checkins") or [])[-4:]],
+           "collisions": [{"t_s": c.get("t_s"), "mode": c.get("mode"), "front_m": c.get("front_m")} for c in list(report.get("collisions") or [])[-4:]],
+           "instructions": list(report.get("instructions") or [])[-6:],
+           "conversations": list(report.get("conversations") or [])[-6:],
+           "concerns": list(report.get("concerns") or [])[-4:],
+           "remarks": list(report.get("remarks") or [])[-6:],
+           "missions": [], "frontier": {"available": False, "goal": None}, "graph_sentences": [], "places": 0, "objects": [],
+           "map": getattr(view, "map_geometry", None)}
+    board = getattr(view, "missions", None)
+    if board is not None:
+        with contextlib.suppress(Exception):
+            out["missions"] = board.recent(12)
+    frontier = getattr(view, "frontier", None)
+    if frontier:
+        goal = frontier.get("goal")
+        out["frontier"] = {"available": frontier.get("planner") is not None,
+                           "goal": [round(float(goal[0]), 2), round(float(goal[1]), 2)] if goal is not None else None}
+    graph = getattr(view, "graph", None)
+    if graph is not None:
+        with contextlib.suppress(Exception):
+            out["graph_sentences"] = list(graph.summary(limit=6).get("sentences") or [])[:6]
+            out["places"] = len(graph.places())
+    recorder = getattr(view, "recorder", None)
+    if recorder is not None:
+        with contextlib.suppress(Exception):
+            latest = recorder.latest()
+            out["objects"] = sorted({p["label"] for p in latest.get("people") or []
+                                     if str(p.get("track_id", "")).startswith("obj-")})[:12]
+    return out
 
 
 class LiveView:
     """Annotated camera + status for the operator's browser; a stdlib HTTP server in a thread. Port 0 disables."""
 
-    def __init__(self, port=8011, host="127.0.0.1", status_lines=12):
+    def __init__(self, port=8011, host="127.0.0.1", status_lines=12, token=None):
         self.port, self.host = port, host
+        # Token: required for the state-changing routes (/command, /stop) when set; binding beyond loopback
+        # without one is refused in main(). Host check: a browser page elsewhere cannot reach us via DNS rebinding.
+        self.token = token if token is not None else (os.environ.get("ANNIE_BODY_TOKEN") or None)
+        self.extra_hosts = {h.strip().lower() for h in os.environ.get("ANNIE_VIEW_HOSTS", "").split(",") if h.strip()}
         self.state = {"mode": "-", "action": None, "tracks": [], "ranges": None, "battery": None, "t_s": 0.0,
                       "greetings": 0, "checkins": 0, "home_m": 0.0, "log": []}
         self.status_lines = status_lines
@@ -274,14 +377,53 @@ class LiveView:
             def log_message(self, *a):
                 pass
 
+            def _host_ok(self):
+                host = (self.headers.get("Host") or "").split(":")[0].strip("[]").lower()
+                ok = host in ("127.0.0.1", "localhost", "::1", view.host.lower()) or host in view.extra_hosts
+                if not ok:
+                    self._send(421, b'{"error":"unexpected Host"}', "application/json")
+                return ok
+
+            def _token_ok(self):
+                if view.token and not hmac.compare_digest(self.headers.get("X-Body-Token") or "", view.token):
+                    self._send(401, b'{"error":"unauthorized"}', "application/json")
+                    return False
+                return True
+
             def do_GET(self):
+                if not self._host_ok():
+                    return
                 if self.path.startswith("/stream.mjpg"):
                     return self._stream()
+                if self.path.startswith("/graph.json"):
+                    g = getattr(view, "graph", None)
+                    if g is None:
+                        return self._send(503, b'{"error":"graph off"}', "application/json")
+                    try:
+                        q = parse_qs(urlsplit(self.path).query)
+                        n_vox = max(0, min(int(q.get("voxels", ["0"])[0]), 20000))  # ?voxels=N embeds the remembered geometry
+                        return self._send(200, json.dumps(g.snapshot(max_voxels=n_vox)).encode(), "application/json")
+                    except ValueError:
+                        return self._send(400, b'{"error":"voxels must be an integer"}', "application/json")
+                    except Exception:
+                        return self._send(500, b'{"error":"snapshot failed"}', "application/json")
                 if self.path.startswith("/command/"):
                     board = getattr(view, "missions", None)
                     receipt = board.get(self.path[len("/command/"):].split("?")[0]) if board else None
                     return self._send(200, json.dumps(receipt).encode(), "application/json") if receipt \
                         else self._send(404, b'{"error":"unknown command_id"}', "application/json")
+                if self.path.startswith("/people"):
+                    people = getattr(view, "people", None)
+                    if people is None:
+                        return self._send(503, b'{"error":"people directory off"}', "application/json")
+                    return self._send(200, json.dumps({"people": people.list()}).encode(), "application/json")
+                if self.path.startswith("/voice"):
+                    v = VOICE
+                    st = v.status() if v is not None else {"cloud": False, "elevenlabs": False, "deepgram": False, "speak_via": "off", "hear_via": "off"}
+                    with contextlib.suppress(Exception):
+                        from robot.dog.voice import devices as devices_mod
+                        st["devices"] = devices_mod.shared().status()
+                    return self._send(200, json.dumps(st).encode(), "application/json")
                 if self.path.startswith("/health"):
                     return self._send(200, b'{"ok": true, "service": "go2-patrol-greet"}', "application/json")
                 if self.path.startswith(("/spacetime", "/three.min.js")):
@@ -303,16 +445,79 @@ class LiveView:
                     with view.lock:
                         data = json.dumps(view.state).encode()
                     return self._send(200, data, "application/json")
-                self._send(200, VIEW_HTML.encode(), "text/html; charset=utf-8")
+                if self.path.startswith("/telemetry.json"):
+                    try:
+                        return self._send(200, json.dumps(telemetry_snapshot(view), allow_nan=False).encode(), "application/json")
+                    except Exception:
+                        return self._send(500, b'{"error":"telemetry failed"}', "application/json")
+                if self.path.startswith("/classic"):
+                    return self._send(200, VIEW_HTML.encode(), "text/html; charset=utf-8")
+                try:
+                    page = COMMAND_CENTER_PATH.read_bytes()  # read per request so edits show on reload
+                except OSError:
+                    page = VIEW_HTML.encode()
+                self._send(200, page, "text/html; charset=utf-8")
 
             def do_POST(self):
+                if not self._host_ok() or not self._token_ok():
+                    return
                 length = int(self.headers.get("Content-Length") or 0)
-                raw = self.rfile.read(length) if 0 < length < 65536 else b""
+                raw = self.rfile.read(length) if 0 < length < (8 << 20 if self.path.startswith("/people") else 65536) else b""
                 board = getattr(view, "missions", None)
                 if self.path == "/stop" and board is not None:  # body contract: cancel the mission, StopMove follows
                     code, receipt = board.submit({"name": "stop"})
                     return self._send(200, json.dumps({"stop_code": None, "ack_ms": None, "cancelled": receipt.get("stop_requested", True),
                                                        "note": "software stop via the patrol loop"}).encode(), "application/json")
+                if self.path.startswith("/people"):
+                    people = getattr(view, "people", None)
+                    if people is None:
+                        return self._send(503, b'{"error":"people directory off"}', "application/json")
+                    try:
+                        payload = json.loads(raw.decode() or "{}")
+                        if not isinstance(payload, dict):
+                            raise ValueError
+                    except ValueError:
+                        return self._send(400, b'{"error":"invalid JSON object"}', "application/json")
+                    if self.path.startswith("/people/forget"):
+                        ok = people.forget(str(payload.get("name") or "").strip())
+                        return self._send(200 if ok else 404, json.dumps({"forgotten": ok}).encode(), "application/json")
+                    import base64
+                    photos = []
+                    for b64 in (payload.get("photos") or [])[:10]:
+                        with contextlib.suppress(Exception):
+                            photos.append(base64.b64decode(b64, validate=False))
+                    try:
+                        result = people.enroll(str(payload.get("name") or ""), photos, relation=payload.get("relation"),
+                                               shirt=payload.get("shirt"), notes=payload.get("notes"))
+                    except ValueError as exc:
+                        return self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
+                    view.log(f"people: {result['name']} enrolled ({result['faces_added']} face(s))")
+                    if result.get("shirt") and getattr(view, "identifier", None) is not None:
+                        ident = view.identifier
+                        ident.name, ident.colour = result["name"], result["shirt"]  # the shirt-colour identity follows the app
+                    return self._send(200, json.dumps(result).encode(), "application/json")
+                if self.path.startswith("/voice"):
+                    try:
+                        payload = json.loads(raw.decode() or "{}")
+                        if not isinstance(payload, dict):
+                            raise ValueError
+                    except ValueError:
+                        return self._send(400, b'{"error":"invalid JSON object"}', "application/json")
+                    v = voice()
+                    keys = {k: payload.get(k) for k in ("eleven_key", "deepgram_key", "eleven_voice") if isinstance(payload.get(k), str) and len(payload[k]) <= 200}
+                    cloud = payload.get("cloud") if isinstance(payload.get("cloud"), bool) else None
+                    st = v.configure(cloud=cloud, **keys)
+                    from robot.dog.voice import devices as devices_mod
+                    dev = {k: payload.get(k) for k in ("input_device", "output_device") if isinstance(payload.get(k), str) and len(payload[k]) <= 80}
+                    if dev:
+                        devices_mod.shared().configure(input_name=dev.get("input_device"), output_name=dev.get("output_device"))
+                        listener = getattr(view, "listener", None)
+                        if listener is not None and "input_device" in dev:
+                            listener.reopen(devices_mod.shared().recorder)  # the wake-word mic follows the selection
+                    st["devices"] = {k: v_ for k, v_ in devices_mod.shared().status().items()}
+                    view.log(f"voice settings: cloud={st['cloud']} speak={st['speak_via']} hear={st['hear_via']} "
+                             f"mic={st['devices']['input']} speaker={st['devices']['output']}")  # never the keys
+                    return self._send(200, json.dumps(st).encode(), "application/json")
                 if self.path.startswith("/command"):
                     try:
                         payload = json.loads(raw.decode() or "{}")
@@ -430,7 +635,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                            planner=None, stall=None, lidar=True, firmware_avoid=False, lidar_stale_s=2.0,
                            stop_on_checkin=False, idle_trick_s=45.0, view=None, no_motion=False, diag_every_s=5.0,
                            imgsz=352, voxel_min_interval_s=0.25, brain=None, brain_period_s=4.0, memory=None,
-                           voice=None, bandit=None, identifier=None, recorder=None):
+                           voice=None, bandit=None, identifier=None, recorder=None, frontier_planner="auto",
+                           source="hardware"):
     loop = asyncio.get_running_loop()
     view = view or LiveView(port=0)
     view_url = view.start()
@@ -442,7 +648,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         view.log(text)
         _status(text)
 
-    report = {"script": SCRIPT_VERSION, "source": "hardware", "target_ip": ip, "connection": {"status": "not_started"},
+    report = {"script": SCRIPT_VERSION, "source": source, "target_ip": ip, "connection": {"status": "not_started"},
               "battery_soc_start": None, "frames": 0, "moves_sent": 0, "greetings": [], "checkins": [],
               "collisions": [], "modes": {}, "lidar": {"maps": 0, "first_ranges": None, "stale_ticks": 0},
               "firmware_avoid": None, "elapsed_s": 0.0, "max_distance_from_origin_m": 0.0, "reason": None,
@@ -452,8 +658,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                         "Collision detection = LiDAR voxel sectors + odometry stall; no touch sensors on this robot."]}
     policy = policy or GreetPolicy()
     planner = planner or PatrolPlanner(cruise_mps=speed_mps, turn_rps=yaw_rps, leash_m=boundary_m * 0.8,
-                                       stop_m=0.45, clear_m=0.8, slow_m=1.0, min_turn_s=0.4)
+                                       stop_m=0.6, clear_m=0.95, slow_m=1.4, min_turn_s=0.4)  # earlier stop: the map is 1-2 Hz
     stall = stall or StallDetector()
+    guard_state = {"cam_log": 0.0}
     if tracker is None:
         tracker = _fast_tracker(imgsz=imgsz)
     diag = Diag()
@@ -465,6 +672,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             entry = _memory_add(t=t, pose=pose, yaw=yaw, kind=kind, people=people, note=note)
             with contextlib.suppress(Exception):
                 recorder.record_event(time.time(), pose[0], pose[1], kind, note or kind)
+            if graph is not None:
+                with contextlib.suppress(Exception):
+                    graph.ingest_event(time.time(), pose[0], pose[1], kind, note or kind)
             return entry
         memory.add = _add_and_record
     brain_state = {"decision": None, "until": 0.0, "busy": False, "last": None, "count": 0}
@@ -525,9 +735,13 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     if recorder is not None:
                         with contextlib.suppress(Exception):
                             recorder.record_obstacles(time.time(), world_obs)
+                    if graph is not None:
+                        with contextlib.suppress(Exception):
+                            graph.ingest_obstacles(time.time(), world_obs)
                     if time.monotonic() - grid["rendered"] > 0.4 and view.port:
                         grid["rendered"] = time.monotonic()
-                        view.map_jpeg = grid["map"].render(pose, yaw, planner.target_heading)
+                        view.map_jpeg = grid["map"].render(pose, yaw, planner.target_heading, palette="costmap")
+                        view.map_geometry = grid["map"].geometry()
             except Exception:
                 continue
             tel["ranges"], tel["ranges_t"] = ranges, loop.time()
@@ -588,16 +802,105 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             jpeg, w, h = encoder(frame)
             return np.zeros((h, w, 3), dtype=np.uint8)
     detector = None
-    if objects_mod is not None and conn_factory is None and objects_mod.find_checkpoint() is not None:
+    if objects_mod is not None and conn_factory is None:
+        # Open vocabulary (YOLO-World: door, table, chair, bag, phone, ...) when its baked clip-free checkpoint exists,
+        # else the COCO subset. Built here, warmed off the control thread below (first detect costs 5-9 s).
         with contextlib.suppress(Exception):
-            detector = objects_mod.ObjectDetector()
+            if objects_mod.find_checkpoint(objects_mod.baked_name(objects_mod.HOME_VOCABULARY)) is not None \
+                    and os.environ.get("ANNIE_OBJECTS", "open_vocab") == "open_vocab":
+                detector = objects_mod.ObjectDetector.open_vocab(imgsz=416)
+            elif objects_mod.find_checkpoint() is not None:
+                detector = objects_mod.ObjectDetector()
     perception = Perception(tracker, convert=convert, annotate=annotate if view.port else None, diag=diag,
-                            min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier, objects=detector)
+                            min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier, objects=None, objects_every=8)
+    if detector is not None:
+        def _warm_detector():  # the pipeline only gets the detector once it is warm: no concurrent first inference
+            try:
+                import numpy as _np
+                detector.detect(_np.zeros((270, 480, 3), dtype=_np.uint8), 0)
+                perception.objects = detector
+                status(f"objects: {'open-vocabulary' if getattr(detector, 'vocabulary', None) else 'COCO subset'} detector warm")
+            except Exception as exc:
+                status(f"objects: detector warm-up failed ({type(exc).__name__}); running without it")
+        threading.Thread(target=_warm_detector, daemon=True, name="objects-warm").start()
     view.commands = voice_state  # POST /command on the live view sets the same bounded override as a voice command
+    view.identifier = identifier
+    with contextlib.suppress(Exception):
+        from robot.dog.perception.people import PeopleDirectory
+        view.people = PeopleDirectory(tracker=tracker)  # /people: enrol from the family app, greet by name
     view.recorder = recorder
     missions = MissionBoard()
     view.missions = missions
     report["missions"] = []
+    graph = SpacetimeGraph() if SpacetimeGraph is not None else None  # the 4D knowledge graph (geometry + semantics)
+    if graph is not None and recorder is not None and getattr(recorder, "path", None) and conn_factory is None:
+        # persistence across restarts: what the previous run(s) saw in the last hour comes back before the first frame
+        try:
+            counts = graph.reload_recent(recorder.path, max_age_s=float(os.environ.get("ANNIE_MEMORY_RELOAD_S", "3600")))
+            if counts["used"]:
+                status(f"memory: reloaded {counts['used']} records from {recorder.path} (last hour of the recording)")
+                report["memory_reloaded"] = counts
+        except Exception as exc:
+            status(f"memory reload skipped: {type(exc).__name__}")
+    view.graph = graph
+    planner_obj = (FrontierPlanner() if FrontierPlanner is not None else None) if frontier_planner == "auto" else frontier_planner
+    frontier = {"planner": planner_obj, "goal": None, "t": 0.0}
+    report["frontier"] = {"available": frontier["planner"] is not None, "goals": 0}
+    view.report, view.frontier, view.brain_period_s = report, frontier, brain_period_s  # /telemetry.json reads these
+    narrator = agent_mod.Narrator()
+    instruct_state = {"thread": None, "receipt": None, "plan": None}
+    situation_cache = {"t": 0.0, "sit": None}
+
+    def build_situation(now_wall, *, tracks=(), ranges=None, home_m=0.0, battery=None, mode="-", max_age_s=1.0):
+        """The agent's picture of the moment (graph entities with bearings, under-cover state, recent greetings)."""
+        if situation_cache["sit"] is not None and now_wall - situation_cache["t"] < max_age_s:
+            return situation_cache["sit"]
+        pose = tel["pose"] or (0.0, 0.0)
+        entities, sentences, over = [], [], None
+        if graph is not None:
+            with contextlib.suppress(Exception):
+                entities = graph.snapshot(max_entities_out=40, max_events_out=0, max_track_out=2)["entities"]
+                sentences = graph.summary(limit=6)["sentences"]
+                over = graph.overhead(pose[0], pose[1])
+        if over and over.get("covered"):
+            uc = report.setdefault("under_cover", {})
+            if not uc.get("since"):
+                uc.update(since=now_wall, entry_heading_deg=round(math.degrees(tel["yaw"])), entry_xy=[round(pose[0], 2), round(pose[1], 2)])
+            over.update(since_s=round(now_wall - uc["since"], 1), entry_heading_deg=uc["entry_heading_deg"],
+                        exit_heading_deg=(uc["entry_heading_deg"] + 180) % 360 - 180)
+        elif report.get("under_cover"):
+            report["under_cover"] = {}
+        sit = agent_mod.situation(now=now_wall, pose_xy=pose, yaw=tel["yaw"], entities=entities, graph_sentences=sentences, overhead=over,
+                                  greeted=[g for g in report["greetings"] if "t" in g], tracks=tracks, ranges=ranges, home_m=home_m,
+                                  battery=battery, mode=mode)
+        situation_cache.update(t=now_wall, sit=sit)
+        return sit
+    view.situation = build_situation
+
+    def line_inference():
+        """A short-timeout client for spoken lines (greetings, remarks); None when the provider is not configured,
+        and None under the fake dog (tests never call a model)."""
+        if conn_factory is not None or os.environ.get("ANNIE_LLM_PROVIDER", "").lower() in ("off", "none"):
+            return None
+        try:
+            from robot.dog.inference import Inference
+            return Inference(timeout_s=4.0)
+        except Exception:
+            return None
+    chat_client = line_inference()
+
+    def plan_instruct(receipt, sit):
+        """Runs in a thread: instruction -> steps through the shared inference client (or the rules), then chain."""
+        try:
+            inf = None
+            with contextlib.suppress(Exception):
+                from robot.dog.inference import shared as _shared
+                inf = _shared()
+            from robot.dog.runtime.body import validate_command as _validate
+            plan = agent_mod.plan_instruction(receipt["args"]["text"], sit, inference=inf, validate_command=_validate)
+        except Exception as exc:
+            plan = {"reply": f"planning failed ({type(exc).__name__})", "steps": [], "source": "error", "rejected": []}
+        instruct_state["plan"] = plan
 
     async def on_track(track):
         while not stopped:
@@ -619,6 +922,11 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         options = {"api_id": api_id}
         if priority:
             options["priority"] = 1
+        resp = await asyncio.wait_for(conn.datachannel.pub_sub.publish_request_new(TOPIC_SPORT, options), timeout)
+        return _status_code(resp)
+
+    async def request_params(api_id, params: dict, timeout=5.0):
+        options = {"api_id": api_id, "parameter": json.dumps(params)}
         resp = await asyncio.wait_for(conn.datachannel.pub_sub.publish_request_new(TOPIC_SPORT, options), timeout)
         return _status_code(resp)
 
@@ -728,11 +1036,14 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         rec_last = [-1e9]
         mission_state: dict = {}
         mission_hold_until = [0.0]
+        last_people_world = []
+        last_remark_check = 0.0
+        rec_objects_seq = [-1]
         bandit = bandit or HeadingBandit()
         bandit_state = {"until": 0.0, "rewarded": False}
         report["bandit"] = None
 
-        async def show(trick_name, trick_api, trick_settle, text):
+        async def show(trick_name, trick_api, trick_settle, text, look_up=False):
             """Stop, speak, perform one firmware trick, let it finish, stand back up. Never raises on a slow ack."""
             nonlocal cmd_vx, last_show
             if no_motion:
@@ -743,6 +1054,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             send_move(0.0, 0.0)
             with contextlib.suppress(Exception):
                 await request(STOP_MOVE, priority=True, timeout=3.0)
+            if look_up and trick_api != EULER:  # stand to attention: lift the nose so the face is in frame
+                with contextlib.suppress(Exception):
+                    await request_params(EULER, {"x": 0.0, "y": LOOK_UP_PITCH, "z": 0.0}, timeout=3.0)
+                    await asyncio.sleep(0.8)
             if text:
                 speak(text)
             try:
@@ -768,7 +1083,11 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             try:
                 jpeg = view.jpeg if view.port else None
                 now_s = loop.time()
-                decision = brain.decide(jpeg, brain_status(), memory.summary(tel["pose"], tel["yaw"], now=now_s))
+                sightings = memory.summary(tel["pose"], tel["yaw"], now=now_s)
+                if graph is not None:
+                    with contextlib.suppress(Exception):
+                        sightings = graph.summary(now=time.time(), limit=6).get("sentences", []) + sightings
+                decision = brain.decide(jpeg, brain_status(), sightings[:10])
                 brain_state["decision"], brain_state["last"] = decision, now_s
                 brain_state["until"] = now_s + decision["seconds"]
                 brain_state["count"] += 1
@@ -784,14 +1103,41 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 brain_state["busy"] = False
 
         def on_voice(cmd, text):
-            voice_state["intent"], voice_state["until"] = cmd["intent"], loop.time() + 12.0
             voice_state["count"] += 1
             report["voice"]["commands"].append({"t_s": round(loop.time() - start, 1), "intent": cmd["intent"],
                                                 "text": text[:80]})
+            if cmd["intent"] == "converse":  # inside a conversation window: a command if it reads like one, else a reply
+                plan = agent_mod.rule_plan(cmd["phrase"])
+                if plan.get("steps"):
+                    code, receipt = missions.submit({"name": "instruct", "args": {"text": cmd["phrase"]}})
+                    status(f"conversation -> instruction ({code}): {cmd['phrase'][:80]!r}")
+                    speak(plan.get("reply") or "On it.")
+                    return
+                sit = build_situation(time.time(), tracks=perception.latest().get("tracks", []), ranges=tel["ranges"],
+                                      home_m=math.dist(origin, tel["pose"]) if tel["pose"] else 0.0, battery=tel["soc"], mode=mode)
+                who = next(((t.get("identity") or {}).get("name") for t in perception.latest().get("tracks", []) if (t.get("identity") or {}).get("name")), None)
+                rep = agent_mod.converse_reply(cmd["phrase"], sit, who=who, inference=chat_client)
+                status(f"conversation: heard {cmd['phrase'][:80]!r} -> {rep['kind']}; saying {rep['text']!r} ({rep['source']})")
+                report.setdefault("conversations", []).append({"t_s": round(loop.time() - start, 1), "name": who, "asked": None,
+                                                               "heard": cmd["phrase"], "reply": rep["text"], "kind": rep["kind"]})
+                if rep["kind"] == "concern":
+                    report.setdefault("concerns", []).append({"t_s": round(loop.time() - start, 1), "t": time.time(), "name": who, "heard": cmd["phrase"][:200]})
+                if rep["text"]:
+                    speak(rep["text"])
+                return
+            if cmd["intent"] == "instruct":  # free speech after the wake word: the situated agent plans it
+                code, receipt = missions.submit({"name": "instruct", "args": {"text": cmd["phrase"]}})
+                status(f"voice instruction -> {code}: {cmd['phrase'][:80]!r}")
+                speak("On it." if code == 202 else "One moment, I'm still busy.")
+                return
+            voice_state["intent"], voice_state["until"] = cmd["intent"], loop.time() + 12.0
             speak(f"Okay, {cmd['intent'].replace('_', ' ')}.")
 
         if voice is not None:
             voice.on_command = on_voice
+            view.listener = voice
+            global LISTENER
+            LISTENER = voice
             voice.start()
 
         while loop.time() - start < duration_s:
@@ -837,11 +1183,25 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                                                  "y": tel["pose"][1] + dist * math.sin(ang), "z": 0.9,
                                                  "label": ident or f"person {t.get('track_id')}", "identity": ident,
                                                  "posture": t.get("posture")})
-                        recorder.record_people(wall, people_world)
+                    else:
+                        people_world = []
                     objs = res.get("objects") or []
-                    if objs and fw and objects_mod is not None:
+                    object_world = []
+                    if objs and fw and objects_mod is not None and res.get("objects_seq", 0) != rec_objects_seq[0]:
+                        rec_objects_seq[0] = res["objects_seq"]  # place each detection list once, at this pose
+                        objs = objects_mod.not_people(objs, [t["box"] for t in res.get("raw_tracks", [])])  # a lying person is not a couch
+                        objs = [o for o in objs if o.get("hits", 1) >= 2]  # drop one-frame hallucinations
                         placed = objects_mod.place(objs, fw, fh or 480, tel["pose"], tel["yaw"], front_range_m=front_r)
-                        recorder.record_people(wall, objects_mod.sightings(placed, int(wall * 1000)))
+                        object_world = objects_mod.sightings(placed, int(wall * 1000))
+                    last_people_world = people_world
+                    if people_world or object_world:
+                        recorder.record_people(wall, people_world + object_world)  # one call: it replaces "now"
+                    if graph is not None:
+                        with contextlib.suppress(Exception):
+                            graph.ingest_pose(wall, tel["pose"][0], tel["pose"][1], tel["yaw"])
+                            if people_world or object_world:
+                                graph.ingest_people(wall, [dict(p, kind="person") for p in people_world]
+                                                    + [dict(o, kind="object") for o in object_world])
             if now - last_diag >= diag_every_s:
                 last_diag = now
                 status(f"diag {diag.line()}")
@@ -850,6 +1210,26 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             if lidar and (tel["ranges_t"] is None or now - tel["ranges_t"] > lidar_stale_s):
                 ranges = None  # unknown: the planner treats missing sectors as clear, stall detection still covers us
                 report["lidar"]["stale_ticks"] += 1
+            map_age = None if tel["ranges_t"] is None else now - tel["ranges_t"]
+            # camera guard: a detected object filling most of the frame height with its bottom near the frame's
+            # bottom edge is right at the nose, whatever the LiDAR band says (chair seats, boxes, low tables)
+            cam_block = None
+            try:
+                latest_res = perception.latest()
+                fh_ = fh or 480
+                for o in latest_res.get("objects") or []:
+                    x1, y1, x2, y2 = o["box"]
+                    if (y2 - y1) > 0.55 * fh_ and y2 > 0.85 * fh_ and o.get("hits", 1) >= 2:
+                        cam_block = o.get("label")
+                        break
+            except Exception:
+                cam_block = None
+            if cam_block is not None and mode not in ("follow", "greet"):
+                ranges = dict(ranges or {"left": float("inf"), "right": float("inf")})
+                ranges["front"] = min(ranges.get("front", float("inf")), 0.4)
+                if now - guard_state.get("cam_log", 0.0) > 5.0:
+                    guard_state["cam_log"] = now
+                    status(f"t={now-start:5.1f}s camera guard: {cam_block} fills the view, treating the front as 0.4 m")
             front_now = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
             action, tid = policy.step(tracks, fw or 640, fh or 480, now_s=now, front_m=front_now) if fw else ("patrol", None)
             # ---- missions from the family app (body-command shape); they pre-empt greeting and idle tricks
@@ -864,6 +1244,95 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 name, margs = new_mission["name"], new_mission["args"]
                 status(f"t={now-start:5.1f}s mission {name} {margs if margs else ''}")
                 report["missions"].append({"t_s": round(now - start, 1), "name": name, "args": margs})
+                if name == "instruct":
+                    sit = build_situation(time.time(), tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode, max_age_s=0.0)
+                    instruct_state.update(receipt=new_mission, plan=None)
+                    instruct_state["thread"] = threading.Thread(target=plan_instruct, args=(new_mission, sit), daemon=True, name="instruct")
+                    instruct_state["thread"].start()
+                    missions.progress(new_mission, step="planning")
+                    continue
+                if name == "turn":
+                    target = wrap_angle(tel["yaw"] + math.radians(margs["degrees"]))
+                    deadline = loop.time() + min(10.0, abs(margs["degrees"]) / 30.0 + 2.0)
+                    while loop.time() < deadline:
+                        err = wrap_angle(target - tel["yaw"])
+                        if abs(err) < 0.12:
+                            break
+                        send_move(0.0, math.copysign(max(0.8, min(1.0, 1.5 * abs(err))), err))
+                        await asyncio.sleep(0.1)
+                    send_move(0.0, 0.0)
+                    err = math.degrees(wrap_angle(target - tel["yaw"]))
+                    missions.finish(new_mission, result={"turned_deg": round(margs["degrees"] - err, 1), "remaining_deg": round(err, 1)})
+                    continue
+                if name == "look_for":
+                    # Scan in 60-degree stops; at each stop ask the local vision model whether the thing is in view and
+                    # where (left/centre/right). Then face it and walk up to it with the LiDAR guard. Pure camera + VLM:
+                    # this is how "the door" gets a bearing although no detector class exists for it.
+                    thing = margs["thing"]
+                    seen_at, answers = None, []
+                    for stop in range(6):
+                        if missions.consume_stop():
+                            break
+                        jpeg = view.jpeg if view.port else None
+                        ans = await loop.run_in_executor(None, lambda j=jpeg: agent_mod.spot(thing, j))
+                        answers.append({"stop": stop, **{k: ans.get(k) for k in ("seen", "where", "latency_ms", "error")}})
+                        status(f"t={now-start:5.1f}s look_for {thing!r}: stop {stop} -> {ans.get('where') if ans.get('seen') else 'not here'} ({ans.get('latency_ms', '?')} ms)")
+                        if ans.get("seen"):
+                            seen_at = ans
+                            break
+                        target = wrap_angle(tel["yaw"] + math.radians(60))
+                        deadline = loop.time() + 4.0
+                        while loop.time() < deadline and abs(wrap_angle(target - tel["yaw"])) > 0.12:
+                            send_move(0.0, 0.9)
+                            await asyncio.sleep(0.1)
+                        send_move(0.0, 0.0)
+                        await asyncio.sleep(0.4)  # let the stream catch up before the next picture
+                    if seen_at is None:
+                        missions.finish(new_mission, result={"found": False, "thing": thing, "stops": answers})
+                        continue
+                    nudge = {"left": 35.0, "centre": 0.0, "right": -35.0}.get(seen_at.get("where"), 0.0)
+                    if nudge:
+                        target = wrap_angle(tel["yaw"] + math.radians(nudge))
+                        deadline = loop.time() + 3.0
+                        while loop.time() < deadline and abs(wrap_angle(target - tel["yaw"])) > 0.12:
+                            send_move(0.0, math.copysign(0.9, nudge))
+                            await asyncio.sleep(0.1)
+                        send_move(0.0, 0.0)
+                    p0, stopped_by, deadline = tel["pose"], None, loop.time() + 12.0
+                    while loop.time() < deadline and not missions.consume_stop():
+                        fr = (tel["ranges"] or {}).get("front", float("inf"))
+                        if fr < 0.6:
+                            stopped_by = f"something {fr:.2f} m ahead"
+                            break
+                        if math.dist(p0, tel["pose"]) >= 2.5:
+                            stopped_by = "walked 2.5 m; look again"
+                            break
+                        send_move(0.3, 0.0)
+                        await asyncio.sleep(0.1)
+                    send_move(0.0, 0.0)
+                    missions.finish(new_mission, result={"found": True, "thing": thing, "where": seen_at.get("where"),
+                                                          "walked_m": round(math.dist(p0, tel["pose"]), 2), "stopped_by": stopped_by, "stops": answers})
+                    continue
+                if name == "walk":
+                    p0, want, forward = tel["pose"], abs(margs["metres"]), margs["metres"] > 0
+                    deadline = loop.time() + want / 0.2 + 2.0
+                    stopped_by = None
+                    while loop.time() < deadline:
+                        gone = math.dist(p0, tel["pose"])
+                        if gone >= want:
+                            break
+                        fr = (tel["ranges"] or {}).get("front", float("inf"))
+                        if forward and fr < 0.45:
+                            stopped_by = f"obstacle {fr:.2f} m ahead"
+                            break
+                        send_move(min(0.35, max(0.2, 0.4 * (want - gone))) if forward else -0.2, 0.0)
+                        await asyncio.sleep(0.1)
+                    send_move(0.0, 0.0)
+                    missions.finish(new_mission, result={"walked_m": round(math.dist(p0, tel["pose"]), 2), "stopped_by": stopped_by})
+                    continue
+                if name == "dance" and tel["ranges"] and tel["ranges"].get("front", float("inf")) < 0.5:
+                    missions.finish(new_mission, error=f"too close to something ({tel['ranges']['front']:.2f} m ahead) to dance safely")
+                    continue
                 if name in ("hello", "dance", "heart", "stretch", "sit", "stand"):
                     api = {"sit": 1009, "stand": STAND_UP, "dance": 1022, "hello": HELLO, "heart": 1036, "stretch": 1017}[name]
                     settle = {"sit": 3.0, "stand": 2.0, "dance": 10.0, "hello": 4.0, "heart": 6.0, "stretch": 5.0}[name]
@@ -890,9 +1359,24 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     voice_state["intent"], voice_state["until"] = "explore", now + margs["duration_s"]
                     missions.finish(new_mission, result={"note": "exploring", "duration_s": margs["duration_s"]})
                     continue
+                if name == "go_home":
+                    voice_state["intent"], voice_state["until"], voice_state["source"] = "go_home", now + 90.0, "mission"
+                    missions.finish(new_mission, result={"note": "heading home for up to 90 s", "home_m": round(dist, 2)})
+                    continue
                 if name == "find_person":
                     mission_state.update(receipt=new_mission, name=(margs["name"] or "").lower() or None,
                                          deadline=now + margs["timeout_s"], approach=margs["approach"], found=None, since=now)
+            if instruct_state["receipt"] is not None and instruct_state["plan"] is not None:
+                rec, plan = instruct_state["receipt"], instruct_state["plan"]
+                instruct_state.update(receipt=None, plan=None, thread=None)
+                status(f"t={now-start:5.1f}s instruct ({plan.get('source')}, {plan.get('latency_ms')} ms): {len(plan['steps'])} steps "
+                       f"{[st['name'] for st in plan['steps']]}; reply {plan.get('reply')!r}"
+                       + (f"; rejected {plan['rejected']}" if plan.get("rejected") else ""))
+                report.setdefault("instructions", []).append({"t_s": round(now - start, 1), "text": rec["args"]["text"], "source": plan.get("source"),
+                                                              "steps": [st["name"] for st in plan["steps"]], "reply": plan.get("reply")})
+                if plan.get("reply"):
+                    speak(plan["reply"])
+                missions.chain(rec, plan["steps"], reply=plan.get("reply", ""), source=plan.get("source", ""))
             mission = missions.executing()
             if mission is not None and mission_state.get("receipt") is mission:
                 wanted = mission_state["name"]
@@ -970,17 +1454,72 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             view.update(mode=mode, action=action, tracks=tracks, ranges=ranges, battery=tel["soc"], t_s=now - start,
                         greetings=len(report["greetings"]), checkins=len(report["checkins"]), home_m=dist,
                         fps=diag.rate("processed"))
+            if action == "patrol" and mission is None and now - last_remark_check >= 5.0 and voice is not None:
+                last_remark_check = now
+                wall = time.time()
+                sit = build_situation(wall, tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode)
+                remark = narrator.remark(sit, now=wall)
+                if remark:
+                    line = await loop.run_in_executor(None, lambda: agent_mod.compose_line(
+                        "remark on something you just noticed while exploring", sit, inference=chat_client, fallback=remark, extra=f"Noticed: {remark}"))
+                    remark = line["text"]
+                    status(f"t={now-start:5.1f}s remark ({line['source']}): {remark!r}")
+                    report.setdefault("remarks", []).append({"t_s": round(now - start, 1), "text": remark})
+                    memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="remark", people=len(tracks), note=remark[:60])
+                    speak(remark)
             if action == "greet":
                 track = next(t for t in tracks if t.get("track_id") == tid)
-                text = policy.greeting_text(track)
+                wall = time.time()
+                world = next(((p["x"], p["y"]) for p in (last_people_world or []) if p.get("track_id") == tid), None)
+                if world is None and tel["pose"] is not None:
+                    fr = (tel["ranges"] or {}).get("front")
+                    d0 = fr if fr is not None and fr != float("inf") else 1.0
+                    world = (tel["pose"][0] + d0 * math.cos(tel["yaw"]), tel["pose"][1] + d0 * math.sin(tel["yaw"]))
+                sit = build_situation(wall, tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode)
+                decision = agent_mod.greeting_decision(dict(track, world=world), sit, now=wall)
+                if not decision["greet"]:
+                    policy.greeted[tid] = now  # known already: no repeat greeting, keep exploring
+                    status(f"t={now-start:5.1f}s person (track {tid}) ahead: not greeting again ({decision['reason']})")
+                    continue
+                who = (track.get("identity") or {}).get("name")
+                line = await loop.run_in_executor(None, lambda: agent_mod.compose_line(
+                    f"greet {who or 'this person'} who is right in front of you", sit, inference=chat_client, fallback=decision["text"],
+                    extra=f"Person in front: {who or 'someone you do not know by name'}; nearby objects: "
+                          f"{', '.join(o['name'] for o in sit['objects'][:3]) or 'none known'}."))
+                text = line["text"]
                 trick_name, trick_api, trick_settle = GREET_TRICKS[len(report["greetings"]) % len(GREET_TRICKS)]
-                status(f"t={now-start:5.1f}s person (track {tid}) ahead: stopping, {trick_name}, saying {text!r}")
+                status(f"t={now-start:5.1f}s person (track {tid}) ahead: stopping, {trick_name}, saying {text!r} "
+                       f"({decision['reason']}; line by {line['source']}, {line['latency_ms']} ms)")
                 memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="greet", people=len(tracks),
                            note=((track.get("identity") or {}).get("name")) or trick_name)
                 grid["map"].mark(tel["pose"][0], tel["pose"][1], "greet")
-                code = await show(trick_name, trick_api, trick_settle, text)
-                report["greetings"].append({"t_s": round(now - start, 1), "track_id": tid, "text": text,
-                                            "trick": trick_name, "hello_code": code, "identity": track.get("identity")})
+                code = await show(trick_name, trick_api, trick_settle, text, look_up=True)
+                # A conversation turn: the greeting asked how they are; listen, answer in character, escalate concern.
+                heard_text, reply_text, reply_kind = None, None, "none"
+                if voice is not None and not no_motion:
+                    try:
+                        heard = await loop.run_in_executor(None, lambda: listen_blocking(6.0))
+                        heard_text = heard.get("transcript")
+                    except Exception:
+                        heard_text = None
+                    if heard_text:
+                        rep = await loop.run_in_executor(None, lambda: agent_mod.converse_reply(heard_text, sit, who=who, inference=chat_client))
+                        reply_text, reply_kind = rep["text"], rep["kind"]
+                        status(f"t={now-start:5.1f}s heard {who or 'them'}: {heard_text[:80]!r} -> {reply_kind}; saying {reply_text!r} ({rep['source']})")
+                        if reply_text:
+                            await loop.run_in_executor(None, lambda: speak_blocking(reply_text))
+                        if reply_kind == "concern":
+                            report.setdefault("concerns", []).append({"t_s": round(now - start, 1), "t": wall, "name": who, "heard": heard_text[:200]})
+                            memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="concern", people=len(tracks), note=(who or "person") + ": " + heard_text[:50])
+                            with contextlib.suppress(Exception):
+                                if graph is not None:
+                                    graph.ingest_event(wall, tel["pose"][0], tel["pose"][1], "concern", heard_text[:120])
+                report.setdefault("conversations", []).append({"t_s": round(now - start, 1), "name": who, "asked": text, "heard": heard_text,
+                                                               "reply": reply_text, "kind": reply_kind})
+                report["greetings"].append({"t_s": round(now - start, 1), "t": wall, "track_id": tid, "text": text,
+                                            "trick": trick_name, "hello_code": code, "identity": track.get("identity"),
+                                            "name": (track.get("identity") or {}).get("name"),
+                                            "x": None if world is None else round(world[0], 2), "y": None if world is None else round(world[1], 2)})
                 continue
             if action == "checkin":
                 # A lying person is a posture estimate, not a diagnosis: stop, ask, wave, and keep an eye out.
@@ -1056,7 +1595,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             if mode == "follow":
                 mode = "cruise"  # lost them for good: back to the wander planner
             if idle_trick_s and mission is None and mode.startswith(("cruise", "brain:")) and now - last_show >= idle_trick_s:
-                trick_name, trick_api, trick_settle = GREET_TRICKS[1 + (len(report["greetings"]) + len(report["checkins"])) % 3]
+                trick_name, trick_api, trick_settle = GREET_TRICKS[(len(report["greetings"]) + len(report["checkins"])) % len(GREET_TRICKS)]
                 status(f"t={now-start:5.1f}s nobody new for {idle_trick_s:.0f}s: {trick_name} for fun")
                 report.setdefault("idle_tricks", []).append({"t_s": round(now - start, 1), "trick": trick_name,
                                                              "code": await show(trick_name, trick_api, trick_settle, None)})
@@ -1080,7 +1619,24 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                             heading_to = math.atan2(seen["y"] - _p[1], seen["x"] - _p[0])
                             if abs(wrap_angle(heading_to - bandit.sector_heading(a))) < math.pi / bandit.n_arms:
                                 bonus = 1.0
+                    goal = frontier["goal"]
+                    if goal is not None:  # dimOS frontier exploration: prefer the sector that points at the next frontier
+                        to_goal = math.atan2(goal[1] - _p[1], goal[0] - _p[0])
+                        if abs(wrap_angle(to_goal - bandit.sector_heading(a))) < math.pi / bandit.n_arms:
+                            bonus += 0.8
                     return bonus + 0.3 * min(free, 3.0) / 3.0 + 0.5 * _g.unvisited_ahead(_p[0], _p[1], bandit.sector_heading(a))
+                if frontier["planner"] is not None and now - frontier["t"] > 8.0:
+                    frontier["t"] = now
+                    try:  # ~0.4 s of pure Python: run it off the loop
+                        goal = await loop.run_in_executor(None, lambda: frontier["planner"].next_goal(
+                            grid["map"], tel["pose"], tel["yaw"], clear_range_m=1.5))
+                        frontier["goal"] = goal
+                        if goal is not None:
+                            report["frontier"]["goals"] += 1
+                            status(f"t={now-start:5.1f}s frontier (dimOS): next goal {goal[0]:.1f},{goal[1]:.1f}")
+                    except Exception as exc:
+                        frontier["goal"] = None
+                        report["frontier"]["error"] = type(exc).__name__
                 arm = bandit.choose(prior=prior)
                 planner.target_heading = bandit.sector_heading(arm)
                 bandit_state.update(until=now + 12.0, rewarded=False)
@@ -1089,6 +1645,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                        f" values={[round(v, 1) for v in bandit.value]}")
             cmd_vx, cmd_wz, new_mode = planner.step(now_s=now, ranges=ranges, pose_xy=tel["pose"], yaw=tel["yaw"],
                                                     origin_xy=origin, stalled=stalled)
+            if cmd_vx > 0 and (map_age is None or map_age > 0.8):  # old or no map: creep, do not cruise blind
+                cmd_vx = min(cmd_vx, 0.2)
             if new_mode in ("blocked", "backoff") and not bandit_state["rewarded"]:
                 bandit.reward(0.0)  # this heading is a wall
                 bandit_state.update(rewarded=True, until=now + 1.0)  # re-choose soon after clearing
@@ -1146,6 +1704,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             voice.stop()
         view.stop()
         report["diag"] = diag.snapshot()
+        if graph is not None:
+            with contextlib.suppress(Exception):
+                report["graph"] = {"places": len(graph.places()), "summary": graph.summary(now=time.time(), limit=6).get("sentences", [])}
         if conn is not None and report["connection"]["status"] == "connected":
             if commanded:
                 report["stop"]["requested"] = True
@@ -1174,10 +1735,12 @@ def main(argv=None):
     parser.add_argument("--no-lidar", action="store_true", help="skip the voxel-map sector ranges (stall detection only)")
     parser.add_argument("--firmware-avoid", action="store_true", help="also switch on the firmware obstacle-avoid service")
     parser.add_argument("--stop-on-checkin", action="store_true", help="end the run after the first lying-person check-in")
-    parser.add_argument("--idle-trick", type=float, default=90.0, help="seconds without a new person before a trick; 0 disables")
-    parser.add_argument("--view-port", type=int, default=8011, help="live camera/boxes page on 127.0.0.1; 0 disables")
+    parser.add_argument("--idle-trick", type=float, default=0.0, help="seconds without a new person before a trick; 0 (default) = keep exploring")
+    parser.add_argument("--view-port", type=int, default=8011, help="live camera/boxes page; 0 disables")
+    parser.add_argument("--view-host", default="127.0.0.1", help="bind address; beyond loopback requires ANNIE_BODY_TOKEN "
+                        "and ANNIE_VIEW_HOSTS (comma list of this machine's addresses the page may be opened on)")
     parser.add_argument("--no-motion", action="store_true", help="perception-only: never move or perform tricks")
-    parser.add_argument("--imgsz", type=int, default=352, help="tracker inference size (multiple of 32)")
+    parser.add_argument("--imgsz", type=int, default=320, help="tracker inference size (multiple of 32); 320 keeps up with the 14 fps stream on this Mac")
     parser.add_argument("--diag-every", type=float, default=5.0, help="seconds between diagnostic lines")
     parser.add_argument("--brain", action="store_true", help="let the local VLM propose patrol moves (guardrails stay)")
     parser.add_argument("--brain-period", type=float, default=4.0)
@@ -1187,10 +1750,19 @@ def main(argv=None):
     parser.add_argument("--target", default=os.environ.get("ANNIE_TARGET", "Jeanine:red"),
                         help="NAME:COLOUR of the person to recognise by shirt colour; empty disables")
     parser.add_argument("--output")
+    parser.add_argument("--sim", nargs="?", const="seated", choices=("seated", "floor", "empty"), default=None,
+                        help="no robot: drive the simulated dog in the MuJoCo apartment (docs/SIM_DOG.md); report source = simulation")
     args = parser.parse_args(argv)
     if not 0.05 <= args.speed <= 0.45:
         parser.error("--speed must be 0.05-0.45")
-    if MOTION_INHIBIT_PATH.exists():
+    sim_conn_factory = None
+    if args.sim:
+        from robot.dog.sim import SimDog
+        sim_conn_factory = SimDog.from_cli(args.sim).connect_factory()
+        for name in ("memory_file", "spacetime_file"):  # simulated sightings never land in the hardware recordings
+            if getattr(args, name) == parser.get_default(name):
+                setattr(args, name, getattr(args, name).replace(".data/hardware/", ".data/sim/"))
+    if MOTION_INHIBIT_PATH.exists() and not args.sim:
         _say("physical motion inhibited by the active hardware task")
         return 2
     for key in [k for k in os.environ if k.lower() in ("http_proxy", "https_proxy", "all_proxy")]:
@@ -1200,18 +1772,22 @@ def main(argv=None):
         if line.startswith(("ELEVENLABS_", "DEEPGRAM_")) and "=" in line:
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip().strip('"'))
+    if args.view_host not in ("127.0.0.1", "localhost", "::1") and not os.environ.get("ANNIE_BODY_TOKEN"):
+        parser.error("--view-host beyond loopback requires ANNIE_BODY_TOKEN (fail closed: anyone on the LAN could move the robot)")
     _say(f"voice: {voice().enabled} (cloud when a key is set; local say/Whisper otherwise)")
     logging.disable(logging.CRITICAL)
     try:
         report = asyncio.run(run_patrol_greet(ip=args.ip, aes_key=os.environ.get("UNITREE_AES_128_KEY"),
+                                              conn_factory=sim_conn_factory, source="simulation" if args.sim else "hardware",
                                               duration_s=args.duration, speed_mps=args.speed, boundary_m=args.boundary,
                                               lidar=not args.no_lidar, firmware_avoid=args.firmware_avoid,
                                               stop_on_checkin=args.stop_on_checkin, idle_trick_s=args.idle_trick,
-                                              view=LiveView(port=args.view_port), no_motion=args.no_motion,
+                                              view=LiveView(port=args.view_port, host=args.view_host), no_motion=args.no_motion,
                                               imgsz=args.imgsz, diag_every_s=args.diag_every,
                                               brain=VisionBrain() if args.brain else None, brain_period_s=args.brain_period,
                                               memory=SightingMemory(args.memory_file),
-                                              voice=CommandListener(lambda c, t: None, status=_say) if args.voice else None,
+                                              voice=CommandListener(lambda c, t: None, status=_say,
+                                                                    transcriber=lambda wav: voice().transcribe(wav) or "") if args.voice else None,
                                               identifier=(TargetIdentifier(*args.target.split(":", 1)) if args.target else None),
                                               recorder=(SpacetimeRecorder(path=args.spacetime_file) if SpacetimeRecorder else None)))
     except KeyboardInterrupt:

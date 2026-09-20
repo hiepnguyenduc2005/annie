@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "annie": {
+      "command": ".venv/bin/python",
+      "args": ["robot/dog/mcp_server.py"]
+    }
+  }
+}

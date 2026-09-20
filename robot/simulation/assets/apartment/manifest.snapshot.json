@@ -1,0 +1,1480 @@
+{
+  "version": 1,
+  "credit": "Powered by Poly Haven (CC0)",
+  "models": {
+    "sofa": {
+      "source": "https://polyhaven.com/a/sofa_03",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/sofa_03/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/sofa_03/mjcf_0.png",
+          "rgba": null,
+          "faces": 6994
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/sofa_03/mjcf_1.obj",
+          "texture": ".cache/simulation-assets/apartment/sofa_03/mjcf_1.png",
+          "rgba": null,
+          "faces": 1010
+        }
+      ],
+      "size_m": [
+        2.731,
+        0.925,
+        1.118
+      ]
+    },
+    "dining_chair": {
+      "source": "https://polyhaven.com/a/dining_chair_02",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/dining_chair_02/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/dining_chair_02/mjcf_0.png",
+          "rgba": null,
+          "faces": 22013
+        }
+      ],
+      "size_m": [
+        0.434,
+        0.576,
+        0.973
+      ]
+    },
+    "dining_table": {
+      "source": "https://polyhaven.com/a/small_wooden_table_01",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/small_wooden_table_01/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/small_wooden_table_01/mjcf_0.png",
+          "rgba": null,
+          "faces": 3410
+        }
+      ],
+      "size_m": [
+        1.306,
+        0.627,
+        0.76
+      ]
+    },
+    "coffee_table": {
+      "source": "https://polyhaven.com/a/modern_coffee_table_01",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/modern_coffee_table_01/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/modern_coffee_table_01/mjcf_0.png",
+          "rgba": null,
+          "faces": 4504
+        }
+      ],
+      "size_m": [
+        0.6,
+        1.202,
+        0.39
+      ]
+    },
+    "side_table": {
+      "source": "https://polyhaven.com/a/side_table_01",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/side_table_01/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/side_table_01/mjcf_0.png",
+          "rgba": null,
+          "faces": 2756
+        }
+      ],
+      "size_m": [
+        0.55,
+        0.45,
+        0.551
+      ]
+    },
+    "plant": {
+      "source": "https://polyhaven.com/a/potted_plant_04",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_0.png",
+          "rgba": null,
+          "faces": 3744
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_1.obj",
+          "texture": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_1.png",
+          "rgba": null,
+          "faces": 3394
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_2.obj",
+          "texture": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_2.png",
+          "rgba": null,
+          "faces": 411
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_3.obj",
+          "texture": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_3.png",
+          "rgba": null,
+          "faces": 1380
+        }
+      ],
+      "size_m": [
+        0.168,
+        0.185,
+        0.267
+      ]
+    },
+    "pendant": {
+      "source": "https://polyhaven.com/a/modern_ceiling_lamp_01",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_0.png",
+          "rgba": null,
+          "faces": 2944
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_1.obj",
+          "texture": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_1.png",
+          "rgba": null,
+          "faces": 2354
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_2.obj",
+          "texture": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_2.png",
+          "rgba": null,
+          "faces": 304
+        }
+      ],
+      "size_m": [
+        0.432,
+        0.432,
+        0.952
+      ]
+    },
+    "frame_a": {
+      "source": "https://polyhaven.com/a/hanging_picture_frame_01",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_0.png",
+          "rgba": null,
+          "faces": 2
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_1.obj",
+          "texture": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_1.png",
+          "rgba": null,
+          "faces": 2
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_2.obj",
+          "texture": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_2.png",
+          "rgba": null,
+          "faces": 2582
+        }
+      ],
+      "size_m": [
+        0.594,
+        0.016,
+        0.841
+      ]
+    },
+    "frame_b": {
+      "source": "https://polyhaven.com/a/hanging_picture_frame_02",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_0.png",
+          "rgba": null,
+          "faces": 2
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_1.obj",
+          "texture": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_1.png",
+          "rgba": null,
+          "faces": 3674
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_2.obj",
+          "texture": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_2.png",
+          "rgba": null,
+          "faces": 2
+        }
+      ],
+      "size_m": [
+        0.752,
+        0.033,
+        0.5
+      ]
+    },
+    "clock": {
+      "source": "https://polyhaven.com/a/wall_clock",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/wall_clock/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/wall_clock/mjcf_0.png",
+          "rgba": null,
+          "faces": 2852
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/wall_clock/mjcf_1.obj",
+          "texture": null,
+          "rgba": [
+            0.8,
+            0.8,
+            0.8,
+            0.4
+          ],
+          "faces": 528
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/wall_clock/mjcf_2.obj",
+          "texture": ".cache/simulation-assets/apartment/wall_clock/mjcf_2.png",
+          "rgba": null,
+          "faces": 10
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/wall_clock/mjcf_3.obj",
+          "texture": ".cache/simulation-assets/apartment/wall_clock/mjcf_3.png",
+          "rgba": null,
+          "faces": 258
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/wall_clock/mjcf_4.obj",
+          "texture": ".cache/simulation-assets/apartment/wall_clock/mjcf_4.png",
+          "rgba": null,
+          "faces": 10
+        }
+      ],
+      "size_m": [
+        0.32,
+        0.047,
+        0.32
+      ]
+    },
+    "vase": {
+      "source": "https://polyhaven.com/a/ceramic_vase_01",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/ceramic_vase_01/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/ceramic_vase_01/mjcf_0.png",
+          "rgba": null,
+          "faces": 10296
+        }
+      ],
+      "size_m": [
+        0.204,
+        0.204,
+        0.4
+      ]
+    },
+    "cabinet": {
+      "source": "https://polyhaven.com/a/painted_wooden_cabinet",
+      "license": "CC0",
+      "parts": [
+        {
+          "mesh": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_0.obj",
+          "texture": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_0.png",
+          "rgba": null,
+          "faces": 325
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_1.obj",
+          "texture": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_1.png",
+          "rgba": null,
+          "faces": 325
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_2.obj",
+          "texture": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_2.png",
+          "rgba": null,
+          "faces": 80
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_3.obj",
+          "texture": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_3.png",
+          "rgba": null,
+          "faces": 404
+        },
+        {
+          "mesh": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_4.obj",
+          "texture": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_4.png",
+          "rgba": null,
+          "faces": 1093
+        }
+      ],
+      "size_m": [
+        1.195,
+        0.617,
+        1.182
+      ]
+    }
+  },
+  "textures": {
+    "plaster": {
+      "source": "https://polyhaven.com/a/white_plaster_02",
+      "license": "CC0",
+      "texture": ".cache/simulation-assets/apartment/textures/white_plaster_02.png",
+      "tile_m": 2.0
+    },
+    "parquet": {
+      "source": "https://polyhaven.com/a/herringbone_parquet",
+      "license": "CC0",
+      "texture": ".cache/simulation-assets/apartment/textures/herringbone_parquet.png",
+      "tile_m": 1.6
+    },
+    "tiles": {
+      "source": "https://polyhaven.com/a/floor_tiles_06",
+      "license": "CC0",
+      "texture": ".cache/simulation-assets/apartment/textures/floor_tiles_06.png",
+      "tile_m": 1.2
+    },
+    "backsplash": {
+      "source": "https://polyhaven.com/a/long_white_tiles",
+      "license": "CC0",
+      "texture": ".cache/simulation-assets/apartment/textures/long_white_tiles.png",
+      "tile_m": 0.9
+    },
+    "marble": {
+      "source": "https://polyhaven.com/a/marble_01",
+      "license": "CC0",
+      "texture": ".cache/simulation-assets/apartment/textures/marble_01.png",
+      "tile_m": 1.5
+    },
+    "oak": {
+      "source": "https://polyhaven.com/a/oak_veneer_01",
+      "license": "CC0",
+      "texture": ".cache/simulation-assets/apartment/textures/oak_veneer_01.png",
+      "tile_m": 1.2
+    },
+    "rug": {
+      "source": "https://polyhaven.com/a/wool_boucle",
+      "license": "CC0",
+      "texture": ".cache/simulation-assets/apartment/textures/wool_boucle.png",
+      "tile_m": 0.7
+    },
+    "shirt_red": {
+      "source": "generated by robot/simulation/apartment.py",
+      "license": "project-owned",
+      "texture": ".cache/simulation-assets/apartment/generated/shirt_red.png",
+      "tile_m": 1.0
+    },
+    "shirt_teal": {
+      "source": "generated by robot/simulation/apartment.py",
+      "license": "project-owned",
+      "texture": ".cache/simulation-assets/apartment/generated/shirt_teal.png",
+      "tile_m": 1.0
+    },
+    "trousers_navy": {
+      "source": "generated by robot/simulation/apartment.py",
+      "license": "project-owned",
+      "texture": ".cache/simulation-assets/apartment/generated/trousers_navy.png",
+      "tile_m": 1.0
+    },
+    "trousers_grey": {
+      "source": "generated by robot/simulation/apartment.py",
+      "license": "project-owned",
+      "texture": ".cache/simulation-assets/apartment/generated/trousers_grey.png",
+      "tile_m": 1.0
+    },
+    "linen": {
+      "source": "generated by robot/simulation/apartment.py",
+      "license": "project-owned",
+      "texture": ".cache/simulation-assets/apartment/generated/linen.png",
+      "tile_m": 1.0
+    },
+    "window_view": {
+      "source": "generated by robot/simulation/apartment.py",
+      "license": "project-owned",
+      "texture": ".cache/simulation-assets/apartment/generated/window_view.png",
+      "tile_m": 1.0
+    },
+    "art_print": {
+      "source": "generated by robot/simulation/apartment.py",
+      "license": "project-owned",
+      "texture": ".cache/simulation-assets/apartment/generated/art_print.png",
+      "tile_m": 1.0
+    }
+  },
+  "files": [
+    {
+      "url": "https://api.polyhaven.com/files/sofa_03",
+      "path": ".cache/simulation-assets/apartment/sofa_03/files.json",
+      "sha256": "13f87d37287a68c7e967a186607656131f9114c4761c3abb994db71a40cf0e7a",
+      "bytes": 29355
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/sofa_03/sofa_03_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/sofa_03/sofa_03.gltf",
+      "sha256": "123f491bef4e9bda153bda770a5d12810bfc9b87ce56aa5973aed041ea17fd92",
+      "bytes": 4465
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/sofa_03/sofa_03_rough_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/sofa_03/textures/sofa_03_rough_1k.jpg",
+      "sha256": "b03b45c92365cddf787db158d7499915d6ba0d67ec51947453f6598f51361e47",
+      "bytes": 170206
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/sofa_03/sofa_03.bin",
+      "path": ".cache/simulation-assets/apartment/sofa_03/sofa_03.bin",
+      "sha256": "e524350933d3d2a84c28f13bc042888a4768adeef88d630111015caede1c2e98",
+      "bytes": 228984
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/sofa_03/sofa_03_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/sofa_03/textures/sofa_03_diff_1k.jpg",
+      "sha256": "c0bc221e4cacc3de75aff7744dab1600d008bcf70b5c67fb10ad6847b695a84e",
+      "bytes": 151815
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/sofa_03/sofa_03_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/sofa_03/textures/sofa_03_nor_gl_1k.jpg",
+      "sha256": "b961f9e9f38233bd58cdc5275614d3a1b37d5304f5ab86fd19d110657d386025",
+      "bytes": 112563
+    },
+    {
+      "url": "https://api.polyhaven.com/files/dining_chair_02",
+      "path": ".cache/simulation-assets/apartment/dining_chair_02/files.json",
+      "sha256": "0a35e2b3d040705903cfdaa087d209b2fe7b0e8d12dc880386874932f018dcde",
+      "bytes": 30525
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/dining_chair_02/dining_chair_02_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/dining_chair_02/dining_chair_02.gltf",
+      "sha256": "88352a44a17319846f61fe03ce75c79fb1849aa508b6a262366c149c1bbd06b8",
+      "bytes": 2723
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/dining_chair_02/dining_chair_02.bin",
+      "path": ".cache/simulation-assets/apartment/dining_chair_02/dining_chair_02.bin",
+      "sha256": "c7f1ef858f73815176d2ab304472a69ccf6097e971e5258eb924a75f841d4af5",
+      "bytes": 544592
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/dining_chair_02/dining_chair_02_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/dining_chair_02/textures/dining_chair_02_nor_gl_1k.jpg",
+      "sha256": "348703512ca1215f8389e9108419c2d1a46537663db25f423c3ef900d20cfe61",
+      "bytes": 119612
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/dining_chair_02/dining_chair_02_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/dining_chair_02/textures/dining_chair_02_diff_1k.jpg",
+      "sha256": "343990f764790da1149485a422dee2bc6797945a6af06a37d02d7a7de041acf5",
+      "bytes": 91518
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/dining_chair_02/dining_chair_02_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/dining_chair_02/textures/dining_chair_02_arm_1k.jpg",
+      "sha256": "0a81c0c886baa1e65d94fb6fb90ab4751bee319888ecf1c428ae62042d8a5b15",
+      "bytes": 162630
+    },
+    {
+      "url": "https://api.polyhaven.com/files/small_wooden_table_01",
+      "path": ".cache/simulation-assets/apartment/small_wooden_table_01/files.json",
+      "sha256": "2d6654aeb333a55e682f32e4878a2ac5e7da00d5f878a5f11a4399698cfb062e",
+      "bytes": 24648
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/small_wooden_table_01/small_wooden_table_01_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/small_wooden_table_01/small_wooden_table_01.gltf",
+      "sha256": "2a33fb09785a9553c3cd4d0c5f8b874bb0fb9f26c8ef2613b65607524411f352",
+      "bytes": 2764
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_wooden_table_01/small_wooden_table_01_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/small_wooden_table_01/textures/small_wooden_table_01_arm_1k.jpg",
+      "sha256": "e1d01aaf54338b61f224e8b08c5b9e9879126ae3908a92cb8ad161bf54078c34",
+      "bytes": 154335
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/small_wooden_table_01/small_wooden_table_01.bin",
+      "path": ".cache/simulation-assets/apartment/small_wooden_table_01/small_wooden_table_01.bin",
+      "sha256": "f0ca88dac6cf094e1ba260ee1bc21756a84a27b5456bcf45bda2227819458d84",
+      "bytes": 92428
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_wooden_table_01/small_wooden_table_01_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/small_wooden_table_01/textures/small_wooden_table_01_diff_1k.jpg",
+      "sha256": "ef587bffaf9f65ec81e0777fa6f25d835ed354cef055669c8a783086fd45b9dd",
+      "bytes": 138301
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_wooden_table_01/small_wooden_table_01_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/small_wooden_table_01/textures/small_wooden_table_01_nor_gl_1k.jpg",
+      "sha256": "7f675805966ce02cd7678687c4fc86c0dfe4b20106486bb0c772143ea8ca3b4b",
+      "bytes": 26935
+    },
+    {
+      "url": "https://api.polyhaven.com/files/modern_coffee_table_01",
+      "path": ".cache/simulation-assets/apartment/modern_coffee_table_01/files.json",
+      "sha256": "5c880e7389955a8b2b3a37a76566c85509e8548e3f6cb4f4d9fd3ef9b0bd28f1",
+      "bytes": 28394
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/modern_coffee_table_01/modern_coffee_table_01_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/modern_coffee_table_01/modern_coffee_table_01.gltf",
+      "sha256": "a35d811da4c174d0c888f23353dda21501763dbf5505c66f57fef4b3f613e50c",
+      "bytes": 2771
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/modern_coffee_table_01/modern_coffee_table_01.bin",
+      "path": ".cache/simulation-assets/apartment/modern_coffee_table_01/modern_coffee_table_01.bin",
+      "sha256": "b8fe0d49041b879a5d5962685a39e3daf009679f7b6a88ced1347e6dc6c0851e",
+      "bytes": 154864
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_coffee_table_01/modern_coffee_table_01_rough_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/modern_coffee_table_01/textures/modern_coffee_table_01_rough_1k.jpg",
+      "sha256": "8013b48b0ebb845907f840afcae9cbc915a5205ac82ed99cbba31771febacb0f",
+      "bytes": 403959
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_coffee_table_01/modern_coffee_table_01_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/modern_coffee_table_01/textures/modern_coffee_table_01_diff_1k.jpg",
+      "sha256": "069b89dd3ef03ddcbb7b2e6a124b1903aa7848394509121aa19f87bd0ef0218c",
+      "bytes": 410569
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_coffee_table_01/modern_coffee_table_01_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/modern_coffee_table_01/textures/modern_coffee_table_01_nor_gl_1k.jpg",
+      "sha256": "43e0d317d0f8418b130c0058c645225ee83b808b1dc0e5e7236bead3bdd77139",
+      "bytes": 359134
+    },
+    {
+      "url": "https://api.polyhaven.com/files/side_table_01",
+      "path": ".cache/simulation-assets/apartment/side_table_01/files.json",
+      "sha256": "9174998ad8a4c647dae2970f603876f532d6df07bc2f00fab1912f85ba173fb4",
+      "bytes": 29727
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/side_table_01/side_table_01_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/side_table_01/side_table_01.gltf",
+      "sha256": "a441125a4f660a23a31601aedd9aa379c6febf2b35171c08814187b5ec5a3309",
+      "bytes": 2700
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/side_table_01/side_table_01.bin",
+      "path": ".cache/simulation-assets/apartment/side_table_01/side_table_01.bin",
+      "sha256": "b1f2a0519fc61cded1fdeac8169ac5b077836052671cd39a35cb56576c9aa11e",
+      "bytes": 117784
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/side_table_01/side_table_01_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/side_table_01/textures/side_table_01_diff_1k.jpg",
+      "sha256": "e0d9f2f91bede592868f9b89d141f5e8542524b8356f1b68f0f5c6bb6447731d",
+      "bytes": 183315
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/side_table_01/side_table_01_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/side_table_01/textures/side_table_01_nor_gl_1k.jpg",
+      "sha256": "14850c49ae1e06cf8701eac4fed2163c2ad075978d2878fcaa079dffe1fd1195",
+      "bytes": 71744
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/side_table_01/side_table_01_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/side_table_01/textures/side_table_01_arm_1k.jpg",
+      "sha256": "ebaef894800faa2e09df7001c1536055c97648428410a9de76bb191aec00c014",
+      "bytes": 129725
+    },
+    {
+      "url": "https://api.polyhaven.com/files/potted_plant_04",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/files.json",
+      "sha256": "302f57049f55cfdf1364156e6b9ec6b63d212e9b7b04b5db830073f4aedd4b1b",
+      "bytes": 30185
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/potted_plant_04/potted_plant_04_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/potted_plant_04.gltf",
+      "sha256": "b3a3bc3e97da75844999c4da07b7104b6c023f729a7c045979929b9504184339",
+      "bytes": 7081
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/potted_plant_04/potted_plant_04.bin",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/potted_plant_04.bin",
+      "sha256": "158c1d27503d4845eb3573f00c01ae3f4f77f1d6ca8754c67bf1762745946f7f",
+      "bytes": 241800
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_04/potted_plant_04_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/textures/potted_plant_04_nor_gl_1k.jpg",
+      "sha256": "66e4627f6691a2d8104a6c53a39b41daddbd5bad8103e73f372c39166a3dcb07",
+      "bytes": 817786
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_04/potted_plant_04_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/textures/potted_plant_04_arm_1k.jpg",
+      "sha256": "7f3288345570ef700c851ea382ed267490ffc8c901ccc31f2ec5507e4d098e48",
+      "bytes": 478413
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_04/potted_plant_04_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/textures/potted_plant_04_diff_1k.jpg",
+      "sha256": "8693a971557fbafb12a24a2e23c1a04ab6b04ecdc4d26808c5ad3516a4971f24",
+      "bytes": 577545
+    },
+    {
+      "url": "https://api.polyhaven.com/files/modern_ceiling_lamp_01",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/files.json",
+      "sha256": "02b6f22527f1b2f161e22dd1568c0c55ae4a00d0d600b365d0facdeac0dfd4f8",
+      "bytes": 39982
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/modern_ceiling_lamp_01/modern_ceiling_lamp_01_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/modern_ceiling_lamp_01.gltf",
+      "sha256": "f88b5d0a81fa813457a77474e7e4e812f97ad5fac2109ba03ddb183274be3f8c",
+      "bytes": 6177
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_ceiling_lamp_01/modern_ceiling_lamp_01_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/textures/modern_ceiling_lamp_01_arm_1k.jpg",
+      "sha256": "f4c6a8e7c86b1deaaf0f74099539ff635063b63f594b0fadfc3ec8fac805df4e",
+      "bytes": 124022
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_ceiling_lamp_01/modern_ceiling_lamp_01_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/textures/modern_ceiling_lamp_01_diff_1k.jpg",
+      "sha256": "c08bfbf7576a86a4a09d386ae9f0a92965fc652bf82f3a8dba1c796b1aa9e535",
+      "bytes": 79705
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/modern_ceiling_lamp_01/modern_ceiling_lamp_01.bin",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/modern_ceiling_lamp_01.bin",
+      "sha256": "ae5140a64e12e639554158901a5e92340bb37c706096ff255804e3220fb96367",
+      "bytes": 146828
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modern_ceiling_lamp_01/modern_ceiling_lamp_01_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/textures/modern_ceiling_lamp_01_nor_gl_1k.jpg",
+      "sha256": "dd75bd21a901581325f5c363bd89b45430b8531cb27dead314cd087196a33c27",
+      "bytes": 79333
+    },
+    {
+      "url": "https://api.polyhaven.com/files/hanging_picture_frame_01",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/files.json",
+      "sha256": "dbd6e1650e994ad3b81c16b0393f0b6e1ae0733afb69a8396b989b0cd39c8aff",
+      "bytes": 72837
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/hanging_picture_frame_01/hanging_picture_frame_01_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/hanging_picture_frame_01.gltf",
+      "sha256": "00aaeab14751485287443b4c5cc2ee5673136510595daa6a2948519c116ad47b",
+      "bytes": 6495
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_artwork_roughness_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/textures/hanging_picture_frame_01_artwork_roughness_1k.jpg",
+      "sha256": "62d875e9427f5d71f1bb4d9dc9569e34465bfd3067b8b13f5644b73e23a09fa3",
+      "bytes": 12684
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/hanging_picture_frame_01/hanging_picture_frame_01.bin",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/hanging_picture_frame_01.bin",
+      "sha256": "27ec66baf3b227d004d2d325e18c77df6b7a1a7f74afd7d5dbd4f950bc2f5ca6",
+      "bytes": 86448
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_artwork_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/textures/hanging_picture_frame_01_artwork_diff_1k.jpg",
+      "sha256": "2e177d2061d2204efc2a1285dc0a30220148b41134d331ed93fd21ae8b15f6a0",
+      "bytes": 44185
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_artwork_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/textures/hanging_picture_frame_01_artwork_nor_gl_1k.jpg",
+      "sha256": "f91caa0cacbefa2c30dff935f0aee41e5f7493f6ba881e5a5021b8a220084195",
+      "bytes": 17259
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/textures/hanging_picture_frame_01_arm_1k.jpg",
+      "sha256": "aec54462e91d53610f46b2bb760cbdf453e7b87c5193efa24f995cd5bb0253bc",
+      "bytes": 101751
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/textures/hanging_picture_frame_01_nor_gl_1k.jpg",
+      "sha256": "6f16f93ee6fcffb27dbd5ebf3de8fda71c77c7e1abd61ae9261715029be4d43e",
+      "bytes": 40281
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_01/hanging_picture_frame_01_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/textures/hanging_picture_frame_01_diff_1k.jpg",
+      "sha256": "a6aa51141299ff7366b6e1ac1496dee2d8bd2d6fe775ea7d1fbbb299b2afb5e8",
+      "bytes": 88363
+    },
+    {
+      "url": "https://api.polyhaven.com/files/hanging_picture_frame_02",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/files.json",
+      "sha256": "b3e7d4b4d680b1aa61419df10e13cfd93c196f3d9fc10eb44c567157e85bc52d",
+      "bytes": 65493
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/hanging_picture_frame_02/hanging_picture_frame_02_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/hanging_picture_frame_02.gltf",
+      "sha256": "ea9a1d44e8d794e224a5342204669a328b57d64d5df629d1d5d86e60e27245e5",
+      "bytes": 6433
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/textures/hanging_picture_frame_02_diff_1k.jpg",
+      "sha256": "575f2b6481b9e02474750ded776a0b490744228cb64d9b346f28bd78b9cf5897",
+      "bytes": 146402
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_artwork_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/textures/hanging_picture_frame_02_artwork_diff_1k.jpg",
+      "sha256": "7e26aee962965fb201975ef5a99e2751a24c4b461b48e8348cea9f31cde027c2",
+      "bytes": 138383
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/textures/hanging_picture_frame_02_arm_1k.jpg",
+      "sha256": "67378630bc6bb69799f8ee0fde4ab11ecd9e7a43ed3dfef402fdd784d8c2cea3",
+      "bytes": 113780
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_artwork_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/textures/hanging_picture_frame_02_artwork_nor_gl_1k.jpg",
+      "sha256": "8a700c0d7d3f464177ead95879d60a8bf43ef77c034881379b2c036406ab9e27",
+      "bytes": 45035
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_artwork_roughness_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/textures/hanging_picture_frame_02_artwork_roughness_1k.jpg",
+      "sha256": "305018ab800cbd02d61c08f9c5a422c2777f2b5cbb20579f671be56a1fb21853",
+      "bytes": 74142
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/hanging_picture_frame_02/hanging_picture_frame_02.bin",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/hanging_picture_frame_02.bin",
+      "sha256": "0ed5813c8b30f63807ffac962e47135d3248b3804e07cb93862c13e29bed83d8",
+      "bytes": 115080
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hanging_picture_frame_02/hanging_picture_frame_02_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/textures/hanging_picture_frame_02_nor_gl_1k.jpg",
+      "sha256": "79367cf9d7e4981263dd1439297585148d6c93500acaffa7afeb534351e68b86",
+      "bytes": 56776
+    },
+    {
+      "url": "https://api.polyhaven.com/files/wall_clock",
+      "path": ".cache/simulation-assets/apartment/wall_clock/files.json",
+      "sha256": "01550d42f3cc704bcdd32c922db4d2eff506be5d556c544096c0d9a05db4fb7a",
+      "bytes": 30214
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wall_clock/wall_clock_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/wall_clock/wall_clock.gltf",
+      "sha256": "4e67385443e808bc709c054c1de5be1e83d4bf07eb0893884c301fec0bae8bc6",
+      "bytes": 9008
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wall_clock/wall_clock_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/wall_clock/textures/wall_clock_nor_gl_1k.jpg",
+      "sha256": "6138946e055828e92d5e0d8d50c75e3d2da0ea789dd6512b30f85f0e18435d00",
+      "bytes": 236489
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wall_clock/wall_clock_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/wall_clock/textures/wall_clock_diff_1k.jpg",
+      "sha256": "012bfc3ceecd5e35679fe5764e33b6d1b8a631ad4fc9f5b267af25ad10468672",
+      "bytes": 366683
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wall_clock/wall_clock_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/wall_clock/textures/wall_clock_arm_1k.jpg",
+      "sha256": "c78aabec7bb4af4fd6818be1099523e59bf12d88c872530b2260cdea08d81968",
+      "bytes": 444044
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wall_clock/wall_clock_glass_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/wall_clock/textures/wall_clock_glass_arm_1k.jpg",
+      "sha256": "42804955958b3d0fdc1da8d4c4e8e909b04f659ae1b02911e148abe0741b8b84",
+      "bytes": 376244
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/wall_clock/wall_clock.bin",
+      "path": ".cache/simulation-assets/apartment/wall_clock/wall_clock.bin",
+      "sha256": "61d9fe03e871508230160de546ef505f3f4405b1e82c167536945a483a8bb639",
+      "bytes": 132412
+    },
+    {
+      "url": "https://api.polyhaven.com/files/ceramic_vase_01",
+      "path": ".cache/simulation-assets/apartment/ceramic_vase_01/files.json",
+      "sha256": "1affe5e08e1906bfaa8b3b19acb61c738c96e4d55f0d5ea4ab3fd69693b98f0a",
+      "bytes": 30435
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/ceramic_vase_01/ceramic_vase_01_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/ceramic_vase_01/ceramic_vase_01.gltf",
+      "sha256": "4e2c69eb5bbccf86e9fbf92af438464669d804c1f0eae041ee28651a5b57d91e",
+      "bytes": 2706
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_01/ceramic_vase_01_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/ceramic_vase_01/textures/ceramic_vase_01_nor_gl_1k.jpg",
+      "sha256": "c35b59d15e0f08db44b0bc8a5870bc65ae781819e5abf0447996d0faf05b7722",
+      "bytes": 36504
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_01/ceramic_vase_01_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/ceramic_vase_01/textures/ceramic_vase_01_diff_1k.jpg",
+      "sha256": "5f7d22178b74a59fe92aa0ccc958b897e2fb80df514eb28b97000097c0e71beb",
+      "bytes": 32351
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_vase_01/ceramic_vase_01_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/ceramic_vase_01/textures/ceramic_vase_01_arm_1k.jpg",
+      "sha256": "121469880a7900513717685e9035dfc1b04613f85c778ab4e9dba98c1675d660",
+      "bytes": 74240
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/ceramic_vase_01/ceramic_vase_01.bin",
+      "path": ".cache/simulation-assets/apartment/ceramic_vase_01/ceramic_vase_01.bin",
+      "sha256": "56ffadcafff3f56538d04b0b43c06c9704baeec2ac3ec286ef01c313c82906f0",
+      "bytes": 272656
+    },
+    {
+      "url": "https://api.polyhaven.com/files/painted_wooden_cabinet",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/files.json",
+      "sha256": "4dedaa776e9442d2264cbb1630b08c60370390a33a5ae146412c2648e967da09",
+      "bytes": 24984
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_cabinet/painted_wooden_cabinet_1k.gltf",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/painted_wooden_cabinet.gltf",
+      "sha256": "ce04543cdb10e05fe9c2cc08e9c118b16c1c717a07bcbfac9b99859465c8d1ed",
+      "bytes": 9253
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_cabinet/painted_wooden_cabinet_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/textures/painted_wooden_cabinet_diff_1k.jpg",
+      "sha256": "2dbed9f9ec8e49fc2e87de8cd86e2029a80e9001b5102b4e47c7dfa913f34d89",
+      "bytes": 688654
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_cabinet/painted_wooden_cabinet_arm_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/textures/painted_wooden_cabinet_arm_1k.jpg",
+      "sha256": "34e0bcb00a62704d85161d41e844e798d4f894e416e7769079d50a21d561d171",
+      "bytes": 622122
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_cabinet/painted_wooden_cabinet_nor_gl_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/textures/painted_wooden_cabinet_nor_gl_1k.jpg",
+      "sha256": "e94edf68faeaf68016c28da9b9f299bb38c57463acd94130ecf98dcaef790016",
+      "bytes": 463678
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_cabinet/painted_wooden_cabinet.bin",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/painted_wooden_cabinet.bin",
+      "sha256": "1023d773d84c42f2709ec297247d90b0e2833e37241fbe852e2f33b41ae10cda",
+      "bytes": 78072
+    },
+    {
+      "url": "https://api.polyhaven.com/files/white_plaster_02",
+      "path": ".cache/simulation-assets/apartment/textures/white_plaster_02.json",
+      "sha256": "d25695d1a2a7ee4b3e6563bcb9c17dfe3d29a9b54e1e352555214b99c6803287",
+      "bytes": 33673
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/white_plaster_02/white_plaster_02_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/textures/white_plaster_02.jpg",
+      "sha256": "a1ebbe091bd1ae93d2abd5de8d69f9003a8d0ee6532bcf9a87c2492c97051f23",
+      "bytes": 527219
+    },
+    {
+      "url": "https://api.polyhaven.com/files/herringbone_parquet",
+      "path": ".cache/simulation-assets/apartment/textures/herringbone_parquet.json",
+      "sha256": "4906d327b67d586ca040c84b593245959a5edfab25893ca6a41f0d90d4cb6a08",
+      "bytes": 35388
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/herringbone_parquet/herringbone_parquet_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/textures/herringbone_parquet.jpg",
+      "sha256": "d6c66492a6c4cfd4e8ed18c9cdd4e0303f3de4e04613d2adca8bc2b8f2dd2350",
+      "bytes": 829046
+    },
+    {
+      "url": "https://api.polyhaven.com/files/floor_tiles_06",
+      "path": ".cache/simulation-assets/apartment/textures/floor_tiles_06.json",
+      "sha256": "6c9e760e24c62b4e2ffa81315359e93409e68c1f6081a63c9a36da9d62489c73",
+      "bytes": 28597
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/floor_tiles_06/floor_tiles_06_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/textures/floor_tiles_06.jpg",
+      "sha256": "ac159ca6072e30dd9d5c65e2d6eae7bb55a7dc9f06e6d141e9119390563511c2",
+      "bytes": 356257
+    },
+    {
+      "url": "https://api.polyhaven.com/files/long_white_tiles",
+      "path": ".cache/simulation-assets/apartment/textures/long_white_tiles.json",
+      "sha256": "ac4b3ec39145b24c4f1fd55b45540181f8f5fb64e556a738af19ee511a6332ff",
+      "bytes": 36163
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/long_white_tiles/long_white_tiles_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/textures/long_white_tiles.jpg",
+      "sha256": "0aa70e14117e9b1fbf726868675f6afa8fd62a2691f7ba3964f47796df06cd9c",
+      "bytes": 619644
+    },
+    {
+      "url": "https://api.polyhaven.com/files/marble_01",
+      "path": ".cache/simulation-assets/apartment/textures/marble_01.json",
+      "sha256": "4837766b9fb2ecd05598affea2d062abbc6b07b71e78c19d56cdc6755c75359f",
+      "bytes": 26770
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/marble_01/marble_01_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/textures/marble_01.jpg",
+      "sha256": "b10dabea976d68baa976a0d4e8dac58789df8d26a1b50697f320106f1b00a229",
+      "bytes": 305029
+    },
+    {
+      "url": "https://api.polyhaven.com/files/oak_veneer_01",
+      "path": ".cache/simulation-assets/apartment/textures/oak_veneer_01.json",
+      "sha256": "7468b2ef3a0cc08dfcba7683cd9c500da5506640bd84da250e68da9b6f4b036f",
+      "bytes": 33790
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/oak_veneer_01/oak_veneer_01_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/textures/oak_veneer_01.jpg",
+      "sha256": "c14681f72f59f17bff568cae7a837641443b607b899f0c279cd64a5638f877a7",
+      "bytes": 641756
+    },
+    {
+      "url": "https://api.polyhaven.com/files/wool_boucle",
+      "path": ".cache/simulation-assets/apartment/textures/wool_boucle.json",
+      "sha256": "586b969dc23245d67f46b6284f171d2587e4b1acb1007840446fc52addcfce11",
+      "bytes": 52047
+    },
+    {
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/wool_boucle/wool_boucle_diff_1k.jpg",
+      "path": ".cache/simulation-assets/apartment/textures/wool_boucle.jpg",
+      "sha256": "fee39653b3c78efe89636508f2c10ceb38ecb10c0d735ae8dd4e9935cf26540e",
+      "bytes": 1284379
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/ceramic_vase_01/mjcf_0.obj",
+      "sha256": "e6759d5755e8141a0bb1c28a46978aced5aedbf6baa43c49925ec847a42bc573",
+      "bytes": 722108
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/ceramic_vase_01/mjcf_0.png",
+      "sha256": "2795b6858ce0efa764e2a4f16789c614b0237366d8efaf81effe5bcb8168215b",
+      "bytes": 81560
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/dining_chair_02/mjcf_0.obj",
+      "sha256": "a8ff1b11274401847c79df910fe8841b2d2f0005ae9ac52b45664e85d062a59c",
+      "bytes": 1506529
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/dining_chair_02/mjcf_0.png",
+      "sha256": "d41d8f3411b61c59e883f6cb2ee5e70fe4eecf1902f834b7f1c4b8ee13fa633b",
+      "bytes": 621533
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/generated/art_print.png",
+      "sha256": "f01669a5c2ea1b1b5ecd9d7ed08c09ebfe4c5f6bc516deec625735096662d93d",
+      "bytes": 8749
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/generated/linen.png",
+      "sha256": "028443cce64489413d67be9695c6c40777b76b482aa553250c6e9b3e8c1c8473",
+      "bytes": 97460
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/generated/shirt_red.png",
+      "sha256": "f267826711ced293c42e97cccda2f0e186f72461802cb1479a082f524e3df441",
+      "bytes": 79247
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/generated/shirt_teal.png",
+      "sha256": "fa4515db2455665d03710e488ed84c57c9d80fd71a79be192f0a10db83e8fabd",
+      "bytes": 80869
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/generated/trousers_grey.png",
+      "sha256": "4227b891a22522d1bcbb3112ec13ea14e1c55c8a870c5322143850ce67294a98",
+      "bytes": 64951
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/generated/trousers_navy.png",
+      "sha256": "73a175814bf2283dc6a6a7b0703acdb0ccbe2e2eefe2cf46390594c4bfb48593",
+      "bytes": 68356
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/generated/window_view.png",
+      "sha256": "b8c12ba938b639b07047e1e295aebb4eacc5dca59bcd0bfdf424c1bfeeb52da1",
+      "bytes": 35339
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_0.obj",
+      "sha256": "9494e05c0663a2b60ef62ba9c5a13b38472f807eba46f95b482265e904e0e368",
+      "bytes": 369
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_0.png",
+      "sha256": "7cfc1907084ab6845408c8894037eb794fe5da9ad009e6f841184416cb03bfb2",
+      "bytes": 473967
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_1.obj",
+      "sha256": "a88017d42c1e76686453cb02786ce296f36c91523ce627c46fe88a890f6a28ab",
+      "bytes": 367
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_1.png",
+      "sha256": "c2a16bfd8924d30816ab40425fde95e4639ef3f4a023ef37512728d0bb806aa5",
+      "bytes": 73595
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_2.obj",
+      "sha256": "5fd405bb2c56d789f3bf975ba5f68e9ac8d168373f894f2ab3cbe1e095565e2c",
+      "bytes": 209199
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_01/mjcf_2.png",
+      "sha256": "7cfc1907084ab6845408c8894037eb794fe5da9ad009e6f841184416cb03bfb2",
+      "bytes": 473967
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_0.obj",
+      "sha256": "e679a183b414338aff430393e1e1d023b1b6d325ecea3a526742a5bc30e5908e",
+      "bytes": 367
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_0.png",
+      "sha256": "874fbb3a8adab98089391d8eff5b5ca3f7fc8c1acfd63c0dabb4eea70d420709",
+      "bytes": 666933
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_1.obj",
+      "sha256": "d8b2369b35c4f6dcafccb79f8fe2391ff8b83331934a1e3c7c0d9325fe727555",
+      "bytes": 285645
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_1.png",
+      "sha256": "9c898a3cfa19f340a72d5c133e9ac0286cf5f0c6c39e6b1cb817c75cbe18cc40",
+      "bytes": 751749
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_2.obj",
+      "sha256": "62aaa30f861ff2b4215bf0be7c872a2c8d9f92a8f7cdd417421fa7bd79b2ec1e",
+      "bytes": 365
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/hanging_picture_frame_02/mjcf_2.png",
+      "sha256": "9c898a3cfa19f340a72d5c133e9ac0286cf5f0c6c39e6b1cb817c75cbe18cc40",
+      "bytes": 751749
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_0.obj",
+      "sha256": "cf2880fa3dadf479503baac91c783f027ba841e2fc2fe74ce3e0d30fadee8222",
+      "bytes": 181947
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_0.png",
+      "sha256": "70cfe9376c8e0575f8293b935a00495bd7a334041b7fa3ae86f1dbbdf2ca806c",
+      "bytes": 384424
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_1.obj",
+      "sha256": "bccb5bd9bcde9120380df515cd805fd2ad31a376b905ccb7b03caec4a6975a53",
+      "bytes": 170657
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_1.png",
+      "sha256": "70cfe9376c8e0575f8293b935a00495bd7a334041b7fa3ae86f1dbbdf2ca806c",
+      "bytes": 384424
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_2.obj",
+      "sha256": "593bf4d2649aecedb73f142ae17a66c021644dcb8727505f1ee1d34612aa1fa9",
+      "bytes": 17899
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/modern_ceiling_lamp_01/mjcf_2.png",
+      "sha256": "70cfe9376c8e0575f8293b935a00495bd7a334041b7fa3ae86f1dbbdf2ca806c",
+      "bytes": 384424
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/modern_coffee_table_01/mjcf_0.obj",
+      "sha256": "354e997a1a391233dc0561dea6f368c03721fbec9fbca32b2824486a8b7f92c1",
+      "bytes": 380419
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/modern_coffee_table_01/mjcf_0.png",
+      "sha256": "6d62a232fa8ba58630d0bd047c07dd09965e59a0fa479967ccff1c5536616cc8",
+      "bytes": 871979
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_0.obj",
+      "sha256": "3e1d39d5e594ed27afeb53b62edcd8b063072ce88cbc80d2a7668e6c331a7598",
+      "bytes": 25453
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_0.png",
+      "sha256": "91fc05f3868a5610b29461d9507b6e100d6c8f8ae30f391c3fb8eea07eec9005",
+      "bytes": 1452770
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_1.obj",
+      "sha256": "a669d2bb54217d786676b811b38117ae567f4a4197f2a75314579d972657dc5c",
+      "bytes": 25299
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_1.png",
+      "sha256": "91fc05f3868a5610b29461d9507b6e100d6c8f8ae30f391c3fb8eea07eec9005",
+      "bytes": 1452770
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_2.obj",
+      "sha256": "cca7cc7af24f478ba2523ac3e344b067c8b92d5984ed012278bf672ec672b941",
+      "bytes": 8245
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_2.png",
+      "sha256": "91fc05f3868a5610b29461d9507b6e100d6c8f8ae30f391c3fb8eea07eec9005",
+      "bytes": 1452770
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_3.obj",
+      "sha256": "ac75c0e8c1b773be2776a4395be90bc3c1c365b718ed4585955620db27de8ea3",
+      "bytes": 29452
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_3.png",
+      "sha256": "91fc05f3868a5610b29461d9507b6e100d6c8f8ae30f391c3fb8eea07eec9005",
+      "bytes": 1452770
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_4.obj",
+      "sha256": "b8fb8cf4b5d822335bc5ea4f6a99128d6eaa5a4bdd6a8ad449dffaf041046c33",
+      "bytes": 91694
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/painted_wooden_cabinet/mjcf_4.png",
+      "sha256": "91fc05f3868a5610b29461d9507b6e100d6c8f8ae30f391c3fb8eea07eec9005",
+      "bytes": 1452770
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_0.obj",
+      "sha256": "7069635773261b4d14a50842ff67fa2694f307e9d8751e579b2108b92685b479",
+      "bytes": 262137
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_0.png",
+      "sha256": "9cb92412831311fb34904eb00f89a87c9bcd9192da917989a1a94783574466d9",
+      "bytes": 1286163
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_1.obj",
+      "sha256": "a1b56a91db4e259e5ccccc791f03799b4f4b6ef6aed79c783ddb47104d43d684",
+      "bytes": 234965
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_1.png",
+      "sha256": "9cb92412831311fb34904eb00f89a87c9bcd9192da917989a1a94783574466d9",
+      "bytes": 1286163
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_2.obj",
+      "sha256": "dcee49462c32faa7dc7fb85d85f5e384247ae0f0cc4d057e8d0e1bdacb93cc27",
+      "bytes": 29483
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_2.png",
+      "sha256": "9cb92412831311fb34904eb00f89a87c9bcd9192da917989a1a94783574466d9",
+      "bytes": 1286163
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_3.obj",
+      "sha256": "77913d9c1f23101ee030b2228f88e8f256fbfd06c2e579af4d99ae329da74b9c",
+      "bytes": 86262
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/potted_plant_04/mjcf_3.png",
+      "sha256": "9cb92412831311fb34904eb00f89a87c9bcd9192da917989a1a94783574466d9",
+      "bytes": 1286163
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/side_table_01/mjcf_0.obj",
+      "sha256": "6c9c2fabb695a1a964a46743e4ee1b30f4e1b874be5a8abd3b431f3be03a8639",
+      "bytes": 275070
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/side_table_01/mjcf_0.png",
+      "sha256": "466fba5bb49fd388bcabf052de8b16d1e05536de1645d22445b84d1236ebbe06",
+      "bytes": 1077340
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/small_wooden_table_01/mjcf_0.obj",
+      "sha256": "d2648b67f13f4702b882d6c9b9ee4fc751581c7cdb54949f8c41a4fa1f4d36b2",
+      "bytes": 237262
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/small_wooden_table_01/mjcf_0.png",
+      "sha256": "dc6e7a5307724b8d651525aef130f6749ec50f35177e997fddebdc6aa68f862d",
+      "bytes": 793573
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/sofa_03/mjcf_0.obj",
+      "sha256": "2efe4eab0dc9aed0ef0cbab5d96eab4a4351cec4a0be79e6b26a6eace74bc858",
+      "bytes": 488647
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/sofa_03/mjcf_0.png",
+      "sha256": "7568d0ea9379af25fd2cb8834c044f249183e393b9e9eb15520625d7bc345d4f",
+      "bytes": 1036786
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/sofa_03/mjcf_1.obj",
+      "sha256": "3010161f8bdf4dee97036408fba3b031ffadabd837cee4a9a0cbf6c9d0c53c39",
+      "bytes": 96242
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/sofa_03/mjcf_1.png",
+      "sha256": "7568d0ea9379af25fd2cb8834c044f249183e393b9e9eb15520625d7bc345d4f",
+      "bytes": 1036786
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/textures/floor_tiles_06.png",
+      "sha256": "a9dec22ce6cd7737a482a2ba78e9a5f800e30dd1e653ecbb2f383d3127a3e096",
+      "bytes": 1319112
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/textures/herringbone_parquet.png",
+      "sha256": "608915f426d761e9ea4bb017f3112896b4fe000348fecd7650a4df41e5916c10",
+      "bytes": 1784273
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/textures/long_white_tiles.png",
+      "sha256": "8b5beceb67f1fdc805887fec9791af5cc364936e4463dda006d6dedd49ea7630",
+      "bytes": 1100319
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/textures/marble_01.png",
+      "sha256": "2e1bf5c3a5f8bee44124933bd688a68c181b9933688b3ed8fb36eb68b66c83fb",
+      "bytes": 1144428
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/textures/oak_veneer_01.png",
+      "sha256": "e7bc2b7d7f51a2b69660b31d3bc7659c3a4aeadbc154e6e86bc0233a936c4006",
+      "bytes": 1107682
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/textures/white_plaster_02.png",
+      "sha256": "4373aeff2b701c7690ea30799946dca1f4fb1cda53be1ebedabcc6326988f60a",
+      "bytes": 1621262
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/textures/wool_boucle.png",
+      "sha256": "7e1cc0fff864df70da0251c15f600e9429beab5171e6fed7f1ebfa3295b52b0a",
+      "bytes": 2544323
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/wall_clock/mjcf_0.obj",
+      "sha256": "e377080af9e4f22cee8354994f91f9611cc2bda4f457a22baa09933c6f534828",
+      "bytes": 257758
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/wall_clock/mjcf_0.png",
+      "sha256": "fed3d3f6fd6f35e787493ee72b032660c3b0b5afc548f6555d007a4853c057d9",
+      "bytes": 671725
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/wall_clock/mjcf_1.obj",
+      "sha256": "ee204a24945e0d95a3fa64caa3e9262b8b641eccff362983deb7b080b68d72f8",
+      "bytes": 31772
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/wall_clock/mjcf_2.obj",
+      "sha256": "67873066f9f9be918794de342f1c1afd0e97e6eb34d25d21d52c90cf58d66568",
+      "bytes": 1477
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/wall_clock/mjcf_2.png",
+      "sha256": "fed3d3f6fd6f35e787493ee72b032660c3b0b5afc548f6555d007a4853c057d9",
+      "bytes": 671725
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/wall_clock/mjcf_3.obj",
+      "sha256": "0a9b696b589c1d06b5f1cd73cbb045f08c17af09442e5eed72f590b906a1208e",
+      "bytes": 22675
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/wall_clock/mjcf_3.png",
+      "sha256": "fed3d3f6fd6f35e787493ee72b032660c3b0b5afc548f6555d007a4853c057d9",
+      "bytes": 671725
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/wall_clock/mjcf_4.obj",
+      "sha256": "2ace157156fd1f93607955dba008120f345fb992fbddec0a54e3332e1b0743b9",
+      "bytes": 1477
+    },
+    {
+      "url": null,
+      "derived_from": "source files in this manifest or generated by apartment.py",
+      "path": ".cache/simulation-assets/apartment/wall_clock/mjcf_4.png",
+      "sha256": "fed3d3f6fd6f35e787493ee72b032660c3b0b5afc548f6555d007a4853c057d9",
+      "bytes": 671725
+    }
+  ]
+}

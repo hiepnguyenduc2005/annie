@@ -73,7 +73,7 @@ def validate_command(payload) -> tuple[str, str, dict]:
         raise ValueError("command_id must be a string of 1-80 characters")
     if not isinstance(args, dict):
         raise ValueError("args must be an object")
-    if name in TRICK_IDS or name == "stop":
+    if name in TRICK_IDS or name in ("stop", "go_home"):
         extra = set(args)
         if extra:
             raise ValueError(f"{name} takes no args")
@@ -105,6 +105,24 @@ def validate_command(payload) -> tuple[str, str, dict]:
         return command_id, name, {"text": text.strip()}
     if name == "listen":
         return command_id, name, {"max_s": num("max_s", 1.0, 15.0, 8.0)}
+    if name == "instruct":  # a natural-language instruction; the patrol process plans it into the steps above
+        text = args.get("text")
+        if not isinstance(text, str) or not 1 <= len(text.strip()) <= 300:
+            raise ValueError("text must be 1-300 characters")
+        author = args.get("author", "operator")
+        if not isinstance(author, str) or not 1 <= len(author) <= 60:
+            raise ValueError("author must be a string of 1-60 characters")
+        return command_id, name, {"text": text.strip(), "author": author}
+    if name == "turn":
+        deg = num("degrees", -360.0, 360.0)
+        if deg == 0:
+            raise ValueError("degrees must be non-zero")
+        return command_id, name, {"degrees": deg}
+    if name == "walk":
+        m = num("metres", -1.0, 3.0)
+        if m == 0:
+            raise ValueError("metres must be non-zero")
+        return command_id, name, {"metres": m}
     raise ValueError(f"unknown command {name!r}")
 
 
@@ -124,8 +142,14 @@ def _speak_blocking(text: str) -> bool:
 
 def _listen_blocking(max_s: float) -> dict:
     """Host microphone -> transcript via the live listener's VAD + local Whisper (real path)."""
-    from robot.simulation.live_listener import capture_utterance, pcm16_to_wav, silero_vad, sounddevice_recorder
-    utterance = capture_utterance(sounddevice_recorder(), silero_vad(), max_ms=int(max_s * 1000))
+    from robot.dog.voice import devices as devices_mod
+    from robot.simulation.live_listener import capture_utterance, pcm16_to_wav, silero_vad
+    recorder = devices_mod.shared().recorder()  # the selected microphone
+    try:
+        utterance = capture_utterance(recorder, silero_vad(), max_ms=int(max_s * 1000))
+    finally:
+        with contextlib.suppress(Exception):
+            recorder.close()
     if utterance["outcome"] != "speech":
         return {"transcript": None, "heard": False, "speech_ms": 0}
     from robot.dog.runtime.patrol import voice
@@ -519,6 +543,8 @@ class Body:
 # -- HTTP (stdlib server in a thread, coroutines run on the body's loop) -----------------------------------------------
 
 def make_handler(body: Body, loop: asyncio.AbstractEventLoop, token: str | None):
+    allowed_hosts = {h.strip().lower() for h in os.environ.get("ANNIE_VIEW_HOSTS", "").split(",") if h.strip()}
+
     def run(coro, timeout=10.0):
         return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout)
 
@@ -535,6 +561,10 @@ def make_handler(body: Body, loop: asyncio.AbstractEventLoop, token: str | None)
             self.wfile.write(data)
 
         def _authorized(self):
+            host = (self.headers.get("Host") or "").split(":")[0].strip("[]").lower()
+            if host not in ("127.0.0.1", "localhost", "::1") and host not in allowed_hosts:
+                self._send(421, {"error": "unexpected Host"})  # DNS-rebinding guard
+                return False
             if token and not hmac.compare_digest(self.headers.get("X-Body-Token") or "", token):
                 self._send(401, {"error": "unauthorized"})
                 return False

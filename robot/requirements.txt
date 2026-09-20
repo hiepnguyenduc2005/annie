@@ -1,3 +1,10 @@
 # Read-only Go2 WebRTC bring-up; separate from the app and full DimOS runtime.
 # https://github.com/legion1581/unitree_webrtc_connect (MIT)
 unitree-webrtc-connect==2.2.0
+# The "Annie Audio" iPhone app as a microphone/speaker (robot/dog/voice/phone_audio.py) uses the
+# websockets.asyncio server API (13+). https://github.com/python-websockets/websockets (BSD-3-Clause)
+websockets>=13
+# MCP server so Claude Code / Claude Desktop / any MCP client can drive the dog (robot/dog/mcp_server.py, docs/MCP.md).
+# The bridge supports both APIs; pin the SDK exercised by the stdio integration test.
+# https://github.com/modelcontextprotocol/python-sdk (MIT)
+mcp==2.2.0

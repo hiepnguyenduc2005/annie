@@ -136,7 +136,7 @@ def run(dog, tracker=None, **kw):
         ip="10.0.0.99", aes_key=None, conn_factory=lambda ip, key: dog, tracker=tracker or NobodyTracker(),
         encoder=lambda frame: (b"", 640, 480), speak=lambda text: None, status=lambda text: None,
         planner=planner, stall=stall, rate_hz=200.0, stale_s=0.2, lidar_stale_s=0.2, boundary_m=100.0,
-        voxel_min_interval_s=0.0, bandit=StraightBandit(), **kw))
+        voxel_min_interval_s=0.0, bandit=StraightBandit(), frontier_planner=None, **kw))
 
 
 def test_unseen_obstacle_trips_collision_backoff_and_turn():
@@ -234,7 +234,8 @@ def test_find_person_mission_walks_up_to_the_named_person_and_completes():
             encoder=lambda frame: (b"", 640, 480), speak=lambda text: None, status=lambda text: None,
             planner=PatrolPlanner(cruise_mps=0.25, turn_rps=0.5, backoff_s=0.03, min_turn_s=0.02, leash_m=50.0),
             stall=StallDetector(window_s=0.05, min_progress_m=0.02), rate_hz=200.0, stale_s=0.2, lidar_stale_s=0.2,
-            boundary_m=100.0, voxel_min_interval_s=0.0, bandit=StraightBandit(), view=view, duration_s=1.5))
+            boundary_m=100.0, voxel_min_interval_s=0.0, bandit=StraightBandit(), frontier_planner=None, view=view,
+            duration_s=1.5))
         while getattr(view, "missions", None) is None:
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.1)
@@ -242,7 +243,7 @@ def test_find_person_mission_walks_up_to_the_named_person_and_completes():
                                               "args": {"name": "Jeanine", "timeout_s": 5, "approach": True}})
         assert code == 202
         code2, busy = view.missions.submit({"command_id": "m-say", "name": "say", "args": {"text": "hi"}})
-        assert code2 == 409 and busy["error"] == "busy"
+        assert code2 == 202 and busy["state"] == "queued" and busy["position"] == 1  # overlapping requests wait their turn
         report = await task
         return report, view.missions.get("m-find")
     report, receipt = asyncio.run(scenario())

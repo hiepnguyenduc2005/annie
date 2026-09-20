@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import hmac
 import json
 import os
 import re
@@ -72,7 +73,8 @@ SAY_MAX_CHARS, TEXT_MAX_CHARS, NAME_MAX_CHARS, TRANSCRIPT_MAX_CHARS = 300, 2000,
 FIND_TIMEOUT_S, LISTEN_MAX_S = 90, 10
 # Hard client-side limits; anything else 15 s. Tricks: stand + balance + request + the body's settle time.
 DEADLINES_S = {"find_person": 120.0, "say": 45.0, "listen": 25.0, "hello": 40.0, "dance": 45.0}
-BUSY_WAIT_S = 5.0  # how long a 409 busy from the body is retried before giving up
+BUSY_WAIT_S = 45.0  # how long a 409 busy from the body is retried before giving up (a greeting/trick takes ~15 s)
+RECONNECT_S = float(os.environ.get("ANNIE_BODY_RECONNECT_S", "45"))  # the dog process relaunches in ~20 s after a link drop
 TERMINAL_KINDS = ("completed", "failed")
 RECEIPT_TERMINAL = ("completed", "failed", "cancelled")
 EVENT_RETRIES = {"progress": 1, "terminal": 3}
@@ -344,10 +346,11 @@ class BodyClient:
     """Thin HTTP adapter for the body service: submit a command, poll its receipt to a terminal state."""
 
     def __init__(self, base_url: str, *, token: str | None = None, poll_s: float = 0.5, deadlines: dict | None = None,
-                 transport=None, status=_log):
+                 transport=None, status=_log, reconnect_s: float | None = None):
         self.client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=5.0, trust_env=False, transport=transport,
                                         headers={"X-Body-Token": token} if token else None)
         self.poll_s, self.deadlines, self.status = poll_s, {**DEADLINES_S, **(deadlines or {})}, status
+        self.reconnect_s = RECONNECT_S if reconnect_s is None else float(reconnect_s)
 
     async def command(self, name: str, args: dict | None = None) -> dict:
         """Run one body command to completion and return its result dict; ErrandError otherwise."""
@@ -366,10 +369,28 @@ class BodyClient:
 
     async def stop(self) -> dict:
         """Software stop request. Not a hardware emergency stop."""
-        response = await self._request("POST", "/stop")
-        if not response.is_success:
-            raise ErrandError(f"The robot body refused the software stop (HTTP {response.status_code}).")
-        return _json(response)
+        async def request_and_confirm():
+            command_id = str(uuid.uuid4())
+            response = await self.client.post("/stop", json={"command_id": command_id}, timeout=2.0)
+            while True:
+                if not response.is_success:
+                    raise ErrandError(f"The robot body refused the software stop (HTTP {response.status_code}).")
+                receipt = _json(response)
+                if "state" not in receipt:
+                    return receipt  # legacy body: null stop_code remains unconfirmed
+                if receipt.get("command_id") != command_id:
+                    raise ErrandError("The robot body returned an unrelated stop receipt.")
+                if receipt["state"] in RECEIPT_TERMINAL:
+                    result = receipt.get("result") or {}
+                    return {**receipt, "stop_code": receipt.get("stop_code", result.get("stop_code"))}
+                await asyncio.sleep(min(self.poll_s, 0.1))
+                response = await self.client.get(f"/command/{command_id}", timeout=1.0)
+
+        # A stop must not wait through the normal 45-second reconnect window.
+        try:
+            return await asyncio.wait_for(request_and_confirm(), 2.5)
+        except asyncio.TimeoutError:
+            raise ErrandError("The robot's software stop was not confirmed in time.") from None
 
     async def aclose(self) -> None:
         await self.client.aclose()
@@ -390,14 +411,19 @@ class BodyClient:
             response = await self._request("GET", f"/command/{command_id}")
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        """Up to three tries on transport errors; safe because command_id makes the POST idempotent."""
-        for attempt in range(3):
+        """Retries transport errors for up to RECONNECT_S (the dog process relaunches itself after a WebRTC link
+        drop, which takes ~20 s); safe because command_id makes the POST idempotent."""
+        until, attempt = time.monotonic() + self.reconnect_s, 0
+        while True:
             try:
                 return await self.client.request(method, path, **kwargs)
             except httpx.TransportError:
-                if attempt == 2:
+                attempt += 1
+                if time.monotonic() >= until:
                     raise ErrandError("The robot body service is unreachable.") from None
-                await asyncio.sleep(self.poll_s)
+                if attempt == 1:
+                    self.status(f"body unreachable; retrying for up to {self.reconnect_s:g} s (link relaunch?)")
+                await asyncio.sleep(min(2.0, self.poll_s * attempt))
 
 
 class AppClient:
@@ -426,8 +452,16 @@ class ErrandService:
     sockets, so it can be tested directly.
     """
 
-    def __init__(self, run_errand, *, body_url: str = "", status=_log):
+    def __init__(self, run_errand, *, body_url: str = "", status=_log, dispatch_secret: str | None = None, stop_body=None):
+        # Inbound auth for /dispatch: app_backend sends X-Internal-Secret (the shared ANNIE_INTERNAL_SECRET);
+        # required whenever this service is reachable beyond loopback (main() fails closed).
+        self.dispatch_secret = dispatch_secret or None
         self.run_errand, self.body_url, self.status = run_errand, body_url, status
+        self.stop_body = stop_body
+        self.pausing = False
+        self.closing = False
+        self.active: asyncio.Task | None = None
+        self.pause_lock = asyncio.Lock()
         self.runs: dict[str, dict] = {}
         self.open = 0  # accepted + queued + running
         self.lock = threading.Lock()
@@ -451,8 +485,21 @@ class ErrandService:
         if not self.loop.is_running() and not self.loop.is_closed():
             self.loop.close()  # never started, or the loop thread has already returned
 
-    def handle(self, method: str, path: str, raw: bytes = b"") -> tuple[int, dict]:
+    def handle(self, method: str, path: str, raw: bytes = b"", headers=None) -> tuple[int, dict]:
         path = path.split("?", 1)[0].rstrip("/")
+        if method == "POST" and path in ("/dispatch", "/pause") and self.dispatch_secret:
+            given = (headers or {}).get("X-Internal-Secret") or (headers or {}).get("x-internal-secret") or ""
+            if not hmac.compare_digest(given, self.dispatch_secret):
+                return 401, {"error": "X-Internal-Secret required"}
+        if method == "POST" and path == "/pause":
+            if not self.thread.is_alive():
+                return 503, {"error": "errand service is not running"}
+            future = asyncio.run_coroutine_threadsafe(self._pause(), self.loop)
+            try:
+                return 200, future.result(4.0)
+            except TimeoutError:
+                # Do not cancel the stop because the HTTP caller timed out.
+                return 503, {"error": "pause is still pending; stop not confirmed"}
         if method == "GET" and path == "/health":
             return 200, {"ok": True, "body_url": self.body_url, "busy": self.open > 0}
         if method == "GET" and path.startswith("/runs/"):
@@ -474,13 +521,15 @@ class ErrandService:
             run = self.runs.get(message["run_id"])
             if run is not None:
                 return 200, {"run_id": run["run_id"], "state": run["state"]}
+            if self.pausing or self.closing:
+                return 409, {"error": "pause cleanup in progress; send a new request when it finishes"}
             if self.open >= MAX_OPEN_RUNS:
                 return 503, {"error": "errand queue is full"}
             state = "queued" if self.open else "accepted"  # answered as decided here; the worker may flip it at once
             run = {**message, "state": state, "events": []}
             self.runs[run["run_id"]] = run
             self.open += 1
-            for stale in [k for k, r in self.runs.items() if r["state"] in TERMINAL_KINDS][:max(0, len(self.runs) - MAX_RUNS)]:
+            for stale in [k for k, r in self.runs.items() if r["state"] in RECEIPT_TERMINAL][:max(0, len(self.runs) - MAX_RUNS)]:
                 del self.runs[stale]
             self.loop.call_soon_threadsafe(self.queue.put_nowait, run["run_id"])  # inside the lock: strict FIFO
         self.status(f"run {run['run_id'][:8]} {state} from {run['author_name']} ({len(run['text'])} chars)")
@@ -493,19 +542,77 @@ class ErrandService:
 
     async def _work(self) -> None:
         while True:
-            run = self.runs[await self.queue.get()]
-            run["state"], state = "running", "failed"
+            run_id = await self.queue.get()
+            with self.lock:
+                run = self.runs.get(run_id)
+                if run is None or run["state"] == "cancelled":
+                    continue
+                run["state"], state = "running", "failed"
             try:
-                state = await self.run_errand(run)
+                self.active = asyncio.create_task(self.run_errand(run))
+                state = await self.active
+            except asyncio.CancelledError:
+                if self.closing or run["state"] != "cancelled":
+                    raise
             except Exception as exc:
                 self.status(f"run {run['run_id'][:8]} errand runner crashed ({type(exc).__name__})")
             finally:
                 with self.lock:
-                    run["state"] = state if state in TERMINAL_KINDS else "failed"
-                    self.open -= 1
+                    if run["state"] != "cancelled":
+                        run["state"] = state if state in TERMINAL_KINDS else "failed"
+                        self.open -= 1
+                    self.active = None
                 self.status(f"run {run['run_id'][:8]} finished: {run['state']}")
 
+    async def _pause(self) -> dict:
+        """Cancel current and queued errands before a bounded body stop request.
+
+        No old request is replayed. Dispatch is blocked until cancellation has
+        settled, so late cleanup cannot stop a newly submitted mission.
+        """
+        async with self.pause_lock:
+            with self.lock:
+                self.pausing = True
+                cancelled = [rid for rid, run in self.runs.items() if run["state"] not in RECEIPT_TERMINAL]
+                for rid in cancelled:
+                    self.runs[rid]["state"] = "cancelled"
+                self.open = 0
+                active = self.active
+            while not self.queue.empty():
+                self.queue.get_nowait()
+            if active is not None and not active.done():
+                active.cancel()
+
+            async def stop_once():
+                if self.stop_body is None:
+                    return False
+                try:
+                    result = await asyncio.wait_for(self.stop_body(), 2.8)
+                    # cancelled/queued means accepted only; require a real ack.
+                    return (isinstance(result, dict) and result.get("state") in (None, "completed")
+                            and type(result.get("stop_code")) is int and result["stop_code"] == 0)
+                except Exception:
+                    return False
+
+            stop_task = asyncio.create_task(stop_once())
+            pending = {stop_task}
+            if active is not None:
+                pending.add(active)
+            await asyncio.wait(pending, timeout=3.0)
+            confirmed = stop_task.done() and not stop_task.cancelled() and stop_task.result()
+            cleanup_pending = active is not None and not active.done()
+            if cleanup_pending:
+                active.add_done_callback(lambda _: self._finish_pause())
+            else:
+                self._finish_pause()
+            return {"paused": True, "cancelled_runs": cancelled, "stop_confirmed": bool(confirmed)}
+
+    def _finish_pause(self):
+        with self.lock:
+            self.pausing = False
+
     async def _shutdown(self, closers) -> None:
+        self.closing = True
         if self.worker is not None:
             self.worker.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -534,7 +641,8 @@ def make_handler(service: ErrandService):
                 code, payload = 400, {"error": "bad Content-Length"}
             else:
                 try:
-                    code, payload = service.handle(method, self.path, self.rfile.read(length) if length else b"")
+                    code, payload = service.handle(method, self.path, self.rfile.read(length) if length else b"",
+                                                   headers={k: v for k, v in self.headers.items()})
                 except Exception as exc:
                     _log(f"request failed ({type(exc).__name__})")
                     code, payload = 500, {"error": "internal error"}
@@ -560,7 +668,7 @@ def _interrupt(*_):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Family-message errand relay for the physical Go2 (software relay).")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1", help="beyond loopback requires the dispatch secret (fail closed)")
     parser.add_argument("--port", type=int, default=8010)
     parser.add_argument("--body-url", default=os.environ.get("ANNIE_BODY_URL") or "http://127.0.0.1:8001")
     parser.add_argument("--app-url", default=os.environ.get("ANNIE_APP_URL") or "http://127.0.0.1:8000")
@@ -580,7 +688,11 @@ def main(argv=None):
         return await Errand(body.command, app.post_event).run(run["run_id"], run["author_name"], run["text"],
                                                                log=run["events"])
 
-    service = ErrandService(run_errand, body_url=args.body_url).start()
+    # /dispatch is authenticated with the same shared secret app_backend uses for events; on loopback it is
+    # optional (ANNIE_DISPATCH_AUTH=off), anywhere else it is mandatory.
+    loopback = args.host in ("127.0.0.1", "localhost", "::1")
+    dispatch_secret = None if (loopback and os.environ.get("ANNIE_DISPATCH_AUTH", "on") == "off") else secret
+    service = ErrandService(run_errand, body_url=args.body_url, dispatch_secret=dispatch_secret, stop_body=body.stop).start()
     try:
         server = ThreadingHTTPServer((args.host, args.port), make_handler(service))
     except OSError as exc:

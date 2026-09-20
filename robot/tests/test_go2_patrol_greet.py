@@ -49,5 +49,5 @@ def test_named_person_gets_a_named_greeting():
     p = GreetPolicy()
     t = track(4, 0.5); t["identity"] = {"name": "Ellis", "score": 0.7}
     assert p.step([t], 640, 480, now_s=0.0) == ("greet", 4)
-    assert p.greeting_text(t) == "Hi Ellis!"
-    assert p.greeting_text(track(5, 0.5)) == "Hello there!"
+    assert p.greeting_text(t).startswith("Hi Ellis,") and "feeling" in p.greeting_text(t)  # warm, asks how they are
+    assert p.greeting_text(track(5, 0.5)).startswith("Hello there,")

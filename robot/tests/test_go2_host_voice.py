@@ -140,3 +140,27 @@ def test_app_unreachable_is_reported_not_fatal():
         app_url='http://app', speaker=None, player=None, listener=None,
         http_transport=httpx.MockTransport(down), poll_s=0.01, duration_s=0.05))
     assert report['app_errors'] >= 1 and report['spoken'] == 0
+
+
+def test_free_speech_after_the_wake_word_becomes_an_instruction():
+    from robot.dog.voice.commands import parse_command
+    cmd = parse_command("Annie, go check whether grandma is in the kitchen")
+    assert cmd["intent"] == "instruct" and cmd["wake"] == "annie"
+    assert cmd["phrase"].startswith("go check whether grandma")
+    assert parse_command("Annie sit")["intent"] == "sit"          # fixed phrases still win
+    assert parse_command("go check on grandma") is None            # no wake word: not for the dog
+    assert parse_command("Annie") is None and parse_command("Annie hi")["intent"] == "hello"
+
+
+def test_conversation_window_needs_no_wake_word_and_mutes_annies_own_voice():
+    import time
+    from robot.dog.voice.commands import CommandListener, parse_command
+    lis = CommandListener(lambda c, t: None, status=lambda *a: None)
+    assert parse_command("I'm feeling fine today") is None                                   # normally not for the dog
+    lis.open_conversation(45.0)
+    cmd = parse_command("I'm feeling fine today", require_wake=not (time.time() < lis.open_until))
+    assert cmd["intent"] == "instruct" and cmd["wake"] is None                                # the loop turns this into converse
+    lis.mute(1.0)
+    assert time.time() < lis.muted_until
+    lis.muted_until = 0.0
+    assert not (time.time() < lis.muted_until)

@@ -41,6 +41,11 @@ trap cleanup EXIT INT TERM
 
 .venv/bin/uvicorn app_backend.app.main:app --host 0.0.0.0 --port $APP_PORT --no-proxy-headers > "$LOGS/app.log" 2>&1 & pids+=($!)
 .venv/bin/python robot/go2_errand.py --host 127.0.0.1 --port 8010 > "$LOGS/errand.log" 2>&1 & pids+=($!)
+# Space-time memory into Elasticsearch (where was X last seen) whenever the local node answers; harmless otherwise
+if curl -s -m 2 "${ANNIE_ES_URL:-http://127.0.0.1:9200}" >/dev/null 2>&1; then
+  .venv/bin/python robot/go2_spacetime_elastic.py --tail --file .data/hardware/spacetime.jsonl > "$LOGS/elastic.log" 2>&1 & pids+=($!)
+  echo "elastic       -> indexing sightings into ${ANNIE_ES_URL:-http://127.0.0.1:9200} (annie-spacetime)"
+fi
 dog_loop() {  # relaunch the dog process whenever it exits (link drop, battery floor is final though)
   while true; do
     until ping -c 1 -W 1 "$DOG_IP" >/dev/null 2>&1; do sleep 3; done

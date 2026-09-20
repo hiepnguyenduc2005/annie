@@ -4,171 +4,156 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
-    <title>Annie — Live simulation</title>
+    <meta name="theme-color" content="#111916" />
+    <title>Annie — Home simulation</title>
     <link rel="icon" href="/favicon.ico" />
     <link rel="stylesheet" href="styles.css" />
+    <script src="camera.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
-    <header>
-      <a class="brand" href="/">annie<span>LAB</span></a>
-      <div class="header-title">
-        Robot simulation <span>/</span>
-        <span id="header-model">Unitree Go2</span>
-      </div>
-      <div class="connection">
-        <i id="connection-dot"></i><span id="connection">Connecting</span>
+    <a class="skip-link" href="#main">Skip to simulation</a>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Annie home">annie<span>LAB</span></a>
+      <span class="header-divider" aria-hidden="true"></span>
+      <span class="header-title">Home simulation</span>
+      <div class="header-actions">
+        <div class="connection" role="status"><i id="connection-dot"></i><span id="connection">Connecting</span></div>
+        <a class="app-link" href="http://127.0.0.1:8000/app/" target="_blank" rel="noopener">Family app <span aria-hidden="true">↗</span></a>
       </div>
     </header>
-    <main>
-      <section class="intro">
+    <main id="main">
+      <section class="intro" aria-labelledby="page-title">
         <div>
-          <p class="eyebrow">ANNIE · LIVE HOME DEMO</p>
-          <h1>Welcome to grandma’s house.</h1>
-          <p>
-            Follow her day, see through Annie’s camera, and test a complete check-in.
-          </p>
+          <p class="eyebrow">ANNIE / ROBOT WORKSPACE</p>
+          <h1 id="page-title">Home simulation</h1>
+          <p>Live physics, robot perception, and agent execution.</p>
         </div>
-        <a
-          class="app-link"
-          href="http://127.0.0.1:8000/app/"
-          target="_blank"
-          rel="noopener"
-          >Open family app ↗</a
-        >
+        <div class="environment-tag"><div><strong>LOCAL SIMULATOR</strong><span id="header-model">Unitree simulation</span></div></div>
       </section>
       <div class="workspace">
-        <section class="viewport-panel" aria-label="Live simulation viewport">
-          <div class="scene-bar">
-            <div class="scene-title-row">
-              <span class="eyebrow">SCENE LIBRARY</span
-              ><span id="scene-count" class="badge">Loading catalog</span>
+        <div class="scene-column">
+          <section class="viewport-panel" aria-label="Live simulation viewport">
+            <div class="viewport-top">
+              <div><span class="live-dot" aria-hidden="true"></span><strong>Live scene</strong><span id="scene-label">Loading home…</span></div>
+              <span id="render-rate">Waiting for frames</span>
             </div>
-            <div class="scene-picker">
-              <button id="previous-scene" aria-label="Previous scene">←</button
-              ><label class="visually-hidden" for="scene-select"
-                >Choose scene</label
-              ><select id="scene-select">
-                <option value="">Original Go2 model</option></select
-              ><button id="next-scene" aria-label="Next scene">→</button>
+            <div class="viewport" id="scene-viewport" tabindex="0" role="group" aria-label="Interactive 3D scene" aria-describedby="camera-help camera-keyboard-help">
+              <img draggable="false" id="frame" alt="Live rendered robot and home in the MuJoCo simulator" />
+              <div id="loading"><span class="loading-orbit" aria-hidden="true"></span>Preparing renderer…</div>
+              <div class="view-tools" aria-label="Camera controls"><button id="camera-zoom-in" aria-label="Zoom in" title="Zoom in" disabled>+</button><button id="camera-zoom-out" aria-label="Zoom out" title="Zoom out" disabled>−</button><button id="camera-reset" title="Reset view (R or double-click)" disabled>Reset view</button></div>
+              <span class="frame-label">SIMULATED HOME <span aria-hidden="true">·</span> NO PHYSICAL ROBOT</span>
             </div>
-            <p id="scene-description" class="hint">
-              Choose a generated home to inspect its layout and scenario.
-            </p>
+            <div class="camera-instructions"><span id="camera-help">Drag to orbit · Shift / right-drag to pan · Scroll to zoom</span><span class="touch-help">One finger: orbit · Two fingers: pan / pinch to zoom</span><span id="camera-keyboard-help" class="visually-hidden">Arrow keys orbit. Shift and arrow keys pan. Plus and minus zoom. R or double-click resets the view.</span></div>
+            <div class="sensor-strip" aria-label="Spatial overlays"><span class="control-label">Layers</span><label class="layer lidar"><input id="show-lidar" type="checkbox" checked disabled />LiDAR hits</label><label class="layer trajectory"><input id="show-trajectory" type="checkbox" checked disabled />Travelled path</label><label class="layer route"><input id="show-route" type="checkbox" checked disabled />Planned route</label><span id="lidar-summary">Sensor starting…</span></div>
+            <div class="camera-strip" aria-label="Viewer camera presets">
+              <span class="control-label">View</span>
+              <div class="camera-buttons">
+                <button data-camera="room">Room</button><button data-camera="front">Front</button><button data-camera="side">Side</button><button data-camera="top">Top</button><button data-camera="downstairs">Downstairs</button><button data-camera="upstairs">Upstairs</button><button data-camera="whole-house">Whole house</button>
+              </div>
+            </div>
+            <div class="transport">
+              <button id="play" class="primary" disabled>Play simulation</button>
+              <button id="step" disabled>Step once</button>
+              <button id="reset" disabled>Reset</button>
+              <span class="keyboard"><kbd>space</kbd> play / pause</span>
+              <button id="mission-stop" class="stop-button">Stop robot</button>
+            </div>
+            <div id="notice" role="status" aria-live="polite">Waiting for the local simulator.</div>
+          </section>
+          <div class="observation-grid">
+            <section class="panel dog-camera-panel" aria-labelledby="dog-camera-title">
+              <div class="state-heading"><h2 id="dog-camera-title">Robot camera</h2><span class="badge quiet-badge">ROBOT CAMERA</span></div>
+              <div class="dog-cam"><img id="dog-frame" alt="Live view from the simulated robot front camera" /><span class="dog-cam-caption">Front camera · simulated</span></div>
+            </section>
+            <section class="panel" id="brain-panel">
+              <div class="state-heading"><h2>Perception</h2><span id="brain-mode" class="badge">DISCONNECTED</span></div>
+              <p id="brain-caption" class="observation-caption">Waiting for a camera observation.</p>
+              <dl class="observation-stats">
+                <div><dt>Posture</dt><dd id="brain-posture">—</dd></div>
+                <div><dt>Location</dt><dd id="brain-location">—</dd></div>
+                <div><dt>Confidence</dt><dd id="brain-confidence">—</dd></div>
+              </dl>
+              <p id="brain-error" class="hint error" role="status" hidden></p>
+              <p id="brain-note" class="hint"></p>
+              <details class="disclosure"><summary>Observation details</summary><dl class="metrics brain-metrics">
+                <div><dt>Frame</dt><dd id="brain-frame">—</dd></div>
+                <div><dt>Latency</dt><dd id="brain-latency">—</dd></div>
+                <div><dt>Provider</dt><dd id="brain-provider">—</dd></div>
+                <div><dt>App ingest</dt><dd id="brain-ingest">—</dd></div>
+                <div><dt>Updated</dt><dd id="brain-updated">—</dd></div>
+              </dl></details>
+            </section>
           </div>
-          <div class="viewport-top">
-            <span><i class="live-dot"></i> MUJOCO RENDER</span
-            ><span id="render-rate">Waiting for frames</span>
-          </div>
-          <div class="viewport">
-            <img
-              id="frame"
-              alt="Live rendered Unitree Go2 robot in the MuJoCo physics simulator"
-            />
-            <div id="loading">Preparing the renderer…</div>
-            <span class="frame-label"
-              >SIMULATED CAMERA · NO PHYSICAL ROBOT</span
-            >
-          </div>
-          <div class="transport">
-            <button id="open-house">Enter full house</button>
-            <button id="play" class="primary" disabled>Play simulation</button>
-            <button id="step" disabled>Step once</button>
-            <button id="reset" disabled>Reset</button>
-            <span class="keyboard">Space to play / pause</span>
-          </div>
-          <div class="mission-bar" id="mission-bar">
+        </div>
+        <aside class="control-rail" aria-label="Demo and AI controls">
+          <section class="panel ai-panel" aria-labelledby="ai-title">
+            <div class="section-kicker"><p class="eyebrow">AGENT CONTROL</p><span class="badge quiet-badge">MODEL PLANNER</span></div>
+            <h2 id="ai-title">Agent goal</h2>
+            <form id="intelligence-form">
+              <label class="visually-hidden" for="intelligence-goal">Give Annie a goal</label>
+              <textarea id="intelligence-goal" maxlength="500" rows="4">Explore the ground floor, find the resident using camera evidence, and tell me what you observed. Decide which rooms to inspect yourself.</textarea>
+              <div class="button-row"><button id="intelligence-start" type="submit" class="primary">Start AI / resume</button><button id="intelligence-stop" type="button">Pause AI</button></div>
+            </form>
+            <p id="autonomy-status" class="status-line">Waiting for the model planner.</p>
+            <p id="goal-completion" class="goal-completion" role="status" hidden></p>
+            <p id="agent-reason" class="hint reasoning"></p>
+            <p id="ai-error" class="hint error" role="status" hidden></p>
+            <p id="planner-freshness" class="hint" hidden></p>
+            <div id="exploration-progress" class="exploration-progress" hidden><p id="exploration-summary" class="hint"></p><div id="visited-rooms" class="room-chips" aria-label="Completed room visits"></div><p id="unvisited-rooms" class="hint"></p></div>
+            <details class="disclosure"><summary>Thinking &amp; memory</summary>
+              <p id="agent-context" class="hint"></p><p id="agent-memory" class="hint"></p><p id="last-person-sighting" class="hint"></p><ol id="agent-history" class="agent-history"></ol><ul id="memory-citations" class="memory-citations"></ul>
+              <p class="hint">Actions use camera images, the goal, memory, and execution feedback.</p>
+            </details>
+          </section>
+          <section class="panel demo-panel" id="demo-evidence-panel" data-status="not_started">
+            <div class="section-kicker"><p class="eyebrow">SCENARIO TEST</p><span class="badge quiet-badge">STAGED</span></div>
+            <h2>Check-in demo</h2>
+            <p class="panel-description">Resets the house for a staged fall, a check-in, and a recorded resident reply. Follow the resulting family alert.</p>
+            <button id="start-house-demo" class="primary full-width">Run full-house demo <span aria-hidden="true">→</span></button>
+            <div class="demo-result"><span class="result-dot" aria-hidden="true"></span><div><h3 id="demo-run-status" role="status">Ready to demonstrate</h3><p id="demo-summary">Camera → check-in → reply → family</p></div></div>
+            <p id="demo-error" class="hint error" role="status" hidden></p>
+            <details id="demo-receipts" class="disclosure"><summary>Run details <span id="demo-stage-count" class="summary-count">0 steps</span></summary>
+              <ol id="demo-stages" class="timeline" aria-live="polite" aria-label="Recorded demo steps"></ol>
+              <p id="demo-run-detail" class="hint"></p>
+              <p class="hint">Starting a run resets the simulated house. The configured image model chooses Annie’s actions; the resident reply is a recording.</p>
+              <a class="text-link" href="http://127.0.0.1:8000/app/" target="_blank" rel="noopener">View family alert feed ↗</a>
+            </details>
+          </section>
+          <section class="panel resident-panel" id="daily-life-panel">
+            <div class="section-kicker"><p class="eyebrow">GRANDMA’S DAY</p><span class="badge quiet-badge">STAGED ACTOR</span></div>
+            <div class="resident-heading"><div><h2 id="resident-activity">Resident routine</h2><p id="resident-detail" class="hint">Choose a daily-life scene to follow the resident.</p></div></div>
+            <div class="resident-buttons"><button data-resident="routine">Start routine</button><button data-resident="fall">Stage a fall</button><button data-resident="recover">Recover</button></div>
+            <p class="hint">The model sees camera images, not the activity label.</p>
+          </section>
+        </aside>
+      </div>
+      <section class="workbench" aria-labelledby="workbench-title">
+        <div class="workbench-heading"><div><p class="eyebrow">WORKBENCH</p><h2 id="workbench-title">Controls &amp; diagnostics</h2></div><span class="hint"></span></div>
+        <div class="tab-list" role="tablist" aria-label="Simulation tools">
+          <button id="tab-controls" role="tab" aria-selected="true" aria-controls="tools-controls" tabindex="0">Robot controls</button>
+          <button id="tab-voice" role="tab" aria-selected="false" aria-controls="tools-voice" tabindex="-1">Voice &amp; check-in</button>
+          <button id="tab-scenes" role="tab" aria-selected="false" aria-controls="tools-scenes" tabindex="-1">Scenes &amp; diagnostics</button>
+        </div>
+        <div id="tools-controls" class="tool-grid" role="tabpanel" aria-labelledby="tab-controls" tabindex="0">
+          <div class="tool-stack"><section class="panel mission-bar" id="mission-bar"><p class="eyebrow">MANUAL NAVIGATION</p><h2>Navigation</h2>
             <div class="mission-buttons">
-              <button id="mission-patrol" class="primary">Patrol home</button>
+              <button id="mission-patrol">Patrol home</button>
               <button id="mission-goto-bedroom">Go to bedroom</button>
               <button id="mission-goto-living-room">Living room</button>
               <button id="mission-come-home">Come home</button>
               <button id="mission-turn-left">Turn left 90°</button>
               <button id="mission-look">Look around</button>
-              <button id="mission-stop">Stop</button>
               <button id="mission-resume">Resume</button>
             </div>
             <p id="mission-status" class="mission-status">
               Missions unavailable: locomotion controller not loaded.
             </p>
-          </div>
-          <div class="dog-cam">
-            <img id="dog-frame" alt="Live view from the simulated robot front camera" />
-            <span class="dog-cam-caption">Dog camera</span>
-          </div>
-          <div id="notice" role="status" aria-live="polite">
-            Waiting for the local simulator.
-          </div>
-        </section>
-        <aside>
-          <section class="panel" id="demo-evidence-panel">
-            <p class="eyebrow">LIVE END-TO-END RUN</p>
-            <h2 id="demo-run-status">Ready to demonstrate</h2>
-            <button id="start-house-demo" class="primary">Run full-house demo</button>
-            <p class="hint">Resets the simulated house and stages a fall. The configured image model chooses the robot’s actions. A recorded “not okay” reply is replayed and transcribed.</p>
-            <ol id="demo-stages" aria-live="polite"></ol>
-            <p id="demo-run-detail" class="hint"></p>
-            <a href="http://127.0.0.1:8000/app/" target="_blank" rel="noopener">Open family alert feed ↗</a>
           </section>
-          <section class="panel" id="daily-life-panel">
-            <p class="eyebrow">GRANDMA’S DAY</p>
-            <h2 id="resident-activity">Resident routine</h2>
-            <p id="resident-detail" class="hint">Choose the full house or daily-life scene to follow the resident.</p>
-            <div class="mission-buttons">
-              <button data-resident="routine">Start routine</button>
-              <button data-resident="fall">Stage a fall</button>
-              <button data-resident="recover">Recover</button>
-            </div>
-            <p class="hint">Authored actor animation. The brain receives camera pixels, not this activity label.</p>
-            <p id="stairs-capability" class="hint"></p>
-            <p class="eyebrow">ANNIE’S AI BRAIN</p>
-            <form id="intelligence-form">
-              <label for="intelligence-goal">Give Annie a goal</label>
-              <textarea id="intelligence-goal" maxlength="500" rows="3">Explore the ground floor and check on the resident. Describe what you see, stay clear of people, and choose your next action from camera evidence.</textarea>
-              <button type="submit" class="primary">Start AI / resume</button>
-              <button id="intelligence-stop" type="button">Pause AI</button>
-            </form>
-            <p id="autonomy-status" class="hint">Waiting for the model planner.</p>
-            <p id="agent-reason" class="hint"></p>
-            <p id="agent-context" class="hint"></p>
-            <p id="agent-memory" class="hint"></p>
-            <ol id="agent-history" class="hint"></ol>
-            <p class="hint">Camera + goal + observation memory + execution feedback → model-selected action. The simulator reports whether person detection is advisory or stops movement.</p>
-          </section>
-          <section class="panel factory-panel">
-            <p class="eyebrow">BULK GENERATION</p>
-            <h2>Make a batch</h2>
-            <form id="factory-form">
-              <div class="factory-fields">
-                <label for="factory-count"
-                  >Scenes<select id="factory-count">
-                    <option>6</option>
-                    <option>12</option>
-                    <option selected>24</option>
-                    <option>48</option>
-                    <option>96</option>
-                  </select></label
-                ><label for="factory-seed"
-                  >Seed<input
-                    id="factory-seed"
-                    type="number"
-                    min="0"
-                    max="2147483647"
-                    value="2026"
-                    required
-                /></label>
-              </div>
-              <button class="primary" id="generate" type="submit">
-                Generate scenes
-              </button>
-            </form>
-            <p class="hint">
-              Bed-rest, floor, seated, standing, occluded, and empty rooms. A
-              seed reproduces the batch.
-            </p>
-          </section>
+            <section class="panel"><p class="eyebrow">HOME TOUR</p><h2>House environment</h2><p class="hint">Camera presets change your view. Navigation controls move Annie through the ground floor.</p><button id="open-house">Enter full house <span aria-hidden="true">↗</span></button><p id="stairs-capability" class="hint"></p></section>
+          </div>
           <section class="panel">
-            <p class="eyebrow">RIGHT NOW</p>
+            <p class="eyebrow">SIMULATION TELEMETRY</p>
             <div class="state-heading">
               <h2 id="run-state">Starting</h2>
               <span class="badge">DIRECT MUJOCO</span>
@@ -213,57 +198,10 @@
             >
             <p id="phase" class="hint">No routine schedule loaded.</p>
           </section>
-          <section class="panel" id="brain-panel">
-            <p class="eyebrow">PERCEPTION</p>
-            <div class="state-heading">
-              <h2>What Annie sees</h2>
-              <span id="brain-mode" class="badge">DISCONNECTED</span>
-            </div>
-            <dl class="metrics brain-metrics">
-              <div>
-                <dt>Caption</dt>
-                <dd id="brain-caption">—</dd>
-              </div>
-              <div>
-                <dt>Posture</dt>
-                <dd id="brain-posture">—</dd>
-              </div>
-              <div>
-                <dt>Location</dt>
-                <dd id="brain-location">—</dd>
-              </div>
-              <div>
-                <dt>Confidence</dt>
-                <dd id="brain-confidence">—</dd>
-              </div>
-              <div>
-                <dt>Frame</dt>
-                <dd id="brain-frame">—</dd>
-              </div>
-              <div>
-                <dt>Latency</dt>
-                <dd id="brain-latency">—</dd>
-              </div>
-              <div>
-                <dt>Provider</dt>
-                <dd id="brain-provider">—</dd>
-              </div>
-              <div>
-                <dt>App ingest</dt>
-                <dd id="brain-ingest">—</dd>
-              </div>
-              <div>
-                <dt>Updated</dt>
-                <dd id="brain-updated">—</dd>
-              </div>
-            </dl>
-            <p id="brain-error" class="hint" hidden></p>
-            <p id="brain-note" class="hint"></p>
-          </section>
-          <section class="panel" id="person-safety-panel">
+          <div class="tool-stack"><section class="panel" id="person-safety-panel">
             <p class="eyebrow">CAMERA PERSON DETECTION</p>
             <div class="state-heading">
-              <h2>Person safety</h2>
+              <h2>Person detection</h2>
               <span id="safety-state" class="badge">NO DATA</span>
             </div>
             <dl class="metrics brain-metrics">
@@ -286,11 +224,25 @@
             </dl>
             <p id="safety-error" class="hint" hidden></p>
             <p class="hint">
-              Software stop from camera person detection. It is a convenience
-              behavior, not a safety guarantee or an emergency stop.
+              The current policy is shown above. Detection may advise the model or stop simulated movement; this is not a hardware emergency stop.
             </p>
-          </section>
-          <section class="panel" id="voice-panel">
+          </section><section class="panel">
+            <p class="eyebrow">TRY A COMPARISON</p>
+            <h2>Joint control</h2>
+            <label class="toggle"
+              ><input type="checkbox" id="hold" /> Hold the starting joint
+              pose</label
+            >
+            <p id="control-mode" class="hint">
+              Passive physics. No navigation or gait controller.
+            </p>
+            <p class="hint">
+              Reset, enable hold, and press play. Disable hold to see the robot
+              settle under gravity.
+            </p>
+          </section></div>
+        </div>
+        <div id="tools-voice" class="tool-grid" role="tabpanel" aria-labelledby="tab-voice" tabindex="0" hidden><section class="panel" id="voice-panel">
             <p class="eyebrow">VOICE OUTPUT</p>
             <h2>Speak</h2>
             <form id="say-form">
@@ -301,7 +253,7 @@
                 id="say-text"
                 maxlength="2000"
                 rows="3"
-                placeholder="Text for the simulated dog to speak (max 2000 characters)"
+                placeholder="Hi Grandma, how are you feeling today?"
                 required
               ></textarea>
               <button id="say-send" class="primary" type="submit">
@@ -322,13 +274,25 @@
               <input type="checkbox" id="demo-voice" />
               Enable demo voice (autoplay new clips in this browser)
             </label>
-            <p class="hint">
+            <p id="browser-voice-hint" class="hint">
               Default off: clips wait for the Hear Annie button. When enabled,
               the latest clip plays automatically; only actual playback ends
               send the played receipt.
             </p>
-          </section>
-          <section class="panel" id="transcribe-panel">
+          </section><section class="panel" id="resident-reply-panel">
+            <p class="eyebrow">CHECK-IN DEMO</p>
+            <h2>Replay a resident reply</h2>
+            <p id="reply-window" class="hint" role="status">Waiting for a check-in.</p>
+            <div class="camera-buttons">
+              <button data-reply="okay" disabled>Replay “okay”</button>
+              <button data-reply="help" disabled>Replay “help me”</button>
+              <button data-reply="not-okay" disabled>Replay “not okay”</button>
+              <button data-reply="ambiguous" disabled>Replay “maybe”</button>
+            </div>
+            <p id="resident-reply-result" class="hint" role="status"></p>
+            <p class="hint">Synthetic WAV input at its recorded sample rate → local Whisper → incident policy.
+              These controls do not capture a microphone or send an expected transcript.</p>
+          </section><section class="panel" id="transcribe-panel">
             <p class="eyebrow">VOICE INPUT</p>
             <h2>Hear a recorded reply</h2>
             <p class="hint">
@@ -359,38 +323,55 @@
               Sent only when you press the button, through the local audio brain
               proxy. Maximum 4 MB. Do not upload real personal recordings.
             </p>
-          </section>
-          <section class="panel" id="resident-reply-panel">
-            <p class="eyebrow">CHECK-IN DEMO</p>
-            <h2>Replay a resident reply</h2>
-            <p id="reply-window" class="hint" role="status">Waiting for a check-in.</p>
-            <div class="camera-buttons">
-              <button data-reply="okay" disabled>Replay “okay”</button>
-              <button data-reply="help" disabled>Replay “help me”</button>
-              <button data-reply="not-okay" disabled>Replay “not okay”</button>
-              <button data-reply="ambiguous" disabled>Replay “maybe”</button>
+          </section></div>
+        <div id="tools-scenes" class="tool-grid" role="tabpanel" aria-labelledby="tab-scenes" tabindex="0" hidden><section class="panel scene-bar">
+            <div class="scene-title-row">
+              <span class="eyebrow">SCENE LIBRARY</span
+              ><span id="scene-count" class="badge">Loading catalog</span>
             </div>
-            <p id="resident-reply-result" class="hint" role="status"></p>
-            <p class="hint">Synthetic WAV input at its recorded sample rate → local Whisper → incident policy.
-              These controls do not capture a microphone or send an expected transcript.</p>
-          </section>
-          <section class="panel">
-            <p class="eyebrow">LOOK AROUND</p>
-            <h2>Camera</h2>
-            <div class="camera-buttons">
-              <button data-camera="room">Room</button
-              ><button data-camera="front">Front</button
-              ><button data-camera="side">Side</button
-              ><button data-camera="top">Top</button>
-              <button data-camera="downstairs">Downstairs</button>
-              <button data-camera="upstairs">Upstairs</button>
-              <button data-camera="whole-house">Whole house</button>
+            <div class="scene-picker">
+              <button id="previous-scene" aria-label="Previous scene">←</button
+              ><label class="visually-hidden" for="scene-select"
+                >Choose scene</label
+              ><select id="scene-select">
+                <option value="">Original Go2 model</option></select
+              ><button id="next-scene" aria-label="Next scene">→</button>
             </div>
-            <p class="hint">
-              These controls move the viewer camera, not the robot.
+            <p id="scene-description" class="hint">
+              Choose a generated home to inspect its layout and scenario.
             </p>
-          </section>
-          <section class="panel">
+          </section><section class="panel factory-panel">
+            <p class="eyebrow">SCENE FACTORY</p>
+            <h2>Build a test set</h2>
+            <form id="factory-form">
+              <div class="factory-fields">
+                <label for="factory-count"
+                  >Scenes<select id="factory-count">
+                    <option>6</option>
+                    <option>12</option>
+                    <option selected>24</option>
+                    <option>48</option>
+                    <option>96</option>
+                  </select></label
+                ><label for="factory-seed"
+                  >Seed<input
+                    id="factory-seed"
+                    type="number"
+                    min="0"
+                    max="2147483647"
+                    value="2026"
+                    required
+                /></label>
+              </div>
+              <button class="primary" id="generate" type="submit">
+                Generate scenes
+              </button>
+            </form>
+            <p class="hint">
+              Bed-rest, floor, seated, standing, occluded, and empty rooms. A
+              seed reproduces the batch.
+            </p>
+          </section><section class="panel">
             <p class="eyebrow">SCENARIO LABELS</p>
             <h2>Simulation ground truth</h2>
             <pre id="ground-truth" class="ground-truth">
@@ -399,52 +380,9 @@ No scenario loaded.</pre
             <p class="hint">
               These are generated labels, not vision-model predictions.
             </p>
-          </section>
-          <section class="panel">
-            <p class="eyebrow">TRY A COMPARISON</p>
-            <h2>Joint control</h2>
-            <label class="toggle"
-              ><input type="checkbox" id="hold" /> Hold the starting joint
-              pose</label
-            >
-            <p id="control-mode" class="hint">
-              Passive physics. No navigation or gait controller.
-            </p>
-            <p class="hint">
-              Reset, enable hold, and press play. Disable hold to see the robot
-              settle under gravity.
-            </p>
-          </section>
-          <section class="panel progress">
-            <p class="eyebrow">WHAT THIS PROVES</p>
-            <div>
-              <span class="check">✓</span
-              ><span>Real robot model &amp; contacts</span>
-            </div>
-            <div>
-              <span class="check">✓</span><span>Live rendered physics</span>
-            </div>
-            <div>
-              <span class="pending">○</span
-              ><span>DimOS navigation — in progress</span>
-            </div>
-            <div>
-              <span class="pending">○</span
-              ><span>Camera inference + native speech + family receipts</span>
-            </div>
-          </section>
-        </aside>
-      </div>
-      <footer>
-        <span id="version">MuJoCo · Unitree Go1 locomotion surrogate</span
-        ><span id="footer-honesty"
-          >Walking uses a matched Go1 model and policy; Go2 hardware is not
-          connected.</span
-        >
-        <a href="https://polyhaven.com/" target="_blank" rel="noopener"
-          >Powered by Poly Haven</a
-        >
-      </footer>
+          </section></div>
+      </section>
+      <footer><div><a class="footer-brand" href="/">annie</a><span id="version">MuJoCo · local rendering</span></div><p id="footer-honesty">Walking uses a matched Go1 model and policy; Go2 hardware is not connected.</p><a href="https://polyhaven.com/" target="_blank" rel="noopener">Assets by Poly Haven ↗</a></footer>
     </main>
   </body>
 </html>

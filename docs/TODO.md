@@ -37,6 +37,8 @@ as work progresses and record a reason for blocked work.
 
 ## Done
 
+- [x] TASK-013: Added interactive camera controls, an operator workspace, and DimOS-derived raycast LiDAR, measured-trail and planned-route layers (REQ-013). Browser-verified orbit/pan/zoom/reset and layer acknowledgement; toggling layers changes operator frames while robot-camera frames remain byte-identical.
+
 - [x] TASK-001: Recorded SDK launch evidence and platform/asset blockers; direct MuJoCo and trained Go1-surrogate motion run locally. Full DimOS integration remains separate.
 - [x] TASK-003: HTTP body adapter publishes simulated maps/poses and forwards app commands with execution receipts.
 - [x] Added deterministic furnished scene batches, realistic cached assets, measured pacing, and verified Blender export.

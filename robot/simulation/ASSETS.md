@@ -36,3 +36,18 @@ visibility, medical assessment, or actual human behavior.
 Timelines specify repeatable planned observation windows in simulation seconds.
 They execute no voice, VLM, notification, or resident animation. These scene
 schedules do not change the application's separate incident-policy timers.
+
+## Spatial visualization code
+
+`spatial.py` adapts the batched `mj_multiRay` operation, world-direction transform,
+range-validity filtering, and hit-point reconstruction from DimOS
+[`_raycast_lidars`](https://github.com/dimensionalOS/dimos/blob/c1c3cdc9d2ee54ca72259465688395699d7d99a2/dimos/simulation/engines/mujoco_engine.py#L485),
+commit `c1c3cdc9d2ee54ca72259465688395699d7d99a2`.
+Copyright 2025 Dimensional Inc., Apache-2.0; the upstream license is retained in
+[licenses/DimOS-Apache-2.0.txt](licenses/DimOS-Apache-2.0.txt).
+
+Annie's changes add a bounded panoramic virtual sensor, exclude the whole robot
+subtree using a private model copy, retain a bounded measured trajectory, and
+render optional operator-only scan/trail/route overlays. This is direct MuJoCo
+sensor simulation, not a claim that the full DimOS or Rerun stack is running.
+The scene camera remains independent of the robot's inference camera.

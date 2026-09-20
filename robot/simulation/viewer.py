@@ -36,6 +36,7 @@ def validate_control(value, scene_ids=()):
         "reset",
         "step",
         "camera",
+        "overlays",
         "hold",
         "scene",
         "generate",
@@ -105,6 +106,12 @@ def validate_control(value, scene_ids=()):
         ):
             raise ValueError("scene id must exist in catalog")
         return value
+    if value["action"] == "overlays":
+        if not 2 <= len(value) <= 4 or not set(value) <= {"action", "lidar", "trajectory", "route"}:
+            raise ValueError("overlays requires lidar, trajectory, or route")
+        if any(type(enabled) is not bool for key, enabled in value.items() if key != "action"):
+            raise ValueError("overlay values must be boolean")
+        return value
     if value["action"] == "hold":
         if set(value) != {"action", "enabled"} or not isinstance(
             value["enabled"], bool
@@ -124,10 +131,17 @@ def validate_control(value, scene_ids=()):
             raise ValueError("preset must be front, side, or top")
     else:
         if (
-            not set(value) <= {"action", "azimuth", "elevation", "distance"}
+            not set(value) <= {"action", "azimuth", "elevation", "distance", "lookat"}
             or len(value) < 2
         ):
             raise ValueError("camera requires preset or bounded camera coordinates")
+        if "lookat" in value:
+            point = value["lookat"]
+            if not isinstance(point, list) or len(point) != 3 or any(
+                type(coordinate) not in (int, float) or not math.isfinite(coordinate)
+                or not -100 <= coordinate <= 100 for coordinate in point
+            ):
+                raise ValueError("lookat requires three finite coordinates in [-100, 100] metres")
         for name, bounds in {
             "azimuth": (-360, 360),
             "elevation": (-90, 90),
@@ -797,6 +811,11 @@ class MujocoSession:
         if scene and scene.get("overview"):
             self.set_camera({"preset": "room"})
         self.renderer = mujoco.Renderer(model, height=480, width=640)
+        from robot.simulation.spatial import SpatialSensor
+        self.spatial = SpatialSensor(model)
+        self.spatial_state = {}
+        self.spatial_error = None
+        self.overlays = {"lidar": True, "trajectory": True, "route": True}
 
     def close(self):
         self.renderer.close()
@@ -809,6 +828,9 @@ class MujocoSession:
         self.mj.mj_forward(self.model, self.data)
         self.physics_error = physics_fault(self.data, self.mj)
         self.map_id = "sim-" + str(uuid4())
+        if getattr(self, "spatial", None):
+            self.spatial.reset()
+            self.spatial_state = {}
         if self.person_safety:
             self.person_safety.reset(self.map_id)
         if self.controller:
@@ -938,6 +960,9 @@ class MujocoSession:
             for name in ("azimuth", "elevation", "distance"):
                 if name in command:
                     setattr(self.camera, name, command[name])
+            if "lookat" in command:
+                self.camera.lookat[:] = command["lookat"]
+                self.track_robot = False
 
     def render(self):
         from PIL import Image
@@ -949,6 +974,20 @@ class MujocoSession:
         self.renderer.update_scene(
             self.data, camera=self.camera, scene_option=self.visual_options
         )
+        # Operator-only overlays: the robot_front observation is rendered separately
+        # and never includes these diagnostic points or planned/measured paths.
+        try:
+            if self.spatial.update(self.data):
+                self.spatial_state = self.spatial.snapshot()
+            self.spatial.draw(
+                self.renderer.scene,
+                lidar=self.overlays["lidar"],
+                trajectory=self.overlays["trajectory"],
+                route=self.navigator.path if self.navigator and self.overlays["route"] else (),
+            )
+            self.spatial_error = None
+        except Exception as exc:
+            self.spatial_error = f"{type(exc).__name__}: spatial overlay unavailable"
         output = io.BytesIO()
         Image.fromarray(self.renderer.render()).save(output, format="JPEG", quality=85)
         self.render_error = None
@@ -1051,6 +1090,14 @@ class MujocoSession:
             "scene_id": self.scene["id"] if self.scene else None,
             "current_scene": self.scene,
             "camera_mode": "robot" if self.track_robot else "room",
+            "camera": {
+                "azimuth": finite_number(self.camera.azimuth),
+                "elevation": finite_number(self.camera.elevation),
+                "distance": finite_number(self.camera.distance),
+                "lookat": [finite_number(value) for value in self.camera.lookat],
+            },
+            "spatial": {**self.spatial_state, "error": self.spatial_error},
+            "overlays": dict(self.overlays),
         }
 
 
@@ -1233,6 +1280,8 @@ def run(args):
                     session.step()
                 elif action == "camera":
                     session.set_camera(command)
+                elif action == "overlays":
+                    session.overlays.update({key: value for key, value in command.items() if key != "action"})
             if now >= next_frame and session.physics_error is None:
                 next_frame = now + 0.1
                 try:

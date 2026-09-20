@@ -63,7 +63,7 @@ struct ContentView: View {
                     .font(.title2.bold())
                     .foregroundStyle(Palette.ink)
                 Spacer()
-                Text(state.live ? "Live \u{00b7} backend connected" : "Demo data \u{00b7} backend offline")
+                Text(state.live ? "Live \u{00b7} connected" : "Offline \u{00b7} demo data")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
@@ -87,6 +87,10 @@ struct ContentView: View {
                     .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
                 ProfileView()
                     .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+                if AppConfiguration.devFeedAvailable {  // debug feed from the dog process; only with a Server set
+                    DevFeedView()
+                        .tabItem { Label("Dev", systemImage: "flask") }
+                }
             }
             .padding(.top, 8)
         }

@@ -26,11 +26,12 @@ home and the family's phone can be in different places.
 
 | Path | What it is | State |
 | --- | --- | --- |
-| `app_backend/` | Family-facing API: messages, runs, reminders, observation memory, incident policy | **Working**, 86 tests |
+| `app_backend/` | Family-facing API: messages, runs, reminders, observation memory, incident policy | **Tested prototype**, 108 passing checks |
 | `app_frontend/` | SwiftUI app for iPhone and Mac | **Working** on device and simulator |
 | `frontend/` | Phone-friendly web app served at `/app/` | **Working** |
 | `robot/` | The robot side: errand brain serving `/dispatch`, physical Go2 control, perception, simulator | **Working**, see [robot/README.md](robot/README.md) |
-| `robot_backend/` | Original top-level placeholder; the working robot service lives under `robot/` | Unused scaffold |
+| `robot_backend/` | Teammate's standalone voice/agent API and sessions; separate from the dog errand bridge under `robot/` | 12 offline tests pass; physical audio acceptance remains open |
+| `speaker_mic/` | Teammate's standalone microphone/speaker iPhone app for the voice API | Separate from the family app; on-device connection remains to be verified |
 | `shared/`, `contract/` | Protocol references and exported typed schemas | — |
 
 ## What is real, and what is staged

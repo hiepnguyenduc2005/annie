@@ -238,3 +238,16 @@ def test_unsupported_trick_cannot_become_unrelated_model_motion(text):
                                                             validate_command=validate_command)):
         assert plan["steps"] == []
         assert "not supported" in plan["reply"]
+
+
+def test_a_greeting_line_must_actually_greet():
+    from robot.dog.planning.agent import compose_line, line_ok
+    assert not line_ok("I'll be right there, just a moment, to see who's come near.", greeting=True)
+    assert line_ok("Hello there, lovely to see you by the window. How are you?", greeting=True)
+
+    class Vague:
+        def chat(self, messages, **kw):
+            return {"ok": True, "text": "I'll be right there, just a moment, to see who's come near.", "latency_ms": 3, "provider": "local", "model": "m"}
+    out = compose_line("greet this person who is right in front of you", {"people": [], "objects": [], "sentences": []},
+                       inference=Vague(), fallback="Hello there, lovely to see you. How are you doing?")
+    assert out["source"] == "rules" and out["text"].startswith("Hello there")

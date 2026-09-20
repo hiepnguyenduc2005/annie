@@ -571,11 +571,16 @@ _BAD_LINE = re.compile(r"\b(about to|going to say|say hello|i see you\b|i can se
                        r"as an ai|language model|guest\s+\d+|hello there!?$|greet(ing)? you)\b", re.I)
 
 
-def line_ok(text: str, *, name: str | None = None) -> bool:
+_GREETING_WORD = re.compile(r"\b(hi|hello|hey|good (morning|afternoon|evening)|lovely to see|nice to see|good to see|welcome)\b", re.I)
+
+
+def line_ok(text: str, *, name: str | None = None, greeting: bool = False) -> bool:
     """A model line Annie may say: no narration of her own mechanics, no meta talk, uses the name when known,
-    ends like a sentence, and is not a bare 'hello'."""
+    ends like a sentence, and is not a bare 'hello'. With `greeting`, it must actually greet."""
     t = (text or "").strip()
     if len(t.split()) < 3 or _BAD_LINE.search(t):
+        return False
+    if greeting and not _GREETING_WORD.search(t):
         return False
     if name and name.lower() not in t.lower():
         return False
@@ -593,7 +598,8 @@ def compose_line(purpose: str, sit: dict, *, inference=None, fallback: str, extr
                                   max_tokens=60, temperature=0.7)
             text = (resp.get("text") or "").strip().strip('"').splitlines()[0].strip() if resp.get("ok") else ""
             words = text.split()
-            if 2 <= len(words) <= max_words + 6 and not re.search(r"[{}\[\]<>]", text) and line_ok(text, name=name):
+            if 2 <= len(words) <= max_words + 6 and not re.search(r"[{}\[\]<>]", text) \
+                    and line_ok(text, name=name, greeting=purpose.strip().lower().startswith("greet")):
                 return {"text": " ".join(words[:max_words + 6]), "source": f"{resp.get('provider')}:{resp.get('model')}",
                         "latency_ms": resp.get("latency_ms")}
         except Exception:

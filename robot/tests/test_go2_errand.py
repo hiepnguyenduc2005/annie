@@ -20,7 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import go2_errand  # noqa: E402
 from go2_errand import (AppClient, BodyClient, Errand, ErrandError, ErrandService, interpret_reply,  # noqa: E402
-                        make_handler, parse_dispatch, phrase_message)
+                        make_handler, parse_dispatch, phrase_message, plan_mission)
 
 RUN = "5488e7cb-8d54-4c59-8e02-9b739d694a81"
 TEXT = "How are you feeling today?"
@@ -34,7 +34,8 @@ class FakeBody:
 
     def __init__(self, log=None, **results):
         self.results = {"find_person": JEANINE, "say": {"played": True}, "listen": {"transcript": "Okay.", "heard": True},
-                        "stop": {"stop_code": 0}, **results}
+                        "stop": {"stop_code": 0}, "hello": {"codes": {"stand": 0, "balance": 0, "hello": 0}},
+                        "dance": {"codes": {"stand": 0, "balance": 0, "dance": "no_ack"}}, **results}
         self.calls, self.seen, self.log = [], {}, log
 
     async def __call__(self, name, args):
@@ -99,6 +100,75 @@ def test_interpret_reply_is_an_exact_phrase_match():
         assert interpret_reply(nothing) == {"reply": "none", "mood": "neutral", "detail": "Message delivered; no reply heard."}
 
 
+def test_interpret_reply_names_whoever_was_addressed():
+    assert interpret_reply("okay", "Ellis")["detail"] == "Ellis says okay. 🙂"
+
+
+# ---- plain language -> mission ----
+
+@pytest.mark.parametrize("text, intent, target", [
+    ("wave at grandma", "wave", "Jeanine"), ("Say hi to mom for me", "wave", "Jeanine"), ("go say hello to Ellis", "wave", "Ellis"),
+    ("greet granny", "wave", "Jeanine"), ("please wave!", "wave", "Jeanine"), ("WAVE TO NAN", "wave", "Jeanine"),
+    ("dance for grandma", "dance", "Jeanine"), ("do a little dance", "dance", "Jeanine"), ("Dance!", "dance", "Jeanine"),
+    ("can you dance for Henry", "dance", "Henry"), ("show gran a dance", "dance", "Jeanine"),
+    ("check on mom", "checkin", "Jeanine"), ("check in on her", "checkin", "Jeanine"), ("is she okay?", "checkin", "Jeanine"),
+    ("is he okay", "checkin", "Jeanine"), ("see if grandma needs anything", "checkin", "Jeanine"),
+    ("make sure mum is alright", "checkin", "Jeanine"), ("how's Janine doing?", "checkin", "Jeanine"),
+    ("ask grandma how she's doing", "checkin", "Jeanine"), ("ask mom if she is okay today?", "checkin", "Jeanine"),
+    ("can you tell me if grandma is okay", "checkin", "Jeanine"), ("check on Ellis", "checkin", "Ellis"),
+    ("come", "come", None), ("come here", "come", None), ("Come to me", "come", None), ("Annie, come here!", "come", None),
+    ("go to grandma", "come", "Jeanine"), ("find Ellis", "come", "Ellis"), ("go find my mom", "come", "Jeanine"),
+    ("say hi to grandma and check on her", "wave", "Jeanine"),  # first match wins: wave, dance, checkin, come
+    ("Henry here, wave at grandma", "wave", "Jeanine"),
+])
+def test_plan_mission_commands(text, intent, target):
+    mission = plan_mission("Henry" if text.startswith("Henry") else "Zach", text)
+    assert (mission["intent"], mission["target"], mission["message"]) == (intent, target, None)
+    assert mission["trick"] == {"wave": "hello", "dance": "dance"}.get(intent) and mission["listen"] is (intent == "checkin")
+
+
+@pytest.mark.parametrize("text, target, message", [
+    ("tell grandma dinner is at six", "Jeanine", "dinner is at six"),
+    ("Tell Grandma that dinner is at 6", "Jeanine", "dinner is at 6"),
+    ("remind mom to take her pills", "Jeanine", "take her pills"),
+    ("ask gran, did the mail come?", "Jeanine", "did the mail come?"),
+    ("let grandma know I'll be late", "Jeanine", "I'll be late"),
+    ("please tell Ellis to call me", "Ellis", "call me"),
+    ("tell her I love her", "Jeanine", "I love her"),
+    # an explicit tell/ask/remind always relays: keywords inside the message must not swallow it
+    ("remind grandma to make sure the stove is off", "Jeanine", "make sure the stove is off"),
+    ("ask grandma if she wants to dance on Saturday", "Jeanine", "if she wants to dance on Saturday"),
+    ("tell grandma to check on the cat", "Jeanine", "check on the cat"),
+    # ordinary messages fall through word for word (today's behaviour), even with keyword-like words in them
+    (TEXT, "Jeanine", TEXT),
+    ("Heat wave coming, drink lots of water", "Jeanine", "Heat wave coming, drink lots of water"),
+    ("Make sure you take your pills tonight", "Jeanine", "Make sure you take your pills tonight"),
+    ("Come over for dinner on Sunday!", "Jeanine", "Come over for dinner on Sunday!"),
+    ("Did you check on the oven?", "Jeanine", "Did you check on the oven?"),
+    ("Dance class is cancelled tomorrow", "Jeanine", "Dance class is cancelled tomorrow"),
+    ("go to grandma's house later", "Jeanine", "go to grandma's house later"),
+    ("tell grandma", "Jeanine", "tell grandma"),
+    # a name inside a message is not its recipient; a name that opens it is
+    ("Ellis will pick you up at 5", "Jeanine", "Ellis will pick you up at 5"),
+    ("Ellis, call me when you can", "Ellis", "Ellis, call me when you can"),
+])
+def test_plan_mission_relays(text, target, message):
+    mission = plan_mission("Zach", text)
+    assert (mission["intent"], mission["target"], mission["message"]) == ("relay", target, message)
+    assert mission["line"] == phrase_message("Zach", message, target) and mission["listen"] and mission["trick"] is None
+
+
+def test_plan_mission_lines_are_fixed_templates():
+    assert plan_mission("Zach", "wave at grandma")["line"] == "Hi Jeanine! Zach says hello."
+    assert plan_mission("Zach", "say hi to Ellis")["line"] == "Hi Ellis! Zach says hello."
+    assert plan_mission("Zach", "dance for nan")["line"] == "Jeanine, that dance was from Zach!"
+    assert plan_mission("Zach", "check on mom")["line"] == "Hi Jeanine, Zach asked me to check on you. Are you alright?"
+    assert plan_mission("Zach", "come here")["line"] == "Here I am."
+    assert plan_mission(" Zach ", "tell  grandma\n dinner is at six")["line"] == \
+        'Jeanine, it\'s Annie. Zach asked me to pass this along: "dinner is at six"'
+    assert len(plan_mission("Z" * 80, "tell grandma " + "x" * 1900)["line"]) == 300
+
+
 # ---- errand sequence ----
 
 def test_happy_path_posts_the_exact_event_sequence_and_ends_happy():
@@ -108,7 +178,7 @@ def test_happy_path_posts_the_exact_event_sequence_and_ends_happy():
     assert body.calls == [("find_person", {"name": "Jeanine", "timeout_s": 90, "approach": True}),
                           ("say", {"text": LINE}), ("listen", {"max_s": 10})]  # and no stop on success
     assert app.posts == [
-        (RUN, "navigating", {"detail": "Looking for Jeanine."}),
+        (RUN, "navigating", {"detail": "Looking for Jeanine.", "intent": "relay", "target": "Jeanine"}),
         (RUN, "arrived", {"detail": "Found Jeanine."}),
         (RUN, "speaking", {"text": LINE}),
         (RUN, "listening", {}),
@@ -119,6 +189,99 @@ def test_happy_path_posts_the_exact_event_sequence_and_ends_happy():
     assert body.seen == {"find_person": ["navigating"], "say": ["navigating", "arrived"],
                          "listen": ["navigating", "arrived", "speaking", "listening"]}
     assert [e["delivered"] for e in log] == [True] * 6 and all(set(e) == {"kind", "payload", "at", "delivered"} for e in log)
+
+
+def test_wave_errand_finds_her_waves_speaks_and_completes_without_listening():
+    log, app = [], FakeApp()
+    body = FakeBody(log=log)
+    assert run_errand(body, app, text="go say hi to grandma", log=log) == "completed"
+    assert body.calls == [("find_person", {"name": "Jeanine", "timeout_s": 90, "approach": True}), ("hello", {}),
+                          ("say", {"text": "Hi Jeanine! Zach says hello."})]
+    assert app.posts == [
+        (RUN, "navigating", {"detail": "Looking for Jeanine.", "intent": "wave", "target": "Jeanine"}),
+        (RUN, "arrived", {"detail": "Found Jeanine."}),
+        (RUN, "speaking", {"text": "Hi Jeanine! Zach says hello."}),
+        (RUN, "completed", {"detail": "Said hello to Jeanine. Wave command acknowledged by the robot.", "reply": "none",
+                            "mood": "happy"}),
+    ]
+    assert body.seen["hello"] == ["navigating", "arrived"] and body.seen["say"] == ["navigating", "arrived"]
+
+
+def test_dance_errand_reports_an_unacknowledged_trick_honestly():
+    body, app = FakeBody(), FakeApp()
+    assert run_errand(body, app, text="dance for grandma") == "completed"
+    assert body.names == ["find_person", "dance", "say"]
+    assert body.calls[-1] == ("say", {"text": "Jeanine, that dance was from Zach!"})
+    assert app.kinds == ["navigating", "arrived", "speaking", "completed"]
+    assert app.posts[-1][2] == {"detail": "Dance for Jeanine: command sent, not acknowledged.", "reply": "none", "mood": "happy"}
+
+
+def test_a_failed_trick_fails_the_errand_and_nothing_is_said():
+    body, app = FakeBody(hello=ErrandError("The robot body could not finish hello (failed).")), FakeApp()
+    assert run_errand(body, app, text="wave at grandma") == "failed"
+    assert body.names == ["find_person", "hello", "stop"] and app.kinds == ["navigating", "arrived", "failed"]
+    assert app.posts[-1][2] == {"error": "The robot body could not finish hello (failed)."}
+
+
+def test_checkin_errand_asks_listens_and_reports_the_reply():
+    body, app = FakeBody(), FakeApp()
+    assert run_errand(body, app, text="can you check on mom?") == "completed"
+    question = "Hi Jeanine, Zach asked me to check on you. Are you alright?"
+    assert body.calls[1:] == [("say", {"text": question}), ("listen", {"max_s": 10})]
+    assert app.posts == [
+        (RUN, "navigating", {"detail": "Looking for Jeanine.", "intent": "checkin", "target": "Jeanine"}),
+        (RUN, "arrived", {"detail": "Found Jeanine."}),
+        (RUN, "speaking", {"text": question}),
+        (RUN, "listening", {}),
+        (RUN, "heard", {"transcript": "Okay."}),
+        (RUN, "completed", {"detail": "Jeanine says okay. 🙂", "reply": "okay", "mood": "happy"}),
+    ]
+    app = FakeApp()
+    run_errand(FakeBody(listen={"transcript": None, "heard": False}), app, text="is she okay?")
+    assert app.posts[-1][2] == {"detail": "Asked Jeanine if they are alright; no reply heard.", "reply": "none", "mood": "neutral"}
+    app = FakeApp()
+    run_errand(FakeBody(listen={"transcript": "help me", "heard": True}), app, text="check on grandma")
+    assert app.posts[-1][2] == {"detail": 'Jeanine may need help: "help me"', "reply": "concern", "mood": "worried"}
+
+
+def test_relay_with_tell_says_only_the_message_part():
+    body, app = FakeBody(), FakeApp()
+    assert run_errand(body, app, text="Tell grandma that dinner is at six") == "completed"
+    line = 'Jeanine, it\'s Annie. Zach asked me to pass this along: "dinner is at six"'
+    assert body.calls[1] == ("say", {"text": line}) and app.posts[2] == (RUN, "speaking", {"text": line})
+    assert app.posts[0][2] == {"detail": "Looking for Jeanine.", "intent": "relay", "target": "Jeanine"}
+    assert app.kinds == ["navigating", "arrived", "speaking", "listening", "heard", "completed"]
+
+
+def test_come_goes_to_whoever_is_there_and_says_here_i_am():
+    body, app = FakeBody(find_person={**JEANINE, "identity": {"name": "Ellis", "score": 0.8}}), FakeApp()
+    assert run_errand(body, app, text="come here") == "completed"
+    assert body.calls == [("find_person", {"name": None, "timeout_s": 90, "approach": True}), ("say", {"text": "Here I am."})]
+    assert app.posts == [
+        (RUN, "navigating", {"detail": "Looking for someone.", "intent": "come", "target": None}),
+        (RUN, "arrived", {"detail": "Found Ellis."}),
+        (RUN, "speaking", {"text": "Here I am."}),
+        (RUN, "completed", {"detail": "Annie walked up to Ellis.", "reply": "none", "mood": "neutral"}),
+    ]
+    app = FakeApp()
+    run_errand(FakeBody(find_person={**JEANINE, "identity": None, "approached": False}), app, text="come")
+    assert app.posts[1][2] == {"detail": "Found someone."}
+    assert app.posts[-1][2]["detail"] == "Annie found someone but did not walk up."
+    app = FakeApp()
+    assert run_errand(FakeBody(find_person={"found": False}), app, text="come here") == "failed"
+    assert app.posts[-1][2] == {"error": "Could not find anyone."}
+
+
+def test_a_named_target_other_than_jeanine_is_searched_for_and_guarded_the_same_way():
+    ellis = {**JEANINE, "identity": {"name": "Ellis", "score": 0.8}}
+    body, app = FakeBody(find_person=ellis), FakeApp()
+    assert run_errand(body, app, text="tell Ellis to call me") == "completed"
+    assert body.calls[0] == ("find_person", {"name": "Ellis", "timeout_s": 90, "approach": True})
+    assert body.calls[1] == ("say", {"text": 'Ellis, it\'s Annie. Zach asked me to pass this along: "call me"'})
+    assert app.posts[-1][2]["detail"] == "Ellis says okay. 🙂"
+    body, app = FakeBody(), FakeApp()  # the body found Jeanine instead: Ellis's message is not for her
+    assert run_errand(body, app, text="tell Ellis to call me") == "failed"
+    assert app.posts[-1][2] == {"error": "Could not find Ellis."} and "say" not in body.names
 
 
 def test_unnamed_person_is_accepted_and_said_so():
@@ -151,7 +314,7 @@ def test_not_found_fails_and_sends_the_software_stop_without_speaking():
     body = FakeBody(find_person={"found": False, "track_id": None, "identity": None, "approached": False, "searched_s": 90})
     app = FakeApp()
     assert run_errand(body, app) == "failed"
-    assert app.posts == [(RUN, "navigating", {"detail": "Looking for Jeanine."}),
+    assert app.posts == [(RUN, "navigating", {"detail": "Looking for Jeanine.", "intent": "relay", "target": "Jeanine"}),
                          (RUN, "failed", {"error": "Could not find Jeanine."})]
     assert body.names == ["find_person", "stop"]
 
@@ -249,7 +412,7 @@ def test_malformed_dispatch_is_a_400(raw):
     assert code == 400 and set(payload) == {"error"} and service.runs == {}
 
 
-def wait_until(predicate, timeout_s=2.0):
+def wait_until(predicate, timeout_s=5.0):  # generous: only reached on failure
     deadline = time.monotonic() + timeout_s
     while not predicate():
         assert time.monotonic() < deadline, "timed out"
@@ -260,8 +423,8 @@ def test_dispatch_is_202_then_idempotent_200_and_queues_fifo_while_busy():
     release, started = threading.Event(), []
 
     async def fake_runner(run):
-        started.append(run["run_id"])
         run["events"].append({"kind": "navigating", "payload": {}, "at": 1, "delivered": True})
+        started.append(run["run_id"])  # last: the test thread reads `events` as soon as it sees this
         while not release.is_set():
             await asyncio.sleep(0.002)
         return "failed" if run["text"] == "fail" else "completed"
@@ -323,7 +486,7 @@ def test_closing_the_service_cancels_the_active_errand_with_failed_and_stop():
 
     service = ErrandService(runner, status=quiet).start()
     service.handle("POST", "/dispatch", dispatch_body())
-    assert started.wait(2.0)
+    assert started.wait(5.0)
     service.close()
     assert app.kinds == ["navigating", "failed"] and body.names == ["stop"]
     assert service.runs[RUN]["state"] == "failed" and not service.thread.is_alive()

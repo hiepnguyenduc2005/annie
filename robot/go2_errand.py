@@ -1,17 +1,33 @@
 #!/usr/bin/env python3
-"""Family-message errand relay for the physical Go2: find Jeanine, say the message, listen, report.
+"""Family-message errands for the physical Go2: find the person, wave / dance / check in / relay, report.
 
 Robot-side adapter for `contract/family_messages.md`. app_backend POSTs a family
 message to `/dispatch`; this service acknowledges at once, then runs one errand
 at a time (FIFO queue) and reports every step to app_backend's
 `POST /internal/events`. The dog is a hand and an arm: this process never
 touches hardware or WebRTC. It sends succinct commands (`find_person`, `say`,
-`listen`, `stop`) to the separate body service (`robot/go2_body.py`) over HTTP
-and watches the receipts.
+`listen`, `hello`, `dance`, `stop`) to the separate body service
+(`robot/go2_body.py`) over HTTP and watches the receipts.
+
+The family member types plain language; `plan_mission` turns it into one mission:
+  wave     "wave at grandma", "say hi to mom", "greet Ellis"   -> find, `hello` trick, "Hi Jeanine! Zach says hello."
+  dance    "dance for grandma", "do a little dance"            -> find, `dance` trick, one spoken line
+  checkin  "check on mom", "is she okay?", "ask grandma how she's doing" -> find, ask "Are you alright?", listen
+  relay    "tell grandma dinner is at six", "remind mom to ..." -> find, say only the message part, listen
+  come     "come here", "go to grandma", "find Ellis"          -> find (anyone when nobody is named), "Here I am."
+  anything else is relayed word for word, as before. Names: grandma/granny/gran/nan/mum/mom/Jeanine/Janine
+  all mean Jeanine; Ellis and Henry are themselves; nobody named means Jeanine. An ordinary message goes to
+  Jeanine unless it opens by addressing someone ("Ellis, call me"): a name inside a message is not its recipient.
 
 What this is, plainly:
-- A software relay. The spoken line is a fixed template around the family
-  member's own words; no model phrases or interprets anything.
+- A software relay. `plan_mission` is keyword and pattern matching, not language
+  understanding: an explicit "tell/ask/remind X ..." always relays, so a message
+  is never swallowed by a keyword inside it, and the keywords only fire on
+  command-shaped text ("make sure SHE is okay", not "make sure YOU take your
+  pills"). Spoken lines are fixed templates around the family member's own words;
+  no model phrases or interprets anything.
+- A trick result is the firmware's acknowledgment of the request. It is not
+  evidence the motion happened, and the completed event says which it got.
 - Playback is the host computer's speaker and listening is the host microphone,
   both through the body service. It is not the robot's own audio.
 - The reply is classified by exact-phrase match (`audio_reply.classify`: "okay",
@@ -19,7 +35,8 @@ What this is, plainly:
   passed on verbatim as unclear. "May need help" prompts the family to check in;
   it is not an assessment of Jeanine's condition.
 - "Found Jeanine" is the body's face-match estimate, or an unnamed person assumed
-  to be her. Someone the body names as another person is never given the message.
+  to be her. Someone the body names as another person is never given the message
+  (only `come` with nobody named accepts whoever is there).
 - `stop` is a software stop request to the body service. It is not a hardware
   emergency stop and cannot stop the robot when the body service or its link is
   down. Supervised use only, operator nearby.
@@ -35,6 +52,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import signal
 import sys
 import threading
@@ -48,16 +66,49 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from robot.app_backend.app.audio_reply import classify  # noqa: E402
 
-SCRIPT_VERSION = "go2-errand/0.1"
+SCRIPT_VERSION = "go2-errand/0.2"
 RESIDENT = "Jeanine"
 SAY_MAX_CHARS, TEXT_MAX_CHARS, NAME_MAX_CHARS, TRANSCRIPT_MAX_CHARS = 300, 2000, 80, 500
 FIND_TIMEOUT_S, LISTEN_MAX_S = 90, 10
-DEADLINES_S = {"find_person": 120.0, "say": 45.0, "listen": 25.0}  # hard client-side limits; anything else 15 s
+# Hard client-side limits; anything else 15 s. Tricks: stand + balance + request + the body's settle time.
+DEADLINES_S = {"find_person": 120.0, "say": 45.0, "listen": 25.0, "hello": 40.0, "dance": 45.0}
 BUSY_WAIT_S = 5.0  # how long a 409 busy from the body is retried before giving up
 TERMINAL_KINDS = ("completed", "failed")
 RECEIPT_TERMINAL = ("completed", "failed", "cancelled")
 EVENT_RETRIES = {"progress": 1, "terminal": 3}
 MAX_BODY_BYTES, MAX_OPEN_RUNS, MAX_RUNS = 65536, 10, 200
+
+# Who a typed name means. Everyone Jeanine is called maps to the one name the face index knows.
+TARGETS = {**dict.fromkeys(("grandma", "granny", "gran", "nan", "mum", "mom", "jeanine", "janine"), RESIDENT),
+           "ellis": "Ellis", "henry": "Henry"}
+TRICKS = {"wave": "hello", "dance": "dance"}
+_WHO = "|".join(sorted(TARGETS, key=len, reverse=True))
+_MY = r"(?:(?:my|our)\s+)?"
+_OK = r"(?:ok|okay|alright|all\s+right|fine|safe|well)"
+_FILL = r"^\W*(?:(?:hey|hi|ok|okay|please|annie|can\s+you|could\s+you)\W+)*"  # politeness before a command
+_NAME = re.compile(rf"\b(?:{_WHO})\b", re.I)
+# "tell/ask/remind X <msg>" and "let X know <msg>": everything after X is the message, opaque to the keywords.
+_RELAY = re.compile(rf"\b(?:(tell|ask|remind)\s+{_MY}({_WHO}|her|him|them)\b"
+                    rf"|let\s+{_MY}({_WHO}|her|him|them)\s+know\b)", re.I)
+_VOCATIVE = re.compile(rf"^\W*(?:(?:hi|hey|hello|dear)\s+)?{_MY}({_WHO})\s*[,:;!.–—-]", re.I)  # "Grandma, ..."
+_LEAD_IN = re.compile(r"^[\s,:;.\-–—]*(?:(?:to|that)\b[\s,]*)?", re.I)
+_WELLBEING = re.compile(rf"(?:if|whether|how)\s+(?:she|he|they)(?:['’]s|\s+is|\s+are)"
+                        rf"(?:\s+(?:doing|feeling|today|now|{_OK}))*\W*", re.I)
+# First match wins, in this order. Patterns are command-shaped on purpose: they refer to the person in the third
+# person or stand alone, so an ordinary message ("heat wave coming", "make sure you eat") falls through to relay.
+_INTENTS = (
+    ("wave", re.compile(rf"\bwave\s+(?:at|to|hi|hello)\b|{_FILL}wave\W*$|\bsay\s+(?:hi|hello)\b|\bgreet\b", re.I)),
+    ("dance", re.compile(rf"\bdance\s+(?:for|with)\b|\b(?:do|show|give|perform)\b.*\ba\s+(?:little\s+|happy\s+)?dance\b"
+                         rf"|{_FILL}dance(?:\W+(?:annie|girl|boy|please|now))*\W*$", re.I)),
+    ("checkin", re.compile(rf"\bcheck(?:\s+in)?\s+on\s+{_MY}(?:{_WHO}|her|him|them)\b"
+                           rf"|\b(?:see\s+if|make\s+sure)\s+(?:that\s+)?{_MY}(?:{_WHO}|she|he|they)\b"
+                           rf"|\bis\s+{_MY}(?:{_WHO}|she|he)\s+{_OK}\b"
+                           rf"|\b(?:if|whether)\s+{_MY}(?:{_WHO}|she|he)(?:['’]s|\s+is)\s+{_OK}\b"
+                           rf"|\bhow(?:['’]s|\s+is)\s+{_MY}(?:{_WHO}|she|he)\b", re.I)),
+    ("come", re.compile(rf"{_FILL}come(?:\s+(?:over\s+)?here|\s+to\s+me|\s+on|\s+back)?(?:\W+(?:annie|girl|boy|please))*\W*$"
+                        rf"|{_FILL}(?:(?:go|walk|run|head)\s+(?:over\s+)?to|(?:go\s+(?:and\s+)?)?find)"
+                        rf"\s+{_MY}(?:{_WHO})(?!['’]s)\b", re.I)),
+)
 
 
 class ErrandError(Exception):
@@ -72,9 +123,9 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def phrase_message(author_name: str, text: str) -> str:
-    """The exact line Annie says. Deterministic; the quote is cut so the whole line fits one `say`."""
-    prefix = f"{RESIDENT}, it's Annie. {author_name.strip()} asked me to pass this along: \""
+def phrase_message(author_name: str, text: str, target: str = RESIDENT) -> str:
+    """The exact relay line Annie says. Deterministic; the quote is cut so the whole line fits one `say`."""
+    prefix = f"{target}, it's Annie. {author_name.strip()} asked me to pass this along: \""
     quote = " ".join(text.split())
     room = SAY_MAX_CHARS - len(prefix) - 1
     if len(quote) > room:
@@ -82,17 +133,49 @@ def phrase_message(author_name: str, text: str) -> str:
     return f'{prefix}{quote}"'
 
 
-def interpret_reply(transcript: str | None) -> dict:
+def plan_mission(author_name: str, text: str) -> dict:
+    """Plain language -> one mission, by keyword and pattern match (deterministic; not understanding).
+
+    Returns intent (wave | dance | checkin | relay | come), target (a name for find_person, or None for
+    `come` with nobody named), message (the relayed words, relay only), line (what Annie says),
+    trick (body trick command or None) and listen (whether a reply is awaited).
+    """
+    author, clean = author_name.strip(), " ".join(text.split())
+    named = (TARGETS[m.group(0).lower()] for m in _NAME.finditer(clean))
+    first = next((name for name in named if name.casefold() != author.casefold()), None)  # not the author's own name
+    intent, target, message = None, first or RESIDENT, None
+    relay = _RELAY.search(clean)
+    if relay:
+        said = _LEAD_IN.sub("", clean[relay.end():], count=1).strip()
+        if said:  # a bare "tell grandma" has nothing to pass on; it falls through to the keywords
+            target = TARGETS.get((relay.group(2) or relay.group(3)).lower(), target)  # her/him/them: whoever was named
+            asks_how_she_is = (relay.group(1) or "").lower() == "ask" and _WELLBEING.fullmatch(said)
+            intent, message = ("checkin", None) if asks_how_she_is else ("relay", said)
+    if intent is None:
+        intent = next((name for name, pattern in _INTENTS if pattern.search(clean)), "relay")
+        if intent == "relay":  # an ordinary message: a name inside it is not its recipient unless it opens with one
+            addressed = _VOCATIVE.match(clean)
+            message, target = clean, TARGETS[addressed.group(1).lower()] if addressed else RESIDENT
+        elif intent == "come":
+            target = first
+    line = {"wave": f"Hi {target}! {author} says hello.", "dance": f"{target}, that dance was from {author}!",
+            "checkin": f"Hi {target}, {author} asked me to check on you. Are you alright?", "come": "Here I am.",
+            "relay": phrase_message(author, message or "", target or RESIDENT)}[intent]
+    return {"intent": intent, "target": target, "message": message, "line": line, "trick": TRICKS.get(intent),
+            "listen": intent in ("relay", "checkin")}
+
+
+def interpret_reply(transcript: str | None, who: str = RESIDENT) -> dict:
     """Map what was heard to the terminal payload. Exact-phrase match only; not understanding."""
     heard = (transcript or "").strip()
     if not heard:
         return {"reply": "none", "mood": "neutral", "detail": "Message delivered; no reply heard."}
     intent = classify(heard)
     if intent == "reassurance":
-        return {"reply": "okay", "mood": "happy", "detail": f"{RESIDENT} says okay. 🙂"}
+        return {"reply": "okay", "mood": "happy", "detail": f"{who} says okay. 🙂"}
     if intent == "concern":
-        return {"reply": "concern", "mood": "worried", "detail": f'{RESIDENT} may need help: "{heard}"'}
-    return {"reply": "unclear", "mood": "neutral", "detail": f'{RESIDENT} said: "{heard}"'}
+        return {"reply": "concern", "mood": "worried", "detail": f'{who} may need help: "{heard}"'}
+    return {"reply": "unclear", "mood": "neutral", "detail": f'{who} said: "{heard}"'}
 
 
 def parse_dispatch(raw: bytes) -> dict:
@@ -155,23 +238,39 @@ class Errand:
             await pump
 
     async def _sequence(self, author_name: str, text: str) -> str:
-        self._event("navigating", {"detail": f"Looking for {RESIDENT}."})
-        found = await self.body_command("find_person", {"name": RESIDENT, "timeout_s": FIND_TIMEOUT_S, "approach": True})
+        mission = plan_mission(author_name, text)
+        intent, target, trick, line = mission["intent"], mission["target"], mission["trick"], mission["line"]
+        self.status(f"run {self.tag} mission intent={intent} target={target}")
+        self._event("navigating", {"detail": f"Looking for {target or 'someone'}.", "intent": intent, "target": target})
+        found = await self.body_command("find_person", {"name": target, "timeout_s": FIND_TIMEOUT_S, "approach": True})
         name = str((found.get("identity") or {}).get("name") or "").strip()
-        if not found.get("found") or (name and name.casefold() != RESIDENT.casefold()):
-            return await self._fail(f"Could not find {RESIDENT}.")  # a differently named person is not her
-        self._event("arrived", {"detail": f"Found {RESIDENT}." if name else f"Found someone; assuming it is {RESIDENT}."})
-        line = phrase_message(author_name, text)
+        if not found.get("found") or (target and name and name.casefold() != target.casefold()):
+            return await self._fail(f"Could not find {target or 'anyone'}.")  # a differently named person is not them
+        who = target or name or "someone"
+        self._event("arrived", {"detail": f"Found {who}." if name or not target else f"Found someone; assuming it is {target}."})
+        sent = "not sent"
+        if trick:  # the result is the firmware's acknowledgment, not evidence the motion happened
+            codes = (await self.body_command(trick, {})).get("codes")
+            acked = isinstance(codes, dict) and codes.get(trick) == 0
+            sent = "acknowledged by the robot" if acked else "sent, not acknowledged"
         if not (await self.body_command("say", {"text": line})).get("played"):
             raise ErrandError("Could not play the message on the speaker.")
         self._event("speaking", {"text": line})  # only after playback really finished
+        if not mission["listen"]:
+            walked = f"Annie walked up to {who}." if found.get("approached") else f"Annie found {who} but did not walk up."
+            detail = {"wave": f"Said hello to {who}. Wave command {sent}.", "dance": f"Dance for {who}: command {sent}.",
+                      "come": walked}[intent]
+            self._event("completed", {"detail": detail, "reply": "none", "mood": "happy" if trick else "neutral"})
+            return "completed"
         self._event("listening", {})
         reply = await self.body_command("listen", {"max_s": LISTEN_MAX_S})
         transcript = reply.get("transcript") if reply.get("heard") else None
         transcript = transcript.strip()[:TRANSCRIPT_MAX_CHARS] if isinstance(transcript, str) else ""
         if transcript:
             self._event("heard", {"transcript": transcript})
-        outcome = interpret_reply(transcript)
+        outcome = interpret_reply(transcript, who)
+        if intent == "checkin" and outcome["reply"] == "none":
+            outcome["detail"] = f"Asked {who} if they are alright; no reply heard."
         self.status(f"run {self.tag} reply={outcome['reply']} ({len(transcript)} chars heard)")
         self._event("completed", {"detail": outcome["detail"], "reply": outcome["reply"], "mood": outcome["mood"]})
         return "completed"
@@ -364,14 +463,15 @@ class ErrandService:
                 return 200, {"run_id": run["run_id"], "state": run["state"]}
             if self.open >= MAX_OPEN_RUNS:
                 return 503, {"error": "errand queue is full"}
-            run = {**message, "state": "queued" if self.open else "accepted", "events": []}
+            state = "queued" if self.open else "accepted"  # answered as decided here; the worker may flip it at once
+            run = {**message, "state": state, "events": []}
             self.runs[run["run_id"]] = run
             self.open += 1
             for stale in [k for k, r in self.runs.items() if r["state"] in TERMINAL_KINDS][:max(0, len(self.runs) - MAX_RUNS)]:
                 del self.runs[stale]
             self.loop.call_soon_threadsafe(self.queue.put_nowait, run["run_id"])  # inside the lock: strict FIFO
-        self.status(f"run {run['run_id'][:8]} {run['state']} from {run['author_name']} ({len(run['text'])} chars)")
-        return 202, {"run_id": run["run_id"], "state": run["state"]}
+        self.status(f"run {run['run_id'][:8]} {state} from {run['author_name']} ({len(run['text'])} chars)")
+        return 202, {"run_id": run["run_id"], "state": state}
 
     def _serve(self) -> None:
         asyncio.set_event_loop(self.loop)

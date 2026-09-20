@@ -1018,7 +1018,7 @@ def main(argv=None):
     parser.add_argument("--voice", action="store_true", help="listen for 'Annie, ...' commands on the host mic")
     parser.add_argument("--memory-file", default=".data/hardware/sightings.jsonl")
     parser.add_argument("--spacetime-file", default=".data/hardware/spacetime.jsonl")
-    parser.add_argument("--target", default=os.environ.get("ANNIE_TARGET", "Grandma:red"),
+    parser.add_argument("--target", default=os.environ.get("ANNIE_TARGET", "Jeanine:red"),
                         help="NAME:COLOUR of the person to recognise by shirt colour; empty disables")
     parser.add_argument("--output")
     args = parser.parse_args(argv)

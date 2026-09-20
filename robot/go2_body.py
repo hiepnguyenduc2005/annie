@@ -612,7 +612,7 @@ def main(argv=None):
     parser.add_argument("--ip", type=_private_ipv4, default="192.168.12.1")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8001)
-    parser.add_argument("--target", default=os.environ.get("ANNIE_TARGET", "Grandma:red"),
+    parser.add_argument("--target", default=os.environ.get("ANNIE_TARGET", "Jeanine:red"),
                         help="NAME:COLOUR recognised by shirt colour for find_person; empty disables")
     args = parser.parse_args(argv)
     token = os.environ.get("ANNIE_BODY_TOKEN") or None

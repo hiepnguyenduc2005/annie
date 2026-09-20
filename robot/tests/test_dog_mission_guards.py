@@ -575,3 +575,48 @@ def test_stop_receipt_waits_for_actual_ack_in_idle_and_guarded_wait(monkeypatch,
         assert not task.done() and not dog.disconnected  # stop acknowledgment keeps the server alive
         await task
     asyncio.run(run())
+
+
+def test_paused_runtime_keeps_state_and_frame_annotations_live_without_motion(tmp_path):
+    from test_go2_patrol_greet_runtime import PersonTracker_
+    class AnnotationView(patrol.LiveView):
+        def __init__(self):
+            super().__init__(port=1)  # enable the real perception annotation callback, without binding HTTP
+            self.annotations = []
+        def start(self):
+            return None
+        def annotate(self, img, tracks, mode, ranges, battery, raw=None):
+            self.annotations.append((time.monotonic(), mode, battery, list(tracks)))
+    class SuppliedIdentity:
+        def apply(self, img, tracks):
+            return tracks
+    dog, view, log = FakeDog(), AnnotationView(), []
+    async def run():
+        task = asyncio.create_task(patrol.run_patrol_greet(
+            ip="unused", aes_key=None, conn_factory=lambda *_: dog, tracker=PersonTracker_(),
+            identifier=SuppliedIdentity(), encoder=lambda frame: (b"", 640, 480),
+            speak=lambda text: None, status=log.append, view=view, duration_s=0.35,
+            start_paused=True, source="simulation", faces_dir=tmp_path, frontier_planner=None,
+            rate_hz=100, voxel_min_interval_s=0, idle_trick_s=0))
+        deadline = time.monotonic() + 2
+        while view.state.get("t_s", 0) < 0.05 or not view.state.get("tracks"):
+            assert not task.done() and time.monotonic() < deadline
+            await asyncio.sleep(0.005)
+        first = patrol.telemetry_snapshot(view)["state"]
+        frames = len(view.annotations)
+        await asyncio.sleep(0.07)
+        later = patrol.telemetry_snapshot(view)["state"]
+        assert later["t_s"] > first["t_s"]
+        assert later["battery"] == 55 and later["pose"] == {"x": 0.0, "y": 0.0, "yaw": 0.0}
+        assert later["tracks"][0]["track_id"] == 3
+        assert later["mode"] == "paused" and later["action"] == "hold" and later["paused"]
+        assert len(view.annotations) > frames
+        assert any(mode == "paused" and battery == 55 and tracks for _, mode, battery, tracks in view.annotations)
+        report = await task
+        assert report["reason"] == "duration_complete" and report["paused"]
+        assert not report["greetings"] and not report["checkins"]
+        assert not any(options["api_id"] in (patrol.STAND_UP, patrol.BALANCE_STAND) for _, options in dog.requests)
+        assert all(json.loads(data["parameter"])["x"] == json.loads(data["parameter"])["z"] == 0
+                   for topic, data, _ in dog.sent if topic == patrol.TOPIC_SPORT)
+        assert any("held/paused" in line for line in log)
+    asyncio.run(run())

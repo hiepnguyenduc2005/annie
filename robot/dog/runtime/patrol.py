@@ -1140,7 +1140,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             lidar_state = f"live {report['lidar']['first_ranges']}" if tel["ranges"] is not None else "no voxel maps yet"
         status(f"connected, battery {tel['soc']:.0f}%, camera live, lidar {lidar_state}, "
                f"firmware_avoid={report['firmware_avoid']}, range_obstacle={tel['range_obstacle']}, "
-               f"origin {origin[0]:.2f},{origin[1]:.2f}; patrolling")
+               f"origin {origin[0]:.2f},{origin[1]:.2f}; {'held/paused' if start_paused else 'perception only' if no_motion else 'patrolling'}")
         commanded = not no_motion
         for api in () if no_motion or start_paused else (STAND_UP, BALANCE_STAND):
             for attempt in range(3):  # the firmware answers -1 / nothing while still finishing a previous motion
@@ -1440,7 +1440,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     report["frames"] = res["seq"]
                 elif res["t"] is not None and time.monotonic() - res["t"] > 1.0:
                     tracks = []  # perception stalled: do not act on old boxes
-                perception.set_context(mode=mode, ranges=tel["ranges"], battery=tel["soc"])
+                perception.set_context(mode="paused" if mission_paused else mode, ranges=tel["ranges"], battery=tel["soc"])
                 if recorder is not None and now - rec_last[0] >= 0.2:
                     rec_last[0] = now
                     with contextlib.suppress(Exception):
@@ -1525,6 +1525,14 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     mission_paused = False
                     report["paused"] = mission_paused
                 new_mission = missions.take()
+                # Publish before hold/mission branches continue: pausing motion must not freeze observation.
+                display_mode = "paused" if mission_paused else mode
+                perception.set_context(mode=display_mode, ranges=ranges, battery=tel["soc"])
+                view.update(mode=display_mode, action="hold" if mission_paused else action, paused=mission_paused,
+                            tracks=tracks, ranges=ranges, battery=tel["soc"], t_s=now - start,
+                            pose={"x": tel["pose"][0], "y": tel["pose"][1], "yaw": tel["yaw"]},
+                            greetings=len(report["greetings"]), checkins=len(report["checkins"]), home_m=dist,
+                            fps=diag.rate("processed"))
                 if mission_paused and new_mission is None and missions.executing() is None and instruct_state["receipt"] is None:
                     send_move(0.0, 0.0)
                     await asyncio.sleep(tick)
@@ -1728,9 +1736,6 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                         and (brain_state["last"] is None or now - brain_state["last"] >= brain_period_s):
                     brain_state["busy"] = True
                     threading.Thread(target=brain_think, daemon=True, name="brain").start()
-                view.update(mode=mode, action=action, tracks=tracks, ranges=ranges, battery=tel["soc"], t_s=now - start,
-                            greetings=len(report["greetings"]), checkins=len(report["checkins"]), home_m=dist,
-                            fps=diag.rate("processed"))
                 if action == "patrol" and mission is None and now - last_remark_check >= 5.0 and voice is not None:
                     last_remark_check = now
                     wall = time.time()

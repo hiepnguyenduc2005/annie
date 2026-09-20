@@ -11,7 +11,7 @@ vocabulary, out-of-range arguments, a second motion command while one is
 executing, a stale link or a battery under the floor are refused with a
 reason, never guessed at.
 
-HTTP (default 0.0.0.0:8001; `X-Body-Token` must match `ANNIE_BODY_TOKEN` when set):
+HTTP (default 0.0.0.0:8001, which requires `ANNIE_BODY_TOKEN`; loopback may run without one):
   GET  /status                 link, battery, pose, people currently tracked, current command
   GET  /frame.jpg              latest camera frame (404 before the first frame)
   POST /command                {"command_id"?, "name", "args"} -> 202 receipt; same id -> 200; busy -> 409
@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import hmac
 import json
 import logging
 import math
@@ -117,8 +118,10 @@ def _log(text):
 
 
 def _speak_blocking(text: str) -> bool:
+    # Text goes in on stdin, never as an argument: a line starting with "-" must not become a `say` option.
     try:
-        return subprocess.run(["say", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60).returncode == 0
+        return subprocess.run(["say"], input=text.encode("utf-8"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=60).returncode == 0
     except Exception:
         return False
 
@@ -518,7 +521,7 @@ def make_handler(body: Body, loop: asyncio.AbstractEventLoop, token: str | None)
             self.wfile.write(data)
 
         def _authorized(self):
-            if token and self.headers.get("X-Body-Token") != token:
+            if token and not hmac.compare_digest(self.headers.get("X-Body-Token") or "", token):
                 self._send(401, {"error": "unauthorized"})
                 return False
             return True
@@ -593,13 +596,16 @@ def main(argv=None):
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args(argv)
+    token = os.environ.get("ANNIE_BODY_TOKEN") or None
+    if args.host not in ("127.0.0.1", "localhost", "::1") and not token:
+        parser.error("binding beyond loopback requires ANNIE_BODY_TOKEN (fail closed: anyone on the LAN could move the robot)")
     for key in [k for k in os.environ if k.lower() in ("http_proxy", "https_proxy", "all_proxy")]:
         os.environ.pop(key)
     os.environ["NO_PROXY"] = "*"
     logging.disable(logging.CRITICAL)
     try:
         asyncio.run(run_service(ip=args.ip, aes_key=os.environ.get("UNITREE_AES_128_KEY"), host=args.host,
-                                port=args.port, token=os.environ.get("ANNIE_BODY_TOKEN") or None))
+                                port=args.port, token=token))
     except KeyboardInterrupt:
         _log("interrupted")
         return 130

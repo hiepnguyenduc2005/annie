@@ -13,7 +13,7 @@ between the phone app and the brain is the family message relay
 | --- | --- | --- | --- | --- |
 | `robot/go2_body.py` (dog link: WebRTC, camera, LiDAR, host mic/speaker) | Mac (USB-tethered to the phone hotspot, `en7` 172.20.10.9) | Mac, unchanged (the Mac's Wi-Fi must stay on the venue network; the dog is on the hotspot) | 8001 | dog at 172.20.10.10 |
 | `app_backend` (phone app API, family thread, WebSocket) | Mac | Mac | 8000 | errand `/dispatch` |
-| `robot/go2_errand.py` (errand brain: find → say → listen → report) | Mac | **GX10** | 8002 | body 8001, app_backend 8000 |
+| `robot/go2_errand.py` (errand brain: find → say → listen → report) | Mac | **GX10** | 8010 | body 8001, app_backend 8000 |
 | `robot/robot_backend` planner + vision (`/plan`, `/infer`) | Mac (Ollama / mlx on loopback) | **GX10** (Nemotron/vLLM on its own loopback) | 8004 | — |
 
 Everything is on one LAN: the iPhone Personal Hotspot ("Henry's iPhone",
@@ -30,15 +30,15 @@ The phone app reaches `app_backend` at the Mac's hotspot address.
    export ANNIE_BODY_TOKEN=<shared secret>
    .cache/dimos/.venv/bin/python robot/go2_body.py --ip 172.20.10.10 --host 0.0.0.0 --port 8001
    # app_backend: ANNIE_ALLOWED_HOSTS must include 172.20.10.9 (the Mac) and 172.20.10.11 (the GX10);
-   # ROBOT_BACKEND_URL=http://172.20.10.11:8002  ANNIE_INTERNAL_SECRET=<secret>
+   # ROBOT_BACKEND_URL=http://172.20.10.11:8010  ANNIE_INTERNAL_SECRET=<secret>
    ```
 3. On the GX10, the brain:
    ```sh
    export ANNIE_BODY_URL=http://172.20.10.9:8001 ANNIE_BODY_TOKEN=<shared secret>
    export ANNIE_APP_URL=http://172.20.10.9:8000 ANNIE_INTERNAL_SECRET=<secret>
-   python robot/go2_errand.py --host 0.0.0.0 --port 8002
+   python robot/go2_errand.py --host 0.0.0.0 --port 8010
    ```
-4. Check: `curl http://172.20.10.11:8002/health` from the Mac,
+4. Check: `curl http://172.20.10.11:8010/health` from the Mac,
    `curl -H "X-Body-Token: ..." http://172.20.10.9:8001/status` from the GX10,
    then send a message from the phone app and watch the thread fill.
 

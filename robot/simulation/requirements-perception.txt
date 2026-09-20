@@ -2,3 +2,11 @@
 ultralytics==8.4.150
 faster-whisper==1.2.1
 # yolo11n-pose.pt from https://github.com/ultralytics/assets/releases/tag/v8.3.0 (AGPL-3.0, Ultralytics)
+# Optional face matching (robot/simulation/face_id.py). Library code is MIT
+# (https://github.com/deepinsight/insightface); it runs on onnxruntime CPU.
+insightface==2.0
+onnxruntime==1.30.0
+# Model pack buffalo_sc (det_500m.onnx + w600k_mbf.onnx) from
+# https://github.com/deepinsight/insightface/releases/download/model-zoo/buffalo_sc.zip
+# cached in .cache/insightface/models/ by `python -m robot.simulation.face_id setup`.
+# InsightFace pretrained weights are for NON-COMMERCIAL RESEARCH USE ONLY (InsightFace model card).

@@ -163,10 +163,13 @@ async def run_tricks(names: list[str], *, ip: str, aes_key: str | None, conn_fac
                 return report
             status(f"{name} ({tier}, api {api_id})")
             t0 = loop.time()
-            code = await request(api_id, timeout=8.0)
+            try:
+                code = await request(api_id, timeout=8.0)
+            except asyncio.TimeoutError:
+                code = "no_ack"  # long behaviours (dance, jumps) do not ack within the window; the request was sent
             entry = {"name": name, "api_id": api_id, "code": code, "duration_s": round(loop.time() - t0, 3)}
             report["performed"].append(entry)
-            if code not in (0, None):
+            if code not in (0, None, "no_ack"):
                 report["reason"] = f"trick_rejected:{name}:{code}"
                 return report
             await asyncio.sleep(settle_s if settle_s is not None else SETTLE_S[tier])

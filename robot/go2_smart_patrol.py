@@ -24,6 +24,7 @@ import math
 from collections import deque
 
 INF = float("inf")
+MIN_WALK_MPS = 0.2  # below this the Go2 firmware does not actually walk
 
 
 def quaternion_yaw(q: dict) -> float:
@@ -42,7 +43,12 @@ def voxel_points_world(decoded: dict, meta: dict):
     positions = np.asarray(decoded.get("positions"), dtype=np.uint8)
     if positions.size < 3:
         return np.zeros((0, 3), dtype=np.float32)
-    idx = np.unique(positions[: positions.size - positions.size % 3].reshape(-1, 3), axis=0)
+    # Face vertices repeat voxels; duplicates do not change a minimum range, and np.unique(axis=0)
+    # costs ~100 ms per map (measured live), so keep every fourth vertex instead (one per face).
+    if positions.size >= 12:
+        idx = positions[: positions.size - positions.size % 12].reshape(-1, 4, 3)[:, 0, :]
+    else:
+        idx = positions[: positions.size - positions.size % 3].reshape(-1, 3)
     origin = np.asarray(meta.get("origin", (0.0, 0.0, 0.0)), dtype=np.float32)
     resolution = float(meta.get("resolution", 0.05))
     return origin + (idx.astype(np.float32) + 0.5) * resolution
@@ -63,13 +69,18 @@ def body_frame(points_world, pose_xy, yaw: float):
     return out
 
 
-def sector_ranges(points_body, *, ground_z: float | None = None, band=(0.12, 0.60), half_width_m=0.30,
-                  side_depth_m=0.90, max_range_m=4.0, min_range_m=0.15) -> dict:
+def sector_ranges(points_body, *, ground_z: float | None = None, ground_hint: float | None = None,
+                  band=(0.12, 0.60), half_width_m=0.30, side_depth_m=0.90, max_range_m=4.0, min_range_m=0.15,
+                  min_points=3) -> dict:
     """Nearest obstacle per sector (metres; inf when clear) from body-frame points.
 
-    Floor voxels are dropped by keeping only the band `ground_z + band[0] .. ground_z + band[1]`;
-    when `ground_z` is None it is estimated as the 5th percentile of z within 1.5 m.
-    Points closer than `min_range_m` are the robot itself and are ignored.
+    Floor voxels are dropped by keeping only the band `ground_z + band[0] .. ground_z + band[1]`.
+    When `ground_z` is None it is the 5th percentile of z within 1.5 m, but never below
+    `ground_hint` (the floor from the robot's own pose height): stray below-floor voxels
+    otherwise drag the estimate down and the real floor becomes an "obstacle" that stops
+    the dog in the middle of nowhere. A sector needs at least `min_points` voxels before it
+    reports a range, so one noisy voxel cannot stop the dog either. Points closer than
+    `min_range_m` are the robot itself and are ignored.
     """
     import numpy as np
     pts = np.asarray(points_body, dtype=np.float32).reshape(-1, 3)
@@ -81,31 +92,34 @@ def sector_ranges(points_body, *, ground_z: float | None = None, band=(0.12, 0.6
         if near.shape[0] == 0:
             return result
         ground_z = float(np.percentile(near[:, 2], 5))
+        if ground_hint is not None:
+            ground_z = max(ground_z, float(ground_hint))
     result["ground_z"] = ground_z
     keep = (pts[:, 2] >= ground_z + band[0]) & (pts[:, 2] <= ground_z + band[1])
     obs = pts[keep]
     dist = np.hypot(obs[:, 0], obs[:, 1])
     obs = obs[(dist >= min_range_m) & (dist <= max_range_m)]
     result["points"] = int(obs.shape[0])
-    if obs.shape[0] == 0:
+    result["obstacles_body"] = obs
+    if obs.shape[0] < min_points:
         return result
     ahead = obs[(obs[:, 0] > 0) & (np.abs(obs[:, 1]) <= half_width_m)]
-    if ahead.shape[0]:
-        result["front"] = float(ahead[:, 0].min())
+    if ahead.shape[0] >= min_points:
+        result["front"] = float(np.sort(ahead[:, 0])[min_points - 1])  # the nearest *cluster*, not the nearest voxel
     flank = obs[(obs[:, 0] > -0.1) & (obs[:, 0] <= side_depth_m)]
     left = flank[flank[:, 1] > half_width_m]
     right = flank[flank[:, 1] < -half_width_m]
-    if left.shape[0]:
-        result["left"] = float(left[:, 1].min())
-    if right.shape[0]:
-        result["right"] = float((-right[:, 1]).min())
+    if left.shape[0] >= min_points:
+        result["left"] = float(np.sort(left[:, 1])[min_points - 1])
+    if right.shape[0] >= min_points:
+        result["right"] = float(np.sort(-right[:, 1])[min_points - 1])
     return result
 
 
 class StallDetector:
     """Collision by odometry: commanded forward but the pose stopped progressing."""
 
-    def __init__(self, *, window_s=2.0, min_progress_m=0.10, min_cmd_mps=0.08):
+    def __init__(self, *, window_s=2.0, min_progress_m=0.10, min_cmd_mps=0.18):
         self.window_s = window_s
         self.min_progress_m = min_progress_m
         self.min_cmd_mps = min_cmd_mps
@@ -127,6 +141,177 @@ class StallDetector:
         return False
 
 
+class OccupancyGrid:
+    """Persistent top-down map from the LiDAR voxel maps: obstacle evidence, visited cells, sightings.
+
+    World (odometry) frame, `cell_m` cells over a square `size_m` window centred on the
+    patrol origin. `observe` adds body-height obstacle points (evidence decays slowly so a
+    moved chair fades); `visit` marks the robot's own footprint as known-free; `free_ahead`
+    ray-marches from a pose along a heading to the first known obstacle, which is how the
+    heading bandit knows a sector is a wall before the dog walks into it again.
+    """
+
+    def __init__(self, origin_xy, *, size_m=12.0, cell_m=0.1, decay=0.995, hit=1.0, threshold=2.0):
+        import numpy as np
+        self.np = np
+        self.origin = (float(origin_xy[0]), float(origin_xy[1]))
+        self.cell_m, self.n = cell_m, int(size_m / cell_m)
+        self.decay, self.hit, self.threshold = decay, hit, threshold
+        self.obstacle = np.zeros((self.n, self.n), dtype=np.float32)
+        self.visited = np.zeros((self.n, self.n), dtype=np.uint8)
+        self.trail: list[tuple[float, float]] = []
+        self.marks: list[tuple[float, float, str]] = []
+
+    def _cell(self, x, y):
+        i = int((x - self.origin[0]) / self.cell_m + self.n / 2)
+        j = int((y - self.origin[1]) / self.cell_m + self.n / 2)
+        return i, j
+
+    def _inside(self, i, j):
+        return 0 <= i < self.n and 0 <= j < self.n
+
+    def observe(self, obstacle_points_world):
+        """Add obstacle evidence from world-frame points already filtered to the body-height band."""
+        np = self.np
+        pts = np.asarray(obstacle_points_world, dtype=np.float32).reshape(-1, 3)
+        self.obstacle *= self.decay
+        if pts.shape[0] == 0:
+            return
+        ii = ((pts[:, 0] - self.origin[0]) / self.cell_m + self.n / 2).astype(int)
+        jj = ((pts[:, 1] - self.origin[1]) / self.cell_m + self.n / 2).astype(int)
+        keep = (ii >= 0) & (ii < self.n) & (jj >= 0) & (jj < self.n)
+        np.add.at(self.obstacle, (ii[keep], jj[keep]), self.hit)
+        np.minimum(self.obstacle, 50.0, out=self.obstacle)
+
+    def visit(self, x, y, radius_m=0.25):
+        i0, j0 = self._cell(x, y)
+        r = max(1, int(radius_m / self.cell_m))
+        for i in range(i0 - r, i0 + r + 1):
+            for j in range(j0 - r, j0 + r + 1):
+                if self._inside(i, j):
+                    self.visited[i, j] = 1
+                    self.obstacle[i, j] = 0.0  # the robot is standing here, so it is not a wall
+        if not self.trail or math.dist(self.trail[-1], (x, y)) > 0.1:
+            self.trail.append((float(x), float(y)))
+            self.trail = self.trail[-2000:]
+
+    def mark(self, x, y, kind):
+        self.marks.append((float(x), float(y), kind))
+        self.marks = self.marks[-200:]
+
+    def free_ahead(self, x, y, heading, max_m=4.0) -> float:
+        """Metres along `heading` to the first cell with obstacle evidence above threshold."""
+        step = self.cell_m * 0.5
+        d = 0.0
+        while d < max_m:
+            d += step
+            i, j = self._cell(x + d * math.cos(heading), y + d * math.sin(heading))
+            if not self._inside(i, j):
+                return d
+            if self.obstacle[i, j] >= self.threshold:
+                return d
+        return max_m
+
+    def unvisited_ahead(self, x, y, heading, max_m=3.0) -> float:
+        """Fraction of cells along the heading (up to the first obstacle) that were never visited."""
+        free = min(max_m, self.free_ahead(x, y, heading, max_m))
+        n = max(1, int(free / self.cell_m))
+        unvisited = 0
+        for k in range(1, n + 1):
+            i, j = self._cell(x + k * self.cell_m * math.cos(heading), y + k * self.cell_m * math.sin(heading))
+            if self._inside(i, j) and not self.visited[i, j]:
+                unvisited += 1
+        return unvisited / n
+
+    def render(self, pose_xy=None, yaw=None, target_heading=None, scale=3):
+        """Top-down JPEG: obstacles dark, visited light, trail blue, marks (greet=green, seen=yellow), robot red."""
+        import cv2
+        np = self.np
+        img = np.full((self.n, self.n, 3), 28, dtype=np.uint8)
+        img[self.visited.T > 0] = (60, 60, 60)
+        occ = (self.obstacle.T >= self.threshold)
+        img[occ] = (200, 200, 200)
+        img = cv2.resize(img, (self.n * scale, self.n * scale), interpolation=cv2.INTER_NEAREST)
+        img = cv2.flip(img, 0)  # +y up
+
+        def px(x, y):
+            i, j = self._cell(x, y)
+            return int(i * scale + scale / 2), int(self.n * scale - (j * scale + scale / 2))
+        for a, b in zip(self.trail, self.trail[1:]):
+            cv2.line(img, px(*a), px(*b), (200, 120, 0), 1, cv2.LINE_AA)
+        for x, y, kind in self.marks:
+            cv2.circle(img, px(x, y), 4, (0, 200, 0) if kind == "greet" else (0, 200, 255), -1)
+        if pose_xy is not None:
+            p = px(*pose_xy)
+            cv2.circle(img, p, 5, (0, 0, 255), -1)
+            if yaw is not None:
+                q = px(pose_xy[0] + 0.5 * math.cos(yaw), pose_xy[1] + 0.5 * math.sin(yaw))
+                cv2.line(img, p, q, (0, 0, 255), 2, cv2.LINE_AA)
+            if target_heading is not None:
+                q = px(pose_xy[0] + 0.9 * math.cos(target_heading), pose_xy[1] + 0.9 * math.sin(target_heading))
+                cv2.line(img, p, q, (255, 0, 255), 1, cv2.LINE_AA)
+        cv2.circle(img, px(*self.origin), 4, (255, 255, 255), 1)
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        return buf.tobytes() if ok else None
+
+
+class HeadingBandit:
+    """UCB1 over heading sectors: explore directions that found people, keep trying the untried ones.
+
+    Arms are `n_arms` world-frame heading sectors. `choose(now)` returns the sector with the
+    highest upper confidence bound (untried sectors first), `reward(r)` credits the current arm:
+    1.0 when a person turned up that way, 0.0 when the way was blocked. Rewards decay so the
+    dog re-explores a sector it wrote off a while ago (people move).
+    """
+
+    def __init__(self, n_arms=8, c=0.8, decay=0.985):
+        self.n_arms, self.c, self.decay = n_arms, c, decay
+        self.pulls = [0.0] * n_arms
+        self.value = [0.0] * n_arms
+        self.current = None
+        self.total = 0.0
+
+    def sector_heading(self, arm) -> float:
+        return wrap_angle(2 * math.pi * arm / self.n_arms)
+
+    def arm_for_heading(self, yaw) -> int:
+        return int(round((yaw % (2 * math.pi)) / (2 * math.pi) * self.n_arms)) % self.n_arms
+
+    def ucb(self, arm) -> float:
+        if self.pulls[arm] < 1e-6:
+            return INF
+        return self.value[arm] + self.c * math.sqrt(math.log(self.total + 1.0) / self.pulls[arm])
+
+    def choose(self, exclude=None, prior=None) -> int:
+        """`prior(arm) -> float` adds map knowledge: negative for known walls, positive for unexplored space."""
+        cur = self.current
+        def turn_cost(a):  # prefer sectors near the one we are on: less time spent spinning in place
+            if cur is None:
+                return 0.0
+            d = min(abs(a - cur), self.n_arms - abs(a - cur))
+            return 0.12 * d
+        scores = [(min(self.ucb(a), 3.0) + (prior(a) if prior else 0.0) - turn_cost(a), -abs(a - (cur or 0)), a)
+                  for a in range(self.n_arms) if a != exclude]
+        best = max(scores)[2]
+        self.current = best
+        self.pulls[best] += 1.0
+        self.total += 1.0
+        return best
+
+    def reward(self, r: float, arm=None):
+        arm = self.current if arm is None else arm
+        if arm is None:
+            return
+        for a in range(self.n_arms):
+            self.value[a] *= self.decay
+        n = max(1.0, self.pulls[arm])
+        self.value[arm] += (float(r) - self.value[arm]) / n
+
+    def snapshot(self):
+        return {"current": self.current, "pulls": [round(p, 1) for p in self.pulls],
+                "value": [round(v, 2) for v in self.value]}
+
+
 class PatrolPlanner:
     """Deterministic wander + avoidance + leash. `step` returns (vx, wz, mode)."""
 
@@ -138,6 +323,7 @@ class PatrolPlanner:
         self.leash_m, self.sweep_period_s = leash_m, sweep_period_s
         self.backoff_s, self.backoff_mps, self.min_turn_s = backoff_s, backoff_mps, min_turn_s
         self.k_heading = k_heading
+        self.target_heading = None  # world yaw the cruise steers toward (bandit / brain); None = free sweep
         self.mode = "cruise"
         self.turn_sign = 1.0
         self.mode_since = None
@@ -197,8 +383,14 @@ class PatrolPlanner:
                 vx = self.cruise_mps * max(0.0, math.cos(err)) if abs(err) < math.pi / 2 else 0.0
                 return self._slow(vx, front), wz, "homing"
 
-        # cruise: sweep gently, steer away from a close flank, slow into the front range
-        wz = 0.35 * self.turn_rps * math.sin(2.0 * math.pi * (now_s - self.t0) / self.sweep_period_s)
+        # cruise: steer toward the target heading when there is one, else sweep gently; avoid a close flank
+        if self.target_heading is not None:
+            err = wrap_angle(self.target_heading - yaw)
+            wz = max(-self.turn_rps, min(self.turn_rps, self.k_heading * err))
+            if abs(err) > math.pi / 3:  # far off: turn in place first (creeping is below the walking deadband)
+                return 0.0, math.copysign(self.turn_rps, err), "cruise"
+        else:
+            wz = 0.35 * self.turn_rps * math.sin(2.0 * math.pi * (now_s - self.t0) / self.sweep_period_s)
         if left < self.side_m:
             wz -= 0.5 * self.turn_rps
         if right < self.side_m:
@@ -206,7 +398,8 @@ class PatrolPlanner:
         return self._slow(self.cruise_mps, front), max(-self.turn_rps, min(self.turn_rps, wz)), "cruise"
 
     def _slow(self, vx, front):
+        """Slow into the front range, but never below the walking deadband (the Go2 shuffles in place under ~0.15 m/s)."""
         if front >= self.slow_m:
             return vx
         frac = max(0.0, (front - self.stop_m) / max(1e-6, self.slow_m - self.stop_m))
-        return vx * max(0.35, frac)
+        return max(MIN_WALK_MPS, vx * max(0.35, frac)) if vx > 0 else vx

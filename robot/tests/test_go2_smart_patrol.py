@@ -18,7 +18,8 @@ def test_quaternion_yaw():
 
 
 def test_voxel_points_and_body_frame():
-    decoded = {"positions": np.array([0, 0, 0, 2, 0, 0, 2, 0, 0], dtype=np.uint8)}  # duplicate voxel collapses
+    # two faces of four vertices each; only the first vertex of a face is kept
+    decoded = {"positions": np.array([0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 2, 0, 0, 2, 1, 0, 3, 1, 0, 3, 0, 0], dtype=np.uint8)}
     pts = voxel_points_world(decoded, {"origin": [1.0, 2.0, 0.0], "resolution": 0.5})
     assert pts.shape == (2, 3)
     assert pts[1].tolist() == pytest.approx([1.0 + 2.5 * 0.5, 2.25, 0.25])

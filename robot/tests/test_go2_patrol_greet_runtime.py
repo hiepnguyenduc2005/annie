@@ -112,13 +112,31 @@ class NobodyTracker:
         return []
 
 
-def run(dog, **kw):
+class StraightBandit:
+    """Always explores heading 0 (+x) so the simulated dog drives at the wall."""
+    current, value = 0, [0.0] * 8
+
+    def choose(self, exclude=None, prior=None):
+        return 0
+
+    def sector_heading(self, arm):
+        return 0.0
+
+    def reward(self, r, arm=None):
+        pass
+
+    def snapshot(self):
+        return {}
+
+
+def run(dog, tracker=None, **kw):
     planner = PatrolPlanner(cruise_mps=0.25, turn_rps=0.5, backoff_s=0.03, min_turn_s=0.02, leash_m=50.0)
     stall = StallDetector(window_s=0.05, min_progress_m=0.02)
     return asyncio.run(go2_patrol_greet.run_patrol_greet(
-        ip="10.0.0.99", aes_key=None, conn_factory=lambda ip, key: dog, tracker=NobodyTracker(),
+        ip="10.0.0.99", aes_key=None, conn_factory=lambda ip, key: dog, tracker=tracker or NobodyTracker(),
         encoder=lambda frame: (b"", 640, 480), speak=lambda text: None, status=lambda text: None,
-        planner=planner, stall=stall, rate_hz=200.0, stale_s=0.2, lidar_stale_s=0.2, boundary_m=100.0, **kw))
+        planner=planner, stall=stall, rate_hz=200.0, stale_s=0.2, lidar_stale_s=0.2, boundary_m=100.0,
+        voxel_min_interval_s=0.0, bandit=StraightBandit(), **kw))
 
 
 def test_unseen_obstacle_trips_collision_backoff_and_turn():
@@ -151,3 +169,38 @@ def test_open_floor_keeps_cruising_without_collisions():
     assert report["collisions"] == []
     assert set(report["modes"]) == {"cruise"}
     assert dog.max_x > 0.2
+
+
+class PersonTracker_:
+    """A far, centred person from the first frame; the dog must walk toward them (follow), not crash."""
+
+    def __init__(self):
+        self.updates = 0
+
+    def update(self, jpeg, now_ms):
+        self.updates += 1
+        return [{"track_id": 3, "box": [300, 150, 340, 260], "conf": 0.9, "posture": "upright", "lying_frames": 0,
+                 "kp_conf": [0.9] * 17, "first_seen_ms": now_ms - 1000}]
+
+
+def test_follow_walks_toward_a_person_and_records_follow_mode():
+    dog = FakeDog(wall_x=None)
+    report = run(dog, duration_s=0.4, tracker=PersonTracker_())
+    assert report["reason"] == "duration_complete", report.get("error")
+    assert report["modes"].get("follow", 0) > 0
+    assert dog.max_x > 0.1  # it actually walked
+    assert report["greetings"] == []  # too far/small to greet
+
+
+def test_close_centred_person_is_greeted_with_a_trick():
+    class Close(PersonTracker_):
+        def update(self, jpeg, now_ms):
+            self.updates += 1
+            return [{"track_id": 4, "box": [280, 60, 360, 330], "conf": 0.9, "posture": "upright", "lying_frames": 0,
+                     "kp_conf": [0.9] * 17, "first_seen_ms": now_ms - 1000}]
+    dog = FakeDog(wall_x=None)
+    go2_patrol_greet.GREET_TRICKS[0] = ("hello", 1016, 0.0)
+    report = run(dog, duration_s=0.5, tracker=Close())
+    assert report["reason"] == "duration_complete", report.get("error")
+    assert len(report["greetings"]) == 1 and report["greetings"][0]["trick"] == "hello"
+    assert any(o["api_id"] == 1016 for _, o in dog.requests)

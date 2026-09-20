@@ -31,21 +31,31 @@ import json
 import logging
 import math
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from go2_follow import follow_command  # noqa: E402
+from go2_patrol_brain import SightingMemory, VisionBrain  # noqa: E402
+from go2_perception_pipeline import Diag, Perception  # noqa: E402
+from go2_voice_commands import CommandListener  # noqa: E402
 from go2_probe import extract_lowstate, extract_pose, safe_error  # noqa: E402
-from go2_smart_patrol import (PatrolPlanner, StallDetector, body_frame, quaternion_yaw, sector_ranges,  # noqa: E402
-                              voxel_points_world)
+from go2_smart_patrol import (HeadingBandit, OccupancyGrid, PatrolPlanner, StallDetector, body_frame,  # noqa: E402
+                              quaternion_yaw, sector_ranges, voxel_points_world, wrap_angle)
 from go2_walk import (MIN_OPERATING_SOC_PERCENT, MOTION_INHIBIT_PATH, TOPIC_LOWSTATE, TOPIC_POSE,  # noqa: E402
                       TOPIC_SPORT, _private_ipv4, _status_code)
 
-SCRIPT_VERSION = "go2-patrol-greet/0.2"
+SCRIPT_VERSION = "go2-patrol-greet/0.3"
+BASE_HEIGHT_M = 0.32  # Go2 standing base height above the floor; anchors the LiDAR floor estimate
 STAND_UP, BALANCE_STAND, STOP_MOVE, MOVE, HELLO = 1004, 1002, 1003, 1008, 1016
+# Greeting tricks, one per new person in rotation: (name, sport api id, seconds to let it finish).
+GREET_TRICKS = [("hello", 1016, 4.0), ("dance", 1022, 10.0), ("heart", 1036, 6.0), ("stretch", 1017, 5.0)]
 TOPIC_VOXELS, TOPIC_LIDAR_SWITCH, TOPIC_SPORT_STATE = "rt/utlidar/voxel_map_compressed", "rt/utlidar/switch", "rt/lf/sportmodestate"
 TOPIC_AVOID, AVOID_SWITCH_SET, AVOID_USE_API = "rt/api/obstacles_avoid/request", 1001, 1004
 
@@ -53,33 +63,58 @@ TOPIC_AVOID, AVOID_SWITCH_SET, AVOID_USE_API = "rt/api/obstacles_avoid/request",
 class GreetPolicy:
     """Deterministic greeting decisions from tracker output. No hardware, no model."""
 
-    def __init__(self, *, cooldown_s: float = 30.0, min_height_frac: float = 0.25):
+    def __init__(self, *, cooldown_s: float = 240.0, min_height_frac: float = 0.45, center_frac: float = 0.18,
+                 follow_min_height_frac: float = 0.12, checkin_cooldown_s: float = 60.0):
         self.cooldown_s = cooldown_s
-        self.min_height_frac = min_height_frac
+        self.min_height_frac = min_height_frac  # greet only when the person is this tall in frame (close)
+        self.center_frac = center_frac  # ... and their box centre is within this fraction of the frame centre
+        self.follow_min_height_frac = follow_min_height_frac  # smaller than this is too far to bother following
+        self.checkin_cooldown_s = checkin_cooldown_s
         self.greeted: dict[int, float] = {}
+        self.checked: dict[int, float] = {}
+        self.ignored: dict[int, float] = {}  # track_id -> until; people we are done with for a while
 
-    def step(self, tracks, frame_w, frame_h, *, now_s):
-        """Return ('patrol', None) | ('greet', track_id) | ('checkin', track_id)."""
-        lying = [t for t in tracks if t.get("posture") == "lying" and t.get("lying_frames", 0) >= 2]
-        if lying:
-            return "checkin", lying[0].get("track_id")
-        candidates = []
+    def ignore(self, track_id, *, now_s, for_s=120.0):
+        self.ignored[track_id] = now_s + for_s
+
+    def step(self, tracks, frame_w, frame_h, *, now_s, front_m=None):
+        """Return ('patrol', None) | ('follow', track_id) | ('greet', track_id) | ('checkin', track_id).
+
+        `front_m` is the LiDAR range straight ahead when known: a centred person within 1.1 m
+        is close enough to greet even when the camera crops them (box height under-reads).
+
+        The nearest upright person (tallest box) is followed; they are greeted once they stand
+        close and directly ahead, then followed again until the cooldown lets a new greeting through.
+        """
+        lying = [t for t in tracks if t.get("posture") == "lying" and t.get("lying_frames", 0) >= 6]
+        for t in lying:
+            tid = t.get("track_id")
+            last = self.checked.get(tid)
+            if last is None or now_s - last >= self.checkin_cooldown_s:
+                self.checked[tid] = now_s
+                return "checkin", tid
+        people = []
         for t in tracks:
             tid = t.get("track_id")
-            if tid is None:
+            if tid is None or t.get("posture") == "lying":
                 continue
-            height = (t["box"][3] - t["box"][1]) / float(frame_h)
-            if height < self.min_height_frac:
+            if self.ignored.get(tid, 0.0) > now_s:
                 continue
-            last = self.greeted.get(tid)
-            if last is not None and now_s - last < self.cooldown_s:
+            x1, y1, x2, y2 = t["box"]
+            height = (y2 - y1) / float(frame_h)
+            if height < self.follow_min_height_frac:
                 continue
-            candidates.append((height, tid))
-        if not candidates:
+            offset = abs((x1 + x2) / 2.0 / float(frame_w) - 0.5)
+            people.append((height, offset, tid))
+        if not people:
             return "patrol", None
-        _, tid = max(candidates)
-        self.greeted[tid] = now_s
-        return "greet", tid
+        height, offset, tid = max(people)  # nearest = tallest box
+        last = self.greeted.get(tid)
+        close = height >= self.min_height_frac or (front_m is not None and front_m <= 1.1 and height >= 0.3)
+        if close and offset <= self.center_frac and (last is None or now_s - last >= self.cooldown_s):
+            self.greeted[tid] = now_s
+            return "greet", tid
+        return "follow", tid
 
     @staticmethod
     def greeting_text(track) -> str:
@@ -104,21 +139,200 @@ def _speak_host(text: str):
         subprocess.Popen(["say", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def _encode(frame):
+def _encode(frame, width=480, quality=70):
     import cv2
     img = frame.to_ndarray(format="bgr24")
     h, w = img.shape[:2]
-    if w > 640:
-        img = cv2.resize(img, (640, int(h * 640 / w)))
-    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if w > width:
+        img = cv2.resize(img, (width, int(h * width / w)))
+    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
     return buf.tobytes(), img.shape[1], img.shape[0]
 
 
+def _fast_tracker(conf=0.30, imgsz=352):
+    """Pose tracker at a reduced inference size for low-latency following.
+
+    CPU on purpose: on Apple MPS the ultralytics NMS step hits its 2 s time limit on real
+    frames (measured 3.5 s/frame live vs 36 ms on CPU at 416 px, 2026-09-19).
+    """
+    from robot.simulation.person_tracker import PersonTracker
+    return PersonTracker(conf=conf, device="cpu", imgsz=imgsz)
+
+
+VIEW_HTML = r"""<!doctype html><meta charset="utf-8"><title>Annie live</title>
+<style>body{margin:0;background:#111;color:#eee;font:14px/1.4 -apple-system,Helvetica,sans-serif}
+.wrap{display:flex;gap:16px;padding:12px}img{width:720px;max-width:100%;border-radius:8px;background:#000}
+.panel{min-width:260px}.k{color:#9aa}.big{font-size:22px;font-weight:600}.log{font-family:Menlo,monospace;font-size:12px;white-space:pre-wrap;color:#cfc}
+</style><div class="wrap"><div><img id="f" src="/stream.mjpg"><div style="margin-top:8px"><img id="m" src="/map.jpg" style="width:360px;border-radius:8px;background:#000"><div class="k">LiDAR occupancy map (odom frame): light = obstacle, grey = visited, blue = trail, green = greeted, yellow = people seen, red = dog, magenta = explore heading</div></div></div><div class="panel">
+<div class="big" id="mode">-</div><div><span class="k">battery</span> <span id="bat">-</span> &middot; <span class="k">t</span> <span id="t">-</span>s &middot; <span class="k">home</span> <span id="home">-</span> m</div>
+<div><span class="k">lidar front/left/right</span> <span id="lidar">-</span></div>
+<div><span class="k">perception</span> <span id="fps">-</span> fps</div>
+<div><span class="k">people</span> <span id="people">-</span> &middot; <span class="k">greeted</span> <span id="greet">-</span> &middot; <span class="k">check-ins</span> <span id="chk">-</span></div>
+<div class="log" id="log"></div></div></div>
+<script>
+const g=id=>document.getElementById(id);
+const m=document.getElementById('m');setInterval(()=>{m.src='/map.jpg?'+Date.now()},400);
+setInterval(async()=>{try{const s=await (await fetch('/status.json')).json();
+g('mode').textContent=s.mode+(s.action&&s.action!=='patrol'?' / '+s.action:'');g('bat').textContent=s.battery==null?'-':s.battery.toFixed(0)+'%';
+g('t').textContent=(s.t_s||0).toFixed(0);g('home').textContent=(s.home_m||0).toFixed(2);
+const r=s.ranges||{};const fm=v=>v==null?'clear':v.toFixed(2)+' m';g('lidar').textContent=fm(r.front)+' / '+fm(r.left)+' / '+fm(r.right);
+g('fps').textContent=(s.fps||0).toFixed(1);g('people').textContent=(s.tracks||[]).length;g('greet').textContent=s.greetings;g('chk').textContent=s.checkins;
+g('log').textContent=(s.log||[]).join('\n');}catch(e){}},250);
+</script>"""
+
+SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12), (11, 13), (13, 15), (12, 14), (14, 16)]
+
+
+class LiveView:
+    """Annotated camera + status for the operator's browser; a stdlib HTTP server in a thread. Port 0 disables."""
+
+    def __init__(self, port=8011, host="127.0.0.1", status_lines=12):
+        self.port, self.host = port, host
+        self.state = {"mode": "-", "action": None, "tracks": [], "ranges": None, "battery": None, "t_s": 0.0,
+                      "greetings": 0, "checkins": 0, "home_m": 0.0, "log": []}
+        self.status_lines = status_lines
+        self.jpeg = None
+        self.map_jpeg = None
+        self.lock = threading.Lock()
+        self.new_frame = threading.Condition(self.lock)
+        self.frame_seq = 0
+        self.server = None
+
+    def start(self):
+        if not self.port:
+            return None
+        view = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                if self.path.startswith("/stream.mjpg"):
+                    return self._stream()
+                if self.path.startswith("/map.jpg"):
+                    data = getattr(view, "map_jpeg", None)
+                    return self._send(200, data, "image/jpeg") if data else self._send(404, b"no map yet", "text/plain")
+                if self.path.startswith("/frame.jpg"):
+                    with view.lock:
+                        data = view.jpeg
+                    if data is None:
+                        return self._send(404, b"no frame yet", "text/plain")
+                    return self._send(200, data, "image/jpeg")
+                if self.path.startswith("/status.json"):
+                    with view.lock:
+                        data = json.dumps(view.state).encode()
+                    return self._send(200, data, "application/json")
+                self._send(200, VIEW_HTML.encode(), "text/html; charset=utf-8")
+
+            def _send(self, code, data, ctype):
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def _stream(self):
+                """Push every annotated frame as it is produced (multipart MJPEG); one thread per viewer."""
+                self.send_response(200)
+                self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                seen = -1
+                try:
+                    while True:
+                        with view.new_frame:
+                            if not view.new_frame.wait_for(lambda: view.frame_seq != seen, timeout=2.0):
+                                continue
+                            seen, data = view.frame_seq, view.jpeg
+                        if data is None:
+                            continue
+                        self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                         + str(len(data)).encode() + b"\r\n\r\n" + data + b"\r\n")
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    return
+
+        self.server = ThreadingHTTPServer((self.host, self.port), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return f"http://{self.host}:{self.port}/"
+
+    def log(self, line):
+        with self.lock:
+            self.state["log"] = (self.state["log"] + [line])[-self.status_lines:]
+
+    def update(self, **fields):
+        with self.lock:
+            self.state.update({k: (None if v == float("inf") else v) for k, v in fields.items()})
+            if "ranges" in fields and fields["ranges"]:
+                self.state["ranges"] = {k: (None if v == float("inf") else round(v, 2))
+                                        for k, v in fields["ranges"].items() if k in ("front", "left", "right")}
+
+    def annotate(self, img, tracks, mode, ranges, battery, raw=None):
+        """Draw boxes, keypoints, labels and a status banner; store the JPEG for /frame.jpg."""
+        if not self.port:
+            return
+        try:
+            import cv2
+            out = img.copy()
+            accepted = {t.get("track_id") for t in tracks}
+            for t in raw or []:
+                if t.get("track_id") not in accepted:  # detected but not (yet) trusted: thin grey box
+                    x1, y1, x2, y2 = (int(v) for v in t["box"])
+                    cv2.rectangle(out, (x1, y1), (x2, y2), (140, 140, 140), 1)
+            for t in tracks:
+                x1, y1, x2, y2 = (int(v) for v in t["box"])
+                lying = t.get("posture") == "lying"
+                color = (0, 0, 255) if lying else (0, 220, 0)
+                cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+                name = ((t.get("identity") or {}).get("name")) or f"person {t.get('track_id')}"
+                label = f"{name} {t.get('posture', '')} {t.get('conf', 0):.2f}"
+                cv2.putText(out, label, (x1, max(12, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+                kps = t.get("keypoints") or []
+                kpc = t.get("kp_conf") or []
+                pts = [(int(p[0]), int(p[1])) if (i < len(kpc) and kpc[i] > 0.3) else None for i, p in enumerate(kps)]
+                for a, b in SKELETON:
+                    if a < len(pts) and b < len(pts) and pts[a] and pts[b]:
+                        cv2.line(out, pts[a], pts[b], (255, 200, 0), 1, cv2.LINE_AA)
+                for pnt in pts:
+                    if pnt:
+                        cv2.circle(out, pnt, 2, (255, 255, 0), -1)
+            front = "clear" if not ranges or ranges["front"] == float("inf") else f"{ranges['front']:.2f} m"
+            banner = f"{mode}  front {front}  battery {battery:.0f}%" if battery is not None else mode
+            cv2.rectangle(out, (0, 0), (out.shape[1], 22), (0, 0, 0), -1)
+            cv2.putText(out, banner, (6, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+            ok, buf = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            if ok:
+                with self.new_frame:
+                    self.jpeg, self.frame_seq = buf.tobytes(), self.frame_seq + 1
+                    self.new_frame.notify_all()
+        except Exception:
+            pass
+
+    def stop(self):
+        if self.server:
+            self.server.shutdown()
+
+
 async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw_rps=0.5, boundary_m=2.5,
-                           rate_hz=10.0, stale_s=1.0, min_soc=MIN_OPERATING_SOC_PERCENT, conn_factory=None,
+                           rate_hz=15.0, stale_s=1.0, min_soc=MIN_OPERATING_SOC_PERCENT, conn_factory=None,
                            tracker=None, encoder=_encode, speak=_speak_host, policy=None, status=_say,
-                           planner=None, stall=None, lidar=True, firmware_avoid=False, lidar_stale_s=2.0):
+                           planner=None, stall=None, lidar=True, firmware_avoid=False, lidar_stale_s=2.0,
+                           stop_on_checkin=False, idle_trick_s=45.0, view=None, no_motion=False, diag_every_s=5.0,
+                           imgsz=352, voxel_min_interval_s=0.25, brain=None, brain_period_s=4.0, memory=None,
+                           voice=None, bandit=None):
     loop = asyncio.get_running_loop()
+    view = view or LiveView(port=0)
+    view_url = view.start()
+    if view_url:
+        status(f"live view at {view_url}")
+    _status = status
+
+    def status(text):
+        view.log(text)
+        _status(text)
+
     report = {"script": SCRIPT_VERSION, "source": "hardware", "target_ip": ip, "connection": {"status": "not_started"},
               "battery_soc_start": None, "frames": 0, "moves_sent": 0, "greetings": [], "checkins": [],
               "collisions": [], "modes": {}, "lidar": {"maps": 0, "first_ranges": None, "stale_ticks": 0},
@@ -128,11 +342,17 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                         "Speech is played on the host, not the robot.",
                         "Collision detection = LiDAR voxel sectors + odometry stall; no touch sensors on this robot."]}
     policy = policy or GreetPolicy()
-    planner = planner or PatrolPlanner(cruise_mps=speed_mps, turn_rps=yaw_rps, leash_m=boundary_m * 0.8)
+    planner = planner or PatrolPlanner(cruise_mps=speed_mps, turn_rps=yaw_rps, leash_m=boundary_m * 0.8,
+                                       stop_m=0.45, clear_m=0.8, slow_m=1.0, min_turn_s=0.4)
     stall = stall or StallDetector()
     if tracker is None:
-        from robot.simulation.person_tracker import PersonTracker
-        tracker = PersonTracker(conf=0.35)
+        tracker = _fast_tracker(imgsz=imgsz)
+    diag = Diag()
+    memory = memory or SightingMemory()
+    brain_state = {"decision": None, "until": 0.0, "busy": False, "last": None, "count": 0}
+    voice_state = {"intent": None, "until": 0.0, "count": 0}
+    report["brain"] = {"enabled": brain is not None, "decisions": [], "failures": 0}
+    report["voice"] = {"enabled": voice is not None, "commands": []}
     tel = {"soc": None, "low_t": None, "pose": None, "pose_t": None, "yaw": 0.0, "ranges": None, "ranges_t": None,
            "range_obstacle": None}
     latest = {"frame": None, "seq": 0}
@@ -150,20 +370,66 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         try:
             pose = extract_pose(msg)
             p = pose["position"]
-            tel["pose"], tel["pose_t"] = (p["x"], p["y"]), loop.time()
+            tel["pose"], tel["pose_t"], tel["z"] = (p["x"], p["y"]), loop.time(), p["z"]
             tel["yaw"] = quaternion_yaw(pose["orientation_xyzw"])
         except Exception:
             pass
 
+    voxel_q: queue.Queue = queue.Queue(maxsize=1)
+    grid = {"map": None, "rendered": 0.0}
+
+    def voxel_worker():
+        """Reduce voxel maps to sector ranges off the event loop; newest map wins, at most ~4 Hz."""
+        last = 0.0
+        while not stopped:
+            try:
+                decoded, data, pose, yaw, z = voxel_q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if time.monotonic() - last < voxel_min_interval_s:
+                continue
+            t0 = time.perf_counter()
+            try:
+                world = voxel_points_world(decoded, data)
+                pts = body_frame(world, pose, yaw)
+                floor = None if z is None else z - BASE_HEIGHT_M
+                ranges = sector_ranges(pts, ground_hint=floor)
+                obs = ranges.pop("obstacles_body", None)
+                if grid["map"] is not None and obs is not None and len(obs):
+                    # back to world: rotate body-frame obstacle points by yaw and translate by pose
+                    import numpy as np
+                    c, sn = math.cos(yaw), math.sin(yaw)
+                    wx = pose[0] + c * obs[:, 0] - sn * obs[:, 1]
+                    wy = pose[1] + sn * obs[:, 0] + c * obs[:, 1]
+                    grid["map"].observe(np.stack([wx, wy, obs[:, 2]], axis=1))
+                    grid["map"].visit(pose[0], pose[1])
+                    if time.monotonic() - grid["rendered"] > 0.4 and view.port:
+                        grid["rendered"] = time.monotonic()
+                        view.map_jpeg = grid["map"].render(pose, yaw, planner.target_heading)
+            except Exception:
+                continue
+            tel["ranges"], tel["ranges_t"] = ranges, loop.time()
+            if report["lidar"]["first_ranges"] is None:
+                report["lidar"]["first_ranges"] = {k: (None if v == float("inf") else round(v, 2))
+                                                   for k, v in ranges.items() if k != "points"}
+            diag.sample("voxel_ms", (time.perf_counter() - t0) * 1000)
+            last = time.monotonic()
+
+    threading.Thread(target=voxel_worker, daemon=True, name="voxel").start()
+
     def on_voxels(msg):
-        # The driver already decoded the voxel payload; reduce it to front/left/right ranges in the body frame.
+        # The driver already decoded the voxel payload; hand it to the worker thread (never block the loop).
         try:
             data = msg.get("data") or {}
             decoded = data.get("data")
             if not isinstance(decoded, dict) or tel["pose"] is None:
                 return
-            pts = body_frame(voxel_points_world(decoded, data), tel["pose"], tel["yaw"])
-            tel["ranges"], tel["ranges_t"] = sector_ranges(pts), loop.time()
+            try:
+                voxel_q.put_nowait((decoded, data, tel["pose"], tel["yaw"], tel.get("z")))
+            except queue.Full:
+                with contextlib.suppress(queue.Empty):
+                    voxel_q.get_nowait()
+                voxel_q.put_nowait((decoded, data, tel["pose"], tel["yaw"], tel.get("z")))
             report["lidar"]["maps"] += 1
             if report["lidar"]["first_ranges"] is None:
                 report["lidar"]["first_ranges"] = {k: (None if v == float("inf") else round(v, 2))
@@ -179,6 +445,26 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         except Exception:
             pass
 
+    def convert(frame):
+        """Video frame -> small BGR array (no JPEG round trip)."""
+        import cv2
+        img = frame.to_ndarray(format="bgr24")
+        h, w = img.shape[:2]
+        if w > 480:
+            img = cv2.resize(img, (480, int(h * 480 / w)), interpolation=cv2.INTER_AREA)
+        return img
+
+    def annotate(img, tracks, raw, ctx):
+        view.annotate(img, tracks, ctx.get("mode", "-"), ctx.get("ranges"), ctx.get("battery"), raw=raw)
+
+    if conn_factory is not None and encoder is not _encode:  # tests inject an encoder returning (jpeg, w, h)
+        def convert(frame):  # noqa: F811
+            import numpy as np
+            jpeg, w, h = encoder(frame)
+            return np.zeros((h, w, 3), dtype=np.uint8)
+    perception = Perception(tracker, convert=convert, annotate=annotate if view.port else None, diag=diag,
+                            min_conf=0.45, min_keypoints=4, min_age_ms=250)
+
     async def on_track(track):
         while not stopped:
             try:
@@ -186,6 +472,14 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             except Exception:
                 return
             latest["frame"], latest["seq"] = frame, latest["seq"] + 1
+            perception.submit(frame)
+
+    async def heartbeat():
+        """Event-loop lag: how late a 50 ms sleep wakes up. Big numbers mean something is hogging the loop."""
+        while not stopped:
+            t0 = loop.time()
+            await asyncio.sleep(0.05)
+            diag.sample("loop_lag_ms", max(0.0, (loop.time() - t0 - 0.05) * 1000))
 
     async def request(api_id, priority=False, timeout=5.0):
         options = {"api_id": api_id}
@@ -196,6 +490,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
 
     def send_move(vx, wz):
         nonlocal seq
+        if no_motion:
+            return
         seq += 1
         conn.datachannel.pub_sub.publish_without_callback(
             TOPIC_SPORT, data={"header": {"identity": {"id": seq, "api_id": MOVE}},
@@ -252,7 +548,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         if tel["soc"] < min_soc:
             report["reason"] = "battery_low"
             return report
+        perception.start()
+        heartbeat_task = asyncio.create_task(heartbeat())
         origin = tel["pose"]
+        grid["map"] = OccupancyGrid(origin)
         lidar_state = "waiting" if lidar else "off"
         if lidar:
             deadline = loop.time() + 4
@@ -262,10 +561,17 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         status(f"connected, battery {tel['soc']:.0f}%, camera live, lidar {lidar_state}, "
                f"firmware_avoid={report['firmware_avoid']}, range_obstacle={tel['range_obstacle']}, "
                f"origin {origin[0]:.2f},{origin[1]:.2f}; patrolling")
-        commanded = True
-        for api in (STAND_UP, BALANCE_STAND):
-            code = await request(api)
-            if code not in (0, None):
+        commanded = not no_motion
+        for api in () if no_motion else (STAND_UP, BALANCE_STAND):
+            for attempt in range(3):  # the firmware answers -1 / nothing while still finishing a previous motion
+                try:
+                    code = await request(api, timeout=4.0)
+                except asyncio.TimeoutError:
+                    code = "no_ack"
+                if code in (0, None):
+                    break
+                await asyncio.sleep(1.5)
+            else:
                 report["reason"] = f"stand_failed:{code}"
                 return report
             await asyncio.sleep(1.5)
@@ -278,6 +584,78 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         fw = fh = None
         cmd_vx = 0.0
         mode = "cruise"
+        last_show = start
+        last_diag = start
+        last_seen = {"tid": None, "t": None, "side": 1.0}  # where the followed person was last, for the search turn
+        memory_last_seen = [-1e9]
+        follow_hold = {"tid": None, "since": None}
+        follow_hold_s = 8.0
+        bandit = bandit or HeadingBandit()
+        bandit_state = {"until": 0.0, "rewarded": False}
+        report["bandit"] = None
+
+        async def show(trick_name, trick_api, trick_settle, text):
+            """Stop, speak, perform one firmware trick, let it finish, stand back up. Never raises on a slow ack."""
+            nonlocal cmd_vx, last_show
+            if no_motion:
+                if text:
+                    speak(text)
+                last_show = loop.time()
+                return "no_motion"
+            send_move(0.0, 0.0)
+            with contextlib.suppress(Exception):
+                await request(STOP_MOVE, priority=True, timeout=3.0)
+            if text:
+                speak(text)
+            try:
+                code = await request(trick_api, timeout=8.0)
+            except Exception:
+                code = "no_ack"  # long behaviours (dance) do not ack within the window; the request was sent
+            await asyncio.sleep(trick_settle)
+            with contextlib.suppress(Exception):
+                await request(BALANCE_STAND, timeout=3.0)
+            await asyncio.sleep(1.0)
+            cmd_vx = 0.0
+            last_show = loop.time()
+            stall.update(now_s=loop.time(), pose_xy=tel["pose"], commanded_vx=0.0)
+            return code
+
+        def brain_status():
+            r = tel["ranges"] or {}
+            return {"people": len(perception.latest()["tracks"]), "ranges": r, "home_m": math.dist(origin, tel["pose"]),
+                    "leash_m": planner.leash_m, "battery": tel["soc"], "mode": mode, "greetings": len(report["greetings"])}
+
+        def brain_think():
+            """Runs in a thread: one VLM call, result stored for the control loop."""
+            try:
+                jpeg = view.jpeg if view.port else None
+                now_s = loop.time()
+                decision = brain.decide(jpeg, brain_status(), memory.summary(tel["pose"], tel["yaw"], now=now_s))
+                brain_state["decision"], brain_state["last"] = decision, now_s
+                brain_state["until"] = now_s + decision["seconds"]
+                brain_state["count"] += 1
+                if not decision.get("ok"):
+                    report["brain"]["failures"] += 1
+                report["brain"]["decisions"].append({"t_s": round(now_s - start, 1), **{k: decision[k] for k in
+                                                     ("action", "seconds", "reason") if k in decision},
+                                                     "latency_ms": decision.get("latency_ms")})
+                report["brain"]["decisions"] = report["brain"]["decisions"][-50:]
+                status(f"t={now_s-start:5.1f}s brain: {decision['action']} for {decision['seconds']:.0f}s "
+                       f"({decision.get('reason', '')!r}, {decision.get('latency_ms', '?')} ms)")
+            finally:
+                brain_state["busy"] = False
+
+        def on_voice(cmd, text):
+            voice_state["intent"], voice_state["until"] = cmd["intent"], loop.time() + 12.0
+            voice_state["count"] += 1
+            report["voice"]["commands"].append({"t_s": round(loop.time() - start, 1), "intent": cmd["intent"],
+                                                "text": text[:80]})
+            speak(f"Okay, {cmd['intent'].replace('_', ' ')}.")
+
+        if voice is not None:
+            voice.on_command = on_voice
+            voice.start()
+
         while loop.time() - start < duration_s:
             now = loop.time()
             report["elapsed_s"] = round(now - start, 1)
@@ -292,41 +670,146 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             if dist > boundary_m:
                 report["reason"] = "boundary_exceeded"
                 return report
-            if latest["seq"] != last_seq:
-                last_seq = latest["seq"]
-                jpeg, fw, fh = encoder(latest["frame"])
-                tracks = tracker.update(jpeg, now_ms=int(time.time() * 1000))
-                report["frames"] += 1
-            action, tid = policy.step(tracks, fw or 640, fh or 480, now_s=now) if fw else ("patrol", None)
-            if action == "greet":
-                track = next(t for t in tracks if t.get("track_id") == tid)
-                text = policy.greeting_text(track)
-                send_move(0.0, 0.0)
-                status(f"t={now-start:5.1f}s person (track {tid}) ahead: stopping, Hello, saying {text!r}")
-                code = await request(STOP_MOVE, priority=True, timeout=3.0)
-                speak(text)
-                hello_code = await request(HELLO, timeout=8.0)
-                report["greetings"].append({"t_s": round(now - start, 1), "track_id": tid, "text": text,
-                                            "hello_code": hello_code, "identity": track.get("identity")})
-                await asyncio.sleep(4.0)  # let Hello finish before walking again
-                with contextlib.suppress(Exception):
-                    await request(BALANCE_STAND, timeout=3.0)
-                await asyncio.sleep(1.0)
-                cmd_vx = 0.0
-                stall.update(now_s=loop.time(), pose_xy=tel["pose"], commanded_vx=0.0)
-                continue
-            if action == "checkin":
-                send_move(0.0, 0.0)
-                status(f"t={now-start:5.1f}s person (track {tid}) appears to be lying down: stopping and asking")
-                await request(STOP_MOVE, priority=True, timeout=3.0)
-                speak("Are you okay? Please say okay or help.")
-                report["checkins"].append({"t_s": round(now - start, 1), "track_id": tid})
-                report["reason"] = "checkin_raised"
-                return report  # hand over to the incident flow; do not keep patrolling
+            diag.tick("control")
+            res = perception.latest()
+            if res["seq"] != last_seq:
+                last_seq = res["seq"]
+                tracks, fw, fh = res["tracks"], res["w"], res["h"]
+                report["frames"] = res["seq"]
+            elif res["t"] is not None and time.monotonic() - res["t"] > 1.0:
+                tracks = []  # perception stalled: do not act on old boxes
+            perception.set_context(mode=mode, ranges=tel["ranges"], battery=tel["soc"])
+            if now - last_diag >= diag_every_s:
+                last_diag = now
+                status(f"diag {diag.line()}")
+                view.update(diag=diag.snapshot())
             ranges = tel["ranges"]
             if lidar and (tel["ranges_t"] is None or now - tel["ranges_t"] > lidar_stale_s):
                 ranges = None  # unknown: the planner treats missing sectors as clear, stall detection still covers us
                 report["lidar"]["stale_ticks"] += 1
+            front_now = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
+            action, tid = policy.step(tracks, fw or 640, fh or 480, now_s=now, front_m=front_now) if fw else ("patrol", None)
+            if action in ("follow", "greet") and not bandit_state["rewarded"] and bandit.current is not None:
+                bandit.reward(1.0)  # this heading found someone
+                bandit_state["rewarded"] = True
+            if action == "greet" and memory.greeted_here_recently(tel["pose"], tel["yaw"], now=now, within_s=300.0):
+                action = "follow"  # same spot, same heading, moments ago: that is the person we already greeted
+            if tracks and now - memory_last_seen[0] > 5.0:
+                memory_last_seen[0] = now
+                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="seen", people=len(tracks))
+                grid["map"].mark(tel["pose"][0], tel["pose"][1], "seen")
+            # voice commands: a bounded override of what the dog is doing (guardrails still apply below)
+            intent = voice_state["intent"] if now < voice_state["until"] else None
+            if intent in ("sit", "stand", "dance", "hello", "heart", "stretch"):
+                voice_state["intent"] = None
+                api = {"sit": 1009, "stand": STAND_UP, "dance": 1022, "hello": HELLO, "heart": 1036, "stretch": 1017}[intent]
+                settle = {"sit": 3.0, "stand": 2.0, "dance": 10.0, "hello": 4.0, "heart": 6.0, "stretch": 5.0}[intent]
+                status(f"t={now-start:5.1f}s voice: {intent}")
+                await show(intent, api, settle, None)
+                continue
+            if intent == "stop":
+                send_move(0.0, 0.0)
+                mode = "voice_stop"
+                await asyncio.sleep(tick)
+                continue
+            if intent in ("follow", "approach") and action == "patrol":
+                action = "patrol"  # nobody visible: keep looking (brain/scan), the follow branch takes over when seen
+            if brain is not None and action == "patrol" and not brain_state["busy"] \
+                    and (brain_state["last"] is None or now - brain_state["last"] >= brain_period_s):
+                brain_state["busy"] = True
+                threading.Thread(target=brain_think, daemon=True, name="brain").start()
+            view.update(mode=mode, action=action, tracks=tracks, ranges=ranges, battery=tel["soc"], t_s=now - start,
+                        greetings=len(report["greetings"]), checkins=len(report["checkins"]), home_m=dist,
+                        fps=diag.rate("processed"))
+            if action == "greet":
+                track = next(t for t in tracks if t.get("track_id") == tid)
+                text = policy.greeting_text(track)
+                trick_name, trick_api, trick_settle = GREET_TRICKS[len(report["greetings"]) % len(GREET_TRICKS)]
+                status(f"t={now-start:5.1f}s person (track {tid}) ahead: stopping, {trick_name}, saying {text!r}")
+                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="greet", people=len(tracks), note=trick_name)
+                grid["map"].mark(tel["pose"][0], tel["pose"][1], "greet")
+                code = await show(trick_name, trick_api, trick_settle, text)
+                report["greetings"].append({"t_s": round(now - start, 1), "track_id": tid, "text": text,
+                                            "trick": trick_name, "hello_code": code, "identity": track.get("identity")})
+                continue
+            if action == "checkin":
+                # A lying person is a posture estimate, not a diagnosis: stop, ask, wave, and keep an eye out.
+                status(f"t={now-start:5.1f}s person (track {tid}) appears to be lying down: stopping and asking")
+                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="checkin", people=len(tracks))
+                code = await show("hello", HELLO, 4.0, "Hey, are you alright? Please say okay or help.")
+                report["checkins"].append({"t_s": round(now - start, 1), "track_id": tid, "hello_code": code})
+                if stop_on_checkin:
+                    report["reason"] = "checkin_raised"
+                    return report  # hand over to the incident flow
+                continue
+            if action == "follow":
+                track = next(t for t in tracks if t.get("track_id") == tid)
+                vx, wz, reason = follow_command(track["box"], fw or 640, fh or 480, target_height_frac=0.5,
+                                                too_close_frac=0.8, max_vx=0.45, max_wz=1.0, k_yaw=2.2)
+                cx = (track["box"][0] + track["box"][2]) / 2.0 / float(fw or 640)
+                centred = abs(cx - 0.5) <= 0.18
+                front_m = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
+                if centred and front_m is not None:
+                    # depth from the LiDAR beats box size: keep walking while the way is clear, hold at ~0.8 m
+                    if front_m > 1.1 and reason != "too_close":
+                        vx, reason = max(vx, 0.3), "lidar_far"
+                    elif front_m < 0.75:
+                        vx, reason = 0.0, "lidar_close"
+                if 0.0 < vx < 0.2:
+                    vx = 0.2  # walking deadband: either walk properly or hold
+                last_seen.update(tid=tid, t=now, side=1.0 if cx < 0.5 else -1.0)
+                holding = reason in ("centered", "too_close") or abs(vx) < 0.05
+                if holding and follow_hold["tid"] == tid and follow_hold["since"] is not None:
+                    if now - follow_hold["since"] > follow_hold_s and tid in policy.greeted:
+                        policy.ignore(tid, now_s=now)
+                        status(f"t={now-start:5.1f}s track {tid} is standing still and already greeted: resuming patrol")
+                        follow_hold.update(tid=None, since=None)
+                        mode = "cruise"
+                        send_move(0.0, 0.0)
+                        await asyncio.sleep(tick)
+                        continue
+                elif holding:
+                    follow_hold.update(tid=tid, since=now)
+                else:
+                    follow_hold.update(tid=tid, since=None)
+                if ranges and ranges["front"] < 0.4 and reason != "lidar_far":
+                    vx = min(vx, 0.0)  # LiDAR says something is right there: turn, do not push
+                stalled = stall.update(now_s=now, pose_xy=tel["pose"], commanded_vx=max(vx, 0.0))
+                if stalled:
+                    report["collisions"].append({"t_s": round(now - start, 1), "mode": "follow", "front_m": None})
+                    status(f"t={now-start:5.1f}s COLLISION while following: stopping")
+                    vx = 0.0
+                cmd_vx = max(vx, 0.0)
+                if mode != "follow":
+                    status(f"t={now-start:5.1f}s mode {mode}->follow (track {tid}, {reason})")
+                    mode = "follow"
+                report["modes"]["follow"] = report["modes"].get("follow", 0) + 1
+                send_move(vx, wz)
+                if now - last_print >= 2.0:
+                    last_print = now
+                    status(f"t={now-start:5.1f}s follow track {tid} v={vx:+.2f} w={wz:+.2f} ({reason}) "
+                           f"people={len(tracks)} battery={tel['soc']:.0f}%")
+                await asyncio.sleep(tick)
+                continue
+            if mode == "follow" and last_seen["t"] is not None and now - last_seen["t"] < 2.0 and not tracks:
+                # lost them a moment ago: turn toward where they went instead of wandering off
+                wz = 0.7 * last_seen["side"]
+                cmd_vx = 0.0
+                send_move(0.0, wz)
+                report["modes"]["search"] = report["modes"].get("search", 0) + 1
+                if now - last_print >= 2.0:
+                    last_print = now
+                    status(f"t={now-start:5.1f}s search: lost track {last_seen['tid']}, turning {'left' if wz > 0 else 'right'}")
+                await asyncio.sleep(tick)
+                continue
+            if mode == "follow":
+                mode = "cruise"  # lost them for good: back to the wander planner
+            if idle_trick_s and mode.startswith(("cruise", "brain:")) and now - last_show >= idle_trick_s:
+                trick_name, trick_api, trick_settle = GREET_TRICKS[1 + (len(report["greetings"]) + len(report["checkins"])) % 3]
+                status(f"t={now-start:5.1f}s nobody new for {idle_trick_s:.0f}s: {trick_name} for fun")
+                report.setdefault("idle_tricks", []).append({"t_s": round(now - start, 1), "trick": trick_name,
+                                                             "code": await show(trick_name, trick_api, trick_settle, None)})
+                continue
             stalled = stall.update(now_s=now, pose_xy=tel["pose"], commanded_vx=cmd_vx)
             if stalled:
                 report["collisions"].append({"t_s": round(now - start, 1), "mode": mode,
@@ -334,8 +817,40 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 front = "?" if not ranges else f"{min(ranges['front'], 99.0):.2f}"
                 status(f"t={now-start:5.1f}s COLLISION: no progress while driving (front={front} m); "
                        "backing off and turning")
+            if now >= bandit_state["until"]:  # pick the next heading to explore (UCB over sectors)
+                def prior(a, _g=grid["map"], _p=tel["pose"]):
+                    free = _g.free_ahead(_p[0], _p[1], bandit.sector_heading(a))
+                    if free < 0.7:
+                        return -1.0  # known wall/desk that way
+                    return 0.3 * min(free, 3.0) / 3.0 + 0.5 * _g.unvisited_ahead(_p[0], _p[1], bandit.sector_heading(a))
+                arm = bandit.choose(prior=prior)
+                planner.target_heading = bandit.sector_heading(arm)
+                bandit_state.update(until=now + 8.0, rewarded=False)
+                report["bandit"] = bandit.snapshot()
+                status(f"t={now-start:5.1f}s bandit: explore heading sector {arm} ({math.degrees(planner.target_heading):+.0f} deg)"
+                       f" values={[round(v, 1) for v in bandit.value]}")
             cmd_vx, cmd_wz, new_mode = planner.step(now_s=now, ranges=ranges, pose_xy=tel["pose"], yaw=tel["yaw"],
                                                     origin_xy=origin, stalled=stalled)
+            if new_mode in ("blocked", "backoff") and not bandit_state["rewarded"]:
+                bandit.reward(0.0)  # this heading is a wall
+                bandit_state.update(rewarded=True, until=now + 1.0)  # re-choose soon after clearing
+            decision = brain_state["decision"] if brain is not None and now < brain_state["until"] else None
+            if intent in ("scan", "explore", "go_home") and now < voice_state["until"]:
+                decision = {"action": intent, "ok": True}
+            if decision and new_mode == "cruise":  # guardrail modes (blocked/backoff/homing) always win
+                act = decision["action"]
+                if act in ("turn_left", "turn_right", "scan"):
+                    cmd_vx, cmd_wz = 0.0, (planner.turn_rps if act != "turn_right" else -planner.turn_rps)
+                elif act == "wait":
+                    cmd_vx, cmd_wz = 0.0, 0.0
+                elif act == "go_home":
+                    err = wrap_angle(math.atan2(origin[1] - tel["pose"][1], origin[0] - tel["pose"][0]) - tel["yaw"])
+                    cmd_wz = max(-planner.turn_rps, min(planner.turn_rps, 1.2 * err))
+                    cmd_vx = planner.cruise_mps if abs(err) < math.pi / 3 else 0.0
+                    if dist < 0.4:
+                        cmd_vx, cmd_wz = 0.0, 0.0
+                # explore / approach: the planner's cruise velocities (already obstacle-aware)
+                new_mode = f"brain:{act}"
             if new_mode != mode:
                 front = "?" if not ranges else f"{min(ranges['front'], 99.0):.2f}"
                 status(f"t={now-start:5.1f}s mode {mode}->{new_mode} (front={front} m, home={dist:.2f} m)")
@@ -356,6 +871,11 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         report["error"] = safe_error(exc)
     finally:
         stopped = True
+        perception.stop()
+        if voice is not None:
+            voice.stop()
+        view.stop()
+        report["diag"] = diag.snapshot()
         if conn is not None and report["connection"]["status"] == "connected":
             if commanded:
                 report["stop"]["requested"] = True
@@ -379,14 +899,24 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Patrol a slow circle and greet people (supervised).")
     parser.add_argument("--ip", type=_private_ipv4, default="192.168.12.1")
     parser.add_argument("--duration", type=float, default=300.0)
-    parser.add_argument("--speed", type=float, default=0.25, help="m/s, at most 0.4")
+    parser.add_argument("--speed", type=float, default=0.35, help="m/s, at most 0.45")
     parser.add_argument("--boundary", type=float, default=2.5)
     parser.add_argument("--no-lidar", action="store_true", help="skip the voxel-map sector ranges (stall detection only)")
     parser.add_argument("--firmware-avoid", action="store_true", help="also switch on the firmware obstacle-avoid service")
+    parser.add_argument("--stop-on-checkin", action="store_true", help="end the run after the first lying-person check-in")
+    parser.add_argument("--idle-trick", type=float, default=45.0, help="seconds without a new person before a trick; 0 disables")
+    parser.add_argument("--view-port", type=int, default=8011, help="live camera/boxes page on 127.0.0.1; 0 disables")
+    parser.add_argument("--no-motion", action="store_true", help="perception-only: never move or perform tricks")
+    parser.add_argument("--imgsz", type=int, default=352, help="tracker inference size (multiple of 32)")
+    parser.add_argument("--diag-every", type=float, default=5.0, help="seconds between diagnostic lines")
+    parser.add_argument("--brain", action="store_true", help="let the local VLM propose patrol moves (guardrails stay)")
+    parser.add_argument("--brain-period", type=float, default=4.0)
+    parser.add_argument("--voice", action="store_true", help="listen for 'Annie, ...' commands on the host mic")
+    parser.add_argument("--memory-file", default=".data/hardware/sightings.jsonl")
     parser.add_argument("--output")
     args = parser.parse_args(argv)
-    if not 0.05 <= args.speed <= 0.4:
-        parser.error("--speed must be 0.05-0.4")
+    if not 0.05 <= args.speed <= 0.45:
+        parser.error("--speed must be 0.05-0.45")
     if MOTION_INHIBIT_PATH.exists():
         _say("physical motion inhibited by the active hardware task")
         return 2
@@ -397,7 +927,13 @@ def main(argv=None):
     try:
         report = asyncio.run(run_patrol_greet(ip=args.ip, aes_key=os.environ.get("UNITREE_AES_128_KEY"),
                                               duration_s=args.duration, speed_mps=args.speed, boundary_m=args.boundary,
-                                              lidar=not args.no_lidar, firmware_avoid=args.firmware_avoid))
+                                              lidar=not args.no_lidar, firmware_avoid=args.firmware_avoid,
+                                              stop_on_checkin=args.stop_on_checkin, idle_trick_s=args.idle_trick,
+                                              view=LiveView(port=args.view_port), no_motion=args.no_motion,
+                                              imgsz=args.imgsz, diag_every_s=args.diag_every,
+                                              brain=VisionBrain() if args.brain else None, brain_period_s=args.brain_period,
+                                              memory=SightingMemory(args.memory_file),
+                                              voice=CommandListener(lambda c, t: None, status=_say) if args.voice else None))
     except KeyboardInterrupt:
         _say("interrupted")
         return 130
@@ -405,7 +941,11 @@ def main(argv=None):
     if args.output:
         Path(args.output).write_text(payload + "\n", encoding="utf-8")
     print(payload, flush=True)
-    _say(f"{report['reason']} greetings={len(report['greetings'])} collisions={len(report['collisions'])} "
+    _say(f"diag {json.dumps(report.get('diag'))}")
+    _say(f"brain decisions={len(report['brain']['decisions'])} failures={report['brain']['failures']} "
+         f"voice commands={len(report['voice']['commands'])}")
+    _say(f"{report['reason']} greetings={len(report['greetings'])} checkins={len(report['checkins'])} "
+         f"idle_tricks={len(report.get('idle_tricks', []))} collisions={len(report['collisions'])} "
          f"lidar_maps={report['lidar']['maps']} modes={report['modes']} frames={report['frames']} "
          f"moves={report['moves_sent']} stop_ack={report['stop']['ack_ms']} ms")
     sys.stdout.flush(); sys.stderr.flush()

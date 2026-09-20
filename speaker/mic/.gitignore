@@ -1,0 +1,6 @@
+# Per-machine signing config and Xcode/build output
+Local.xcconfig
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/

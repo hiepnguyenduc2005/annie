@@ -28,13 +28,22 @@ export ROBOT_BACKEND_URL="http://127.0.0.1:8010" ANNIE_FAMILY_MOCK_ROBOT=false
 export ANNIE_BODY_URL="http://127.0.0.1:8011" ANNIE_APP_URL="http://127.0.0.1:$APP_PORT"
 
 pids=()
-cleanup() { echo; echo "stopping..."; for p in "${pids[@]}"; do kill -INT "$p" 2>/dev/null || true; done; sleep 4; for p in "${pids[@]}"; do kill -9 "$p" 2>/dev/null || true; done; }
+cleanup() { echo; echo "stopping..."; pkill -INT -f "go2_patrol_greet.py --ip" 2>/dev/null || true; for p in "${pids[@]}"; do kill -INT "$p" 2>/dev/null || true; done; sleep 4; pkill -9 -f "go2_patrol_greet.py --ip" 2>/dev/null || true; for p in "${pids[@]}"; do kill -9 "$p" 2>/dev/null || true; done; }
 trap cleanup EXIT INT TERM
 
 .venv/bin/uvicorn app_backend.app.main:app --host 0.0.0.0 --port $APP_PORT --no-proxy-headers > "$LOGS/app.log" 2>&1 & pids+=($!)
 .venv/bin/python robot/go2_errand.py --host 127.0.0.1 --port 8010 > "$LOGS/errand.log" 2>&1 & pids+=($!)
-.cache/dimos/.venv/bin/python robot/go2_patrol_greet.py --ip "$DOG_IP" --duration "$DURATION" --brain --voice --speed 0.4 \
-  --output "$LOGS/patrol-$(date +%Y%m%d-%H%M).json" > "$LOGS/patrol.log" 2>&1 & pids+=($!)
+dog_loop() {  # relaunch the dog process whenever it exits (link drop, battery floor is final though)
+  while true; do
+    until ping -c 1 -W 1 "$DOG_IP" >/dev/null 2>&1; do sleep 3; done
+    .cache/dimos/.venv/bin/python robot/go2_patrol_greet.py --ip "$DOG_IP" --duration "$DURATION" --brain --voice --speed 0.4 \
+      --output "$LOGS/patrol-$(date +%Y%m%d-%H%M%S).json" >> "$LOGS/patrol.log" 2>&1 || true
+    grep -q "battery_low" "$LOGS/patrol.log" 2>/dev/null && tail -1 "$LOGS/patrol.log" | grep -q battery_low && { echo "battery floor reached: charge the dog"; return; }
+    echo "dog process exited $(date +%H:%M:%S); waiting for the link to relaunch"
+    sleep 5
+  done
+}
+dog_loop & pids+=($!)
 
 sleep 6
 echo "phone app     -> http://$MAC_HOTSPOT_IP:$APP_PORT  (POST /api/messages; needs the phone on the same hotspot)"

@@ -72,8 +72,8 @@ def body_frame(points_world, pose_xy, yaw: float):
 
 
 def sector_ranges(points_body, *, ground_z: float | None = None, ground_hint: float | None = None,
-                  band=(0.12, 0.60), half_width_m=0.30, side_depth_m=0.90, max_range_m=4.0, min_range_m=0.15,
-                  min_points=3) -> dict:
+                  band=(0.10, 0.75), half_width_m=0.34, side_depth_m=0.90, max_range_m=4.0, min_range_m=0.15,
+                  min_points=2) -> dict:
     """Nearest obstacle per sector (metres; inf when clear) from body-frame points.
 
     Floor voxels are dropped by keeping only the band `ground_z + band[0] .. ground_z + band[1]`.

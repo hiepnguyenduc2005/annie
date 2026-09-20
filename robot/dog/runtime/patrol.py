@@ -553,8 +553,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                         "Collision detection = LiDAR voxel sectors + odometry stall; no touch sensors on this robot."]}
     policy = policy or GreetPolicy()
     planner = planner or PatrolPlanner(cruise_mps=speed_mps, turn_rps=yaw_rps, leash_m=boundary_m * 0.8,
-                                       stop_m=0.45, clear_m=0.8, slow_m=1.0, min_turn_s=0.4)
+                                       stop_m=0.6, clear_m=0.95, slow_m=1.4, min_turn_s=0.4)  # earlier stop: the map is 1-2 Hz
     stall = stall or StallDetector()
+    guard_state = {"cam_log": 0.0}
     if tracker is None:
         tracker = _fast_tracker(imgsz=imgsz)
     diag = Diag()
@@ -1050,6 +1051,26 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             if lidar and (tel["ranges_t"] is None or now - tel["ranges_t"] > lidar_stale_s):
                 ranges = None  # unknown: the planner treats missing sectors as clear, stall detection still covers us
                 report["lidar"]["stale_ticks"] += 1
+            map_age = None if tel["ranges_t"] is None else now - tel["ranges_t"]
+            # camera guard: a detected object filling most of the frame height with its bottom near the frame's
+            # bottom edge is right at the nose, whatever the LiDAR band says (chair seats, boxes, low tables)
+            cam_block = None
+            try:
+                latest_res = perception.latest()
+                fh_ = fh or 480
+                for o in latest_res.get("objects") or []:
+                    x1, y1, x2, y2 = o["box"]
+                    if (y2 - y1) > 0.55 * fh_ and y2 > 0.85 * fh_ and o.get("hits", 1) >= 2:
+                        cam_block = o.get("label")
+                        break
+            except Exception:
+                cam_block = None
+            if cam_block is not None and mode not in ("follow", "greet"):
+                ranges = dict(ranges or {"left": float("inf"), "right": float("inf")})
+                ranges["front"] = min(ranges.get("front", float("inf")), 0.4)
+                if now - guard_state.get("cam_log", 0.0) > 5.0:
+                    guard_state["cam_log"] = now
+                    status(f"t={now-start:5.1f}s camera guard: {cam_block} fills the view, treating the front as 0.4 m")
             front_now = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
             action, tid = policy.step(tracks, fw or 640, fh or 480, now_s=now, front_m=front_now) if fw else ("patrol", None)
             # ---- missions from the family app (body-command shape); they pre-empt greeting and idle tricks
@@ -1443,6 +1464,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                        f" values={[round(v, 1) for v in bandit.value]}")
             cmd_vx, cmd_wz, new_mode = planner.step(now_s=now, ranges=ranges, pose_xy=tel["pose"], yaw=tel["yaw"],
                                                     origin_xy=origin, stalled=stalled)
+            if cmd_vx > 0 and (map_age is None or map_age > 0.8):  # old or no map: creep, do not cruise blind
+                cmd_vx = min(cmd_vx, 0.2)
             if new_mode in ("blocked", "backoff") and not bandit_state["rewarded"]:
                 bandit.reward(0.0)  # this heading is a wall
                 bandit_state.update(rewarded=True, until=now + 1.0)  # re-choose soon after clearing

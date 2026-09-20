@@ -133,3 +133,22 @@ sequence the five supported tricks by execution receipts, and summarize stack
 status. Each step reports measured elapsed time and has a bounded wait. A trick
 is an optional planner action for celebrating a reassured resident; execution
 still uses the simulator's motion gates. These are simulator workflows only.
+
+## Situated agent in the dog process (2026-09-20)
+
+- Natural-language instructions reach the dog as the body command `instruct {text, author}` (from the
+  command-center page, the family app via the errand, or any client of `POST /command`). The dog process
+  builds a *situation* (pose, people and objects with distance/bearing/age from the spatio-temporal graph,
+  under-cover state, recent greetings, memory sentences), asks the configured inference provider
+  (`robot/dog/inference.py`, text only, no camera frames) for a JSON plan over the skill set
+  (`find_person, say, listen, turn, walk, hello, dance, heart, stretch, sit, stand, patrol, go_home, stop`),
+  validates every step against the body contract, fills in social steps the model dropped from the keyword
+  rules, and runs the steps one after another as child receipts of the instruct mission. Without a model the
+  keyword rules alone handle greet/tell/check/turn/walk/home/explore/sit/stand/dance/stop.
+- Greetings use memory: no repeat within 5 min for the same name or the same spot (1.2 m); the line is
+  composed by the model from the situation (fallback: a fixed line) and the dog lifts its nose (body pitch)
+  before waving so the face is in frame. Greetings are a wave only; idle tricks are off (exploration instead).
+- The dog remarks on new objects/people it just placed in the graph (rate limited, never repeats).
+- `turn(degrees)` and `walk(metres)` are odometry-closed steps; `walk` stops at obstacles (< 0.45 m).
+  A requested `dance` is refused when something is closer than 0.5 m ahead.
+- Turn-in-place commands never go below 0.8 rad/s and reverses never below 0.2 m/s (Go2 deadbands).

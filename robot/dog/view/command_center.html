@@ -134,7 +134,7 @@
     <button onclick="act('hello')">Wave</button>
     <button onclick="act('dance')">Dance</button>
     <button class="danger" onclick="act('stop')">Stop</button>
-    <form class="say" onsubmit="return say(event)"><input type="text" id="saytext" placeholder="Say something through Annie…" maxlength="200" /><button type="submit">Say</button></form>
+    <form class="say" onsubmit="return say(event)"><input type="text" id="saytext" placeholder="Tell Annie what to do… (e.g. go back and greet the person behind you)" maxlength="300" /><button type="submit">Send</button></form>
     <span class="toast" id="toast"></span>
   </div>
   <footer><span>Software stop: cancels the mission and sends StopMove; it is not a hardware emergency stop.</span>
@@ -153,8 +153,8 @@
   };
   window.say = function (e) {
     e.preventDefault(); var text = $("saytext").value.trim(); if (!text) return false;
-    fetch("/command", { method: "POST", headers: headers, body: JSON.stringify({ name: "say", args: { text: text } }) })
-      .then(function (r) { return r.json().then(function (j) { toast(r.status === 202 ? "queued" : (j.error || ("refused " + r.status)), r.status !== 202); }); })
+    fetch("/command", { method: "POST", headers: headers, body: JSON.stringify({ name: "instruct", args: { text: text, author: "operator" } }) })
+      .then(function (r) { return r.json().then(function (j) { toast(r.status === 202 ? "planning…" : (j.error || ("refused " + r.status)), r.status !== 202); }); })
       .catch(function () { toast("not reachable", true); });
     $("saytext").value = ""; return false;
   };
@@ -263,6 +263,11 @@
   $("fade").oninput = function () { historyS = sliderToSeconds(+this.value); $("fadelabel").textContent = "history " + fmtHistory(historyS); };
   $("fade").onchange = function () { pollGraph(); };
   window.addEventListener("resize", resize);
+  var DOT = (function () { // round, soft-edged sprite so points read as dots, not squares
+    var c = document.createElement("canvas"); c.width = c.height = 64; var ctx = c.getContext("2d");
+    var g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.55, "rgba(255,255,255,0.95)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64); var t = new THREE.CanvasTexture(c); return t;
+  })();
   function heightColor(z, zmin, zmax) { // low: blue, mid: green/yellow, high: red (the costmap look)
     var u = Math.min(1, Math.max(0, (z - zmin) / Math.max(0.2, zmax - zmin))), c = new THREE.Color();
     c.setHSL((1 - u) * 0.66, 0.85, 0.5); return c;
@@ -288,7 +293,7 @@
     var pos = new Float32Array(pts.length * 3);
     pts.forEach(function (p, i) { pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2]; });
     var g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    points = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.04, color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false })); scene.add(points);
+    points = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.05, map: DOT, color: 0xffffff, transparent: true, opacity: 0.5, alphaTest: 0.05, depthWrite: false })); scene.add(points);
   }
   var blocks = null, blockCell = 0.2;
   function setBlocks(vox, now) { // remembered geometry from the knowledge graph as small dots: height colour, fading with age
@@ -302,7 +307,7 @@
       var c = ageFade(heightColor(v[2], zmin, zmax), v[5] != null ? now - v[5] : 0); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
     });
     var g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    blocks = new THREE.Points(g, new THREE.PointsMaterial({ size: blockCell * 0.55, vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+    blocks = new THREE.Points(g, new THREE.PointsMaterial({ size: blockCell * 0.7, map: DOT, vertexColors: true, transparent: true, opacity: 0.95, alphaTest: 0.05, depthWrite: false }));
     scene.add(blocks);
   }
   function setTrail() {
@@ -321,11 +326,36 @@
     var s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false })); s.scale.set(w / 190, 44 / 190, 1); return s;
   }
   var PERSON = new THREE.Color(0x5ac8f0), OBJECT = new THREE.Color(0xf5c400), DOWN = new THREE.Color(0xe03131);
+  // rough real-world footprints [length, width, height] in metres per COCO label: the detector gives a bearing and
+  // a range, not a size, so the boxes show "about this big", like the dimOS scene view
+  var SIZES = { person: [0.5, 0.5, 1.7], chair: [0.5, 0.5, 0.9], couch: [1.8, 0.9, 0.8], bed: [2.0, 1.5, 0.5], "dining table": [1.2, 0.8, 0.75],
+    table: [1.2, 0.8, 0.75], tv: [1.0, 0.15, 0.6], laptop: [0.35, 0.25, 0.03], backpack: [0.35, 0.25, 0.45], handbag: [0.3, 0.15, 0.25],
+    suitcase: [0.5, 0.25, 0.7], bottle: [0.08, 0.08, 0.25], cup: [0.09, 0.09, 0.1], remote: [0.16, 0.05, 0.02], book: [0.22, 0.15, 0.03],
+    "cell phone": [0.15, 0.07, 0.01], "potted plant": [0.3, 0.3, 0.6], refrigerator: [0.7, 0.7, 1.8], microwave: [0.5, 0.4, 0.3], oven: [0.6, 0.6, 0.9],
+    sink: [0.6, 0.5, 0.2], toilet: [0.4, 0.7, 0.8], clock: [0.3, 0.05, 0.3], vase: [0.15, 0.15, 0.3], umbrella: [0.9, 0.9, 0.1], dog: [0.7, 0.3, 0.4], cat: [0.4, 0.2, 0.25],
+    keyboard: [0.45, 0.15, 0.03], mouse: [0.1, 0.06, 0.04], "teddy bear": [0.3, 0.2, 0.35], scissors: [0.2, 0.08, 0.01], toothbrush: [0.2, 0.02, 0.02] };
+  function sizeFor(e) {
+    var s = SIZES[(e.label || "").toLowerCase()] || (e.kind === "person" ? SIZES.person : [0.3, 0.3, 0.3]);
+    if (e.kind === "person" && e.posture === "lying") return [1.7, 0.6, 0.3];
+    return s;
+  }
+  function wireBox(size, color, opacity) {
+    var geo = new THREE.BoxGeometry(size[0], size[1], size[2]);
+    var group = new THREE.Group();
+    group.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: opacity })));
+    group.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: opacity * 0.12, depthWrite: false })));
+    return group;
+  }
   function setEntities(ents, now) { // graph entities: a fading trail per person/object plus a small marker + label at the last sighting
-    markers.forEach(function (m) { scene.remove(m); if (m.geometry) m.geometry.dispose(); }); markers = [];
+    markers.forEach(function (m) { scene.remove(m); if (m.geometry) m.geometry.dispose(); if (m.children) m.children.forEach(function (c) { if (c.geometry) c.geometry.dispose(); }); }); markers = [];
     var shown = 0, labelled = 0, MAX_LABELS = 4;
     var list = (ents || []).filter(function (e) { return e.last_seen != null && now - e.last_seen <= historyS; })
       .sort(function (a, b) { return (b.identity ? 1 : 0) - (a.identity ? 1 : 0) || b.last_seen - a.last_seen; });
+    // tracker ids churn: unnamed people (and same-label objects) within 0.7 m of a fresher one are the same thing
+    var kept = []; list = list.filter(function (e) {
+      var dup = kept.some(function (k) { return k.kind === e.kind && (k.identity || null) === (e.identity || null) && (e.kind !== "object" || k.label === e.label) && Math.hypot(k.x - e.x, k.y - e.y) < 0.7; });
+      if (!dup) kept.push(e); return !dup;
+    });
     list.forEach(function (e) {
       var person = e.kind !== "object", down = e.posture === "lying", base = down ? DOWN : (person ? PERSON : OBJECT);
       var track = (e.track || []).filter(function (s) { return now - s[0] <= historyS; });
@@ -334,15 +364,17 @@
         track.forEach(function (s, i) { pos[i * 3] = s[1]; pos[i * 3 + 1] = s[2]; pos[i * 3 + 2] = 0.12; var c = ageFade(base, now - s[0]); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; });
         var g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.BufferAttribute(col, 3));
         var line = new THREE.Line(g, new THREE.LineBasicMaterial({ vertexColors: true })); scene.add(line); markers.push(line);
-        var dots = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.06, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false })); scene.add(dots); markers.push(dots);
+        var dots = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.08, map: DOT, vertexColors: true, transparent: true, opacity: 0.9, alphaTest: 0.05, depthWrite: false })); scene.add(dots); markers.push(dots);
       }
-      var h = person ? (down ? 0.25 : 0.7) : 0.25, r = person ? 0.09 : 0.08, age = now - e.last_seen, u = Math.min(1, age / historyS);
-      var mk = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 10), new THREE.MeshLambertMaterial({ color: base, transparent: true, opacity: 0.9 - 0.8 * u }));
-      mk.rotation.x = Math.PI / 2; mk.position.set(e.x, e.y, h / 2); scene.add(mk); markers.push(mk);
+      var size = sizeFor(e), h = size[2], age = now - e.last_seen, u = Math.min(1, age / historyS);
+      var mk = wireBox(size, base, 0.95 - 0.85 * u); mk.position.set(e.x, e.y, h / 2);
+      if (lastPose) mk.rotation.z = Math.atan2(e.y - lastPose[1], e.x - lastPose[0]); // long side faces the dog: we only know a bearing
+      scene.add(mk); markers.push(mk);
       shown++;
       if (labelled >= MAX_LABELS && !e.identity && !down) return; // tracker ids churn: label the named, the fallen and the freshest few
       labelled++;
       var name = e.identity || e.label || (person ? "person" : "object"), ago = age < 3 ? "" : " · " + (age < 90 ? Math.round(age) + " s" : Math.round(age / 60) + " min");
+      if (e.n_seen) name += " (" + e.n_seen + "x)";
       var sp = labelSprite(name + ago, down); sp.position.set(e.x, e.y, h + 0.25); scene.add(sp); markers.push(sp);
     });
     $("entities").textContent = shown;
@@ -407,6 +439,8 @@
     (t.voice && t.voice.commands || []).forEach(function (v) { rows.push([v.t_s, "voice", v.intent + (v.text ? ' "' + v.text + '"' : "")]); });
     (t.greetings || []).forEach(function (g) { rows.push([g.t_s, "greet", (g.name ? g.name + ": " : "") + (g.text || "")]); });
     (t.checkins || []).forEach(function (c) { rows.push([c.t_s, "checkin", "someone is down: asked if they are alright"]); });
+    (t.instructions || []).forEach(function (i) { rows.push([i.t_s, "instruct", '"' + i.text + '" → ' + (i.steps || []).join(", ") + (i.reply ? ' — "' + i.reply + '"' : "")]); });
+    (t.remarks || []).forEach(function (r) { rows.push([r.t_s, "remark", r.text]); });
     (t.collisions || []).forEach(function (c) { rows.push([c.t_s, "collision", c.mode + (c.front_m != null ? " at " + c.front_m + " m" : "")]); });
     (t.graph_sentences || []).forEach(function (g, i) { rows.push([s.t_s - i * 0.001, "memory", g]); });
     (s.log || []).forEach(function (l) { var m = /^t=\s*([\d.]+)s\s*(.*)$/.exec(l); rows.push([m ? +m[1] : s.t_s, "log", m ? m[2] : l]); });
@@ -419,7 +453,8 @@
     tb.innerHTML = ms.length ? ms.map(function (m) {
       var end = m.finished_at_ms || Date.now(), start = m.started_at_ms || m.accepted_at_ms || end, dur = Math.max(0, (end - start) / 1000);
       var args = m.args && Object.keys(m.args).length ? Object.keys(m.args).map(function (k) { return k + "=" + m.args[k]; }).join(" ") : "";
-      var detail = m.error || (m.progress && (m.progress.step || m.progress.state)) || (m.result && (m.result.note || m.result.status)) || "";
+      var detail = m.error || (m.result && (m.result.reply || m.result.note || m.result.status)) || (m.progress && (m.progress.reply ? m.progress.reply + " · " : "") + (m.progress.step || "")) || "";
+      if (m.parent) return ""; // child steps are summarised on their instruct parent
       return "<tr><td>" + esc(m.name) + (args ? ' <span class="sub">' + esc(args) + "</span>" : "") + '</td><td class="state ' + m.state + '">' + m.state + "</td><td>" + dur.toFixed(1) + " s</td><td>" + esc(String(detail)) + "</td></tr>";
     }).join("") : '<tr><td colspan="4" class="sub">no missions yet: send "go wave at Grandma" from the family app</td></tr>';
   }

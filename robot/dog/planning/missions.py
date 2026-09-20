@@ -25,6 +25,8 @@ class MissionBoard:
         self.lock = threading.Lock()
         self.receipts: OrderedDict[str, dict] = OrderedDict()
         self.current: dict | None = None
+        self.parent: dict | None = None   # an "instruct" receipt whose planned steps run as child receipts
+        self.queue: list[dict] = []
 
     def submit(self, payload) -> tuple[int, dict]:
         """Body-compatible: 202 accepted, 200 on a repeated command_id, 409 busy, 400 invalid."""
@@ -41,15 +43,18 @@ class MissionBoard:
                 if self.current is not None and self.current["state"] in ("accepted", "executing"):
                     self.current["state"], self.current["error"] = "cancelled", "stopped by operator"
                     self.current["finished_at_ms"] = int(self.clock() * 1000)
-                self.current = None
+                if self.parent is not None and self.parent["state"] not in TERMINAL:
+                    self.parent["state"], self.parent["error"] = "cancelled", "stopped by operator"
+                    self.parent["finished_at_ms"] = int(self.clock() * 1000)
+                self.current, self.parent, self.queue = None, None, []
                 receipt["state"], receipt["result"] = "completed", {"stop_code": None, "note": "cancelled the mission; the patrol loop sends StopMove"}
                 receipt["finished_at_ms"] = int(self.clock() * 1000)
                 receipt["stop_requested"] = True
                 self._remember(receipt)
                 self.stop_requested = True
                 return 200, dict(receipt)
-            if self.current is not None and self.current["state"] in ("accepted", "executing"):
-                return 409, {"error": "busy", "current": dict(self.current)}
+            if (self.current is not None and self.current["state"] in ("accepted", "executing")) or self.parent is not None:
+                return 409, {"error": "busy", "current": dict(self.current or self.parent)}
             receipt = self._new(command_id, name, args)
             self._remember(receipt)
             self.current = receipt
@@ -78,13 +83,36 @@ class MissionBoard:
 
     # -- control-loop side ---------------------------------------------------------------------------------------
     def take(self) -> dict | None:
-        """The accepted mission to start now (marks it executing), else None."""
+        """The accepted mission to start now (marks it executing), else None. After an instruct's plan was
+        chained, its steps come out here one at a time as child receipts."""
         with self.lock:
             cur = self.current
             if cur is not None and cur["state"] == "accepted":
                 cur["state"], cur["started_at_ms"] = "executing", int(self.clock() * 1000)
                 return cur
+            if cur is None and self.parent is not None and self.queue:
+                step = self.queue.pop(0)
+                n = self.parent["progress"]["done"] + 1
+                child = self._new(f"{self.parent['command_id']}#{n}", step["name"], step["args"])
+                child["parent"], child["state"], child["started_at_ms"] = self.parent["command_id"], "executing", int(self.clock() * 1000)
+                self._remember(child)
+                self.parent["progress"]["step"] = f"{n}/{self.parent['progress']['steps']} {step['name']}"
+                self.current = child
+                return child
             return None
+
+    def chain(self, parent: dict, steps: list[dict], *, reply: str = "", source: str = "") -> None:
+        """Run `steps` (validated {"name","args"}) one after another under the executing `parent`; the parent
+        completes when the last step does, fails on the first failed step."""
+        with self.lock:
+            if parent["state"] != "executing":
+                return
+            parent["progress"] = {"steps": len(steps), "done": 0, "reply": reply, "source": source, "results": []}
+            self.parent, self.queue = parent, [dict(s) for s in steps]
+            if self.current is parent:
+                self.current = None
+            if not steps:
+                self._finish_parent(result={"reply": reply, "steps": 0, "source": source})
 
     def executing(self) -> dict | None:
         with self.lock:
@@ -104,6 +132,24 @@ class MissionBoard:
             receipt["finished_at_ms"] = int(self.clock() * 1000)
             if self.current is receipt:
                 self.current = None
+            parent = self.parent
+            if parent is not None and receipt.get("parent") == parent["command_id"]:
+                parent["progress"]["done"] += 1
+                parent["progress"]["results"].append({"name": receipt["name"], "state": receipt["state"], "result": result, "error": error})
+                if error:
+                    self.queue = []
+                    self._finish_parent(error=f"step {receipt['name']} failed: {error}")
+                elif not self.queue:
+                    self._finish_parent(result={"reply": parent["progress"].get("reply"), "steps": parent["progress"]["done"],
+                                                "source": parent["progress"].get("source"), "results": parent["progress"]["results"]})
+
+    def _finish_parent(self, *, result=None, error=None):
+        parent = self.parent
+        if parent is not None and parent["state"] not in TERMINAL:
+            parent["state"] = "failed" if error else "completed"
+            parent["result"], parent["error"] = result, error
+            parent["finished_at_ms"] = int(self.clock() * 1000)
+        self.parent, self.queue = None, []
 
     def consume_stop(self) -> bool:
         with self.lock:

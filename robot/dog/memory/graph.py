@@ -715,6 +715,23 @@ class SpacetimeGraph:
                 "last_seen": _r(ent.last[_T], 3), "intervals": intervals, "text": text}
 
     @_locked
+    @_locked
+    def overhead(self, x, y, *, radius_m=0.5, z_band=(0.45, 1.3), at=None, min_hits=2) -> dict:
+        """Is there remembered structure above the dog here (a table, desk, chair seat)? Counts occupied voxels within
+        `radius_m` horizontally whose centre is in `z_band` above the odometry floor. `covered` when >= 6 voxels."""
+        out = {"covered": False, "voxels": 0, "radius_m": radius_m, "z_band": list(z_band)}
+        flat = self._occupied(_fnum(at), min_hits, None)
+        if flat.size == 0:
+            return out
+        cen = self._voxel_centres(flat)
+        d = np.hypot(cen[:, 0] - float(x), cen[:, 1] - float(y))
+        sel = (d <= radius_m) & (cen[:, 2] >= z_band[0]) & (cen[:, 2] <= z_band[1])
+        n = int(sel.sum())
+        out.update(voxels=n, covered=n >= 6)
+        if n:
+            out["z_min"] = _r(float(cen[sel, 2].min()))
+        return out
+
     def nearest_obstacle(self, x, y, z, at=None, *, min_hits=None, max_age_s=None, z_tol_m=None) -> dict:
         """True 3D distance from a point to the nearest voxel CENTRE occupied at/before `at` (so +-cell_m/2).
         `z_tol_m` restricts to voxels within that height of `z`. Remembered geometry, not a safety check."""

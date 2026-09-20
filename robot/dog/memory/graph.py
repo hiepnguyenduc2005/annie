@@ -1001,6 +1001,48 @@ class SpacetimeGraph:
         graph.ingest_all(recorder.snapshot(max_frames_out=big, max_poses_out=big, max_people_out=big))
         return graph
 
+    def reload_recent(self, path, *, max_age_s=3600.0, max_lines=200_000) -> dict:
+        """Persistence across restarts: replay the tail of a recorder JSONL (records newer than `max_age_s`
+        before the file's last timestamp) into this graph. Odometry resets when the dog power-cycles, so only
+        the same session's frame lines up; callers pass the file the live recorder appends to. Returns counts."""
+        import collections
+        counts = {"lines": 0, "used": 0, "skipped": 0, "t_last": None}
+        try:
+            with open(path, encoding="utf-8") as fh:
+                tail = collections.deque(fh, maxlen=max(1, int(max_lines)))
+        except OSError:
+            return counts
+        recs = []
+        for raw in tail:
+            try:
+                d = json.loads(raw)
+                if isinstance(d, dict) and _fnum(d.get("t")) is not None and d.get("type") in ("pose", "obstacles", "people", "event"):
+                    recs.append(d)
+            except ValueError:
+                counts["skipped"] += 1
+        counts["lines"] = len(tail)
+        if not recs:
+            return counts
+        t_last = max(float(d["t"]) for d in recs)
+        counts["t_last"] = t_last
+        for d in recs:
+            if t_last - float(d["t"]) > max_age_s:
+                continue
+            try:
+                kind = d["type"]
+                if kind == "pose":
+                    self.ingest_pose(d["t"], d["x"], d["y"], d.get("yaw", 0.0))
+                elif kind == "obstacles":
+                    self.ingest_obstacles(d["t"], d["points"])
+                elif kind == "people":
+                    self.ingest_people(d["t"], d["people"] if isinstance(d.get("people"), list) else ())
+                else:
+                    self.ingest_event(d["t"], d.get("x"), d.get("y"), d.get("kind"), d.get("text"))
+                counts["used"] += 1
+            except (ValueError, KeyError, TypeError):
+                counts["skipped"] += 1
+        return counts
+
     @classmethod
     def from_jsonl(cls, path, **kwargs) -> "SpacetimeGraph":
         """Replay a recorder JSONL run log straight into a graph (the WHOLE file, not just the recorder's last

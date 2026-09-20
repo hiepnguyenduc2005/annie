@@ -194,9 +194,20 @@ def voice():
     return VOICE
 
 
+LISTENER = None  # the always-on wake-word listener of the running patrol, so speaking can mute it and open a conversation
+
+
 def speak_blocking(text: str) -> bool:
-    """Speak on the host speaker (ElevenLabs voice when configured, else macOS say); blocks until done."""
-    return voice().speak(text)
+    """Speak on the host speaker (ElevenLabs voice when configured, else macOS say); blocks until done. The
+    always-on mic ignores Annie's own voice meanwhile and then listens without a wake word for a while."""
+    lis = LISTENER
+    if lis is not None:
+        lis.mute(2.0 + 0.4 * len(text.split()))
+    ok = voice().speak(text)
+    if lis is not None:
+        lis.muted_until = 0.0
+        lis.open_conversation(45.0)
+    return ok
 
 
 def listen_blocking(max_s: float) -> dict:
@@ -779,6 +790,15 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
     view.missions = missions
     report["missions"] = []
     graph = SpacetimeGraph() if SpacetimeGraph is not None else None  # the 4D knowledge graph (geometry + semantics)
+    if graph is not None and recorder is not None and getattr(recorder, "path", None) and conn_factory is None:
+        # persistence across restarts: what the previous run(s) saw in the last hour comes back before the first frame
+        try:
+            counts = graph.reload_recent(recorder.path, max_age_s=float(os.environ.get("ANNIE_MEMORY_RELOAD_S", "3600")))
+            if counts["used"]:
+                status(f"memory: reloaded {counts['used']} records from {recorder.path} (last hour of the recording)")
+                report["memory_reloaded"] = counts
+        except Exception as exc:
+            status(f"memory reload skipped: {type(exc).__name__}")
     view.graph = graph
     planner_obj = (FrontierPlanner() if FrontierPlanner is not None else None) if frontier_planner == "auto" else frontier_planner
     frontier = {"planner": planner_obj, "goal": None, "t": 0.0}
@@ -1040,6 +1060,25 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             voice_state["count"] += 1
             report["voice"]["commands"].append({"t_s": round(loop.time() - start, 1), "intent": cmd["intent"],
                                                 "text": text[:80]})
+            if cmd["intent"] == "converse":  # inside a conversation window: a command if it reads like one, else a reply
+                plan = agent_mod.rule_plan(cmd["phrase"])
+                if plan.get("steps"):
+                    code, receipt = missions.submit({"name": "instruct", "args": {"text": cmd["phrase"]}})
+                    status(f"conversation -> instruction ({code}): {cmd['phrase'][:80]!r}")
+                    speak(plan.get("reply") or "On it.")
+                    return
+                sit = build_situation(time.time(), tracks=perception.latest().get("tracks", []), ranges=tel["ranges"],
+                                      home_m=math.dist(origin, tel["pose"]) if tel["pose"] else 0.0, battery=tel["soc"], mode=mode)
+                who = next(((t.get("identity") or {}).get("name") for t in perception.latest().get("tracks", []) if (t.get("identity") or {}).get("name")), None)
+                rep = agent_mod.converse_reply(cmd["phrase"], sit, who=who, inference=chat_client)
+                status(f"conversation: heard {cmd['phrase'][:80]!r} -> {rep['kind']}; saying {rep['text']!r} ({rep['source']})")
+                report.setdefault("conversations", []).append({"t_s": round(loop.time() - start, 1), "name": who, "asked": None,
+                                                               "heard": cmd["phrase"], "reply": rep["text"], "kind": rep["kind"]})
+                if rep["kind"] == "concern":
+                    report.setdefault("concerns", []).append({"t_s": round(loop.time() - start, 1), "t": time.time(), "name": who, "heard": cmd["phrase"][:200]})
+                if rep["text"]:
+                    speak(rep["text"])
+                return
             if cmd["intent"] == "instruct":  # free speech after the wake word: the situated agent plans it
                 code, receipt = missions.submit({"name": "instruct", "args": {"text": cmd["phrase"]}})
                 status(f"voice instruction -> {code}: {cmd['phrase'][:80]!r}")
@@ -1051,6 +1090,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         if voice is not None:
             voice.on_command = on_voice
             view.listener = voice
+            global LISTENER
+            LISTENER = voice
             voice.start()
 
         while loop.time() - start < duration_s:

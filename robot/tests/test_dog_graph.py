@@ -352,3 +352,23 @@ def test_bad_input_is_rejected_not_raised():
     assert g.nearest_obstacle(0, 0, 0)["found"] is False
     assert g.free_ahead(0, 0, 0, 2.0)["free_m"] == 2.0
     assert g.stats["rejected"] == 5
+
+
+def test_reload_recent_replays_only_the_recent_tail(tmp_path):
+    import json
+    from robot.dog.memory.graph import SpacetimeGraph
+    p = tmp_path / "spacetime.jsonl"
+    t0 = 1_000_000.0
+    lines = [{"type": "pose", "t": t0 - 7200, "x": 0.0, "y": 0.0, "yaw": 0.0},                       # too old
+             {"type": "people", "t": t0 - 7200, "people": [{"track_id": 1, "x": 1.0, "y": 0.0, "z": 0.9, "label": "person 1", "identity": "Old", "posture": "upright"}]},
+             {"type": "pose", "t": t0 - 60, "x": 0.5, "y": 0.0, "yaw": 0.0},
+             {"type": "obstacles", "t": t0 - 50, "points": [[1.0, 0.0, 0.3], [1.0, 0.2, 0.3], [1.0, 0.4, 0.3]]},
+             {"type": "people", "t": t0 - 40, "people": [{"track_id": 2, "x": 1.5, "y": 0.5, "z": 0.9, "label": "person 2", "identity": "Jeanine", "posture": "upright"}]},
+             {"type": "event", "t": t0 - 30, "x": 0.5, "y": 0.0, "kind": "greet", "text": "hello"},
+             "not json"]
+    p.write_text("\n".join(json.dumps(l) if isinstance(l, dict) else l for l in lines) + "\n")
+    g = SpacetimeGraph()
+    counts = g.reload_recent(p, max_age_s=3600)
+    assert counts["used"] == 4 and counts["skipped"] == 1 and counts["t_last"] == t0 - 30
+    assert g.where_is("Jeanine")["found"] and not g.where_is("Old")["found"]
+    assert g.reload_recent(tmp_path / "missing.jsonl")["used"] == 0

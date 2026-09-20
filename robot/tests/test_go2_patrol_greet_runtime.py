@@ -243,7 +243,7 @@ def test_find_person_mission_walks_up_to_the_named_person_and_completes():
                                               "args": {"name": "Jeanine", "timeout_s": 5, "approach": True}})
         assert code == 202
         code2, busy = view.missions.submit({"command_id": "m-say", "name": "say", "args": {"text": "hi"}})
-        assert code2 == 409 and busy["error"] == "busy"
+        assert code2 == 202 and busy["state"] == "queued" and busy["position"] == 1  # overlapping requests wait their turn
         report = await task
         return report, view.missions.get("m-find")
     report, receipt = asyncio.run(scenario())

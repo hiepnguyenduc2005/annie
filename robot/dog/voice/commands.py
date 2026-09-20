@@ -56,7 +56,7 @@ def parse_command(transcript: str | None, *, require_wake=True) -> dict | None:
         for phrase in sorted(phrases, key=len, reverse=True):
             if text == phrase or text.startswith(phrase + " ") or text.endswith(" " + phrase) or f" {phrase} " in f" {text} ":
                 return {"intent": intent, "phrase": phrase, "wake": wake}
-    if wake is not None and len(raw.split()) >= 2:  # addressed to the dog but not a fixed phrase: a free instruction
+    if (wake is not None or not require_wake) and len(raw.split()) >= 2:  # addressed to the dog (or a conversation is open): free text
         return {"intent": "instruct", "phrase": raw[:300], "wake": wake}
     return None
 
@@ -72,11 +72,20 @@ class CommandListener:
         self.heard = 0
         self.commands = 0
         self._reopen = None  # set by reopen(): a factory for a new recorder, picked up between utterances
+        self.open_until = 0.0   # conversation window: until this time speech needs no wake word (Annie just spoke to someone)
+        self.muted_until = 0.0  # while Annie herself is talking, what the mic hears is discarded
         self.thread = threading.Thread(target=self._loop, daemon=True, name="voice")
 
     def start(self):
         self.thread.start()
         return self
+
+    def open_conversation(self, seconds: float = 45.0):
+        """After Annie speaks to someone, their next words need no wake word for `seconds`."""
+        self.open_until = max(self.open_until, time.time() + seconds)
+
+    def mute(self, seconds: float):
+        self.muted_until = max(self.muted_until, time.time() + seconds)
 
     def reopen(self, recorder_factory):
         """Switch microphones: `recorder_factory()` returns the new chunk generator; applied between utterances."""
@@ -119,8 +128,13 @@ class CommandListener:
                 continue
             if not text:
                 continue
+            if time.time() < self.muted_until:
+                continue  # Annie's own voice
             self.heard += 1
-            cmd = parse_command(text, require_wake=self.require_wake)
+            in_conversation = time.time() < self.open_until
+            cmd = parse_command(text, require_wake=self.require_wake and not in_conversation)
+            if cmd is not None and in_conversation and cmd.get("wake") is None and cmd["intent"] == "instruct":
+                cmd = {"intent": "converse", "phrase": text[:300], "wake": None}  # talking to Annie, not commanding her
             if cmd:
                 self.commands += 1
                 self.status(f"voice command: {cmd['intent']} ({text!r})")

@@ -84,9 +84,13 @@ class Event(Versioned):
 class Say(StrictModel):
     text: Text
 
+TRICKS = ('spin', 'circle', 'zigzag', 'wiggle', 'figure8')  # mirrors robot/simulation/tricks.py
+
+
 class Command(StrictModel):
-    cmd: Literal['stop', 'resume', 'look', 'goto']
+    cmd: Literal['stop', 'resume', 'look', 'goto', 'trick']
     waypoint: str | None = Field(default=None, max_length=100)
+    trick: Literal['spin', 'circle', 'zigzag', 'wiggle', 'figure8'] | None = None
 
 class CommandReceipt(StrictModel):
     status: Literal['accepted', 'executing', 'completed', 'failed']

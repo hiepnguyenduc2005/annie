@@ -449,6 +449,89 @@ class NavigationPhysicsTests(unittest.TestCase):
         self.assertEqual(rig.navigator.velocity(), (0.0, 0.0, 0.0))
         self.assertEqual(rig.navigator.state, "failed")
 
+    def test_trick_spin_rotates_one_turn_and_stays_home(self):
+        rig = Rig("empty-000")
+        nav = rig.navigator
+        dt = rig.model.opt.timestep
+
+        def measured_yaw():
+            w, x, y, z = rig.data.qpos[3:7]
+            return math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+
+        start_p = tuple(float(v) for v in rig.data.qpos[:2])
+        turned = 0.0
+        prev = measured_yaw()
+        nav.command("trick", trick="spin")
+        self.assertEqual(nav.state, "tricking")
+        self.assertEqual(nav.active["cmd"], "trick")
+        self.assertEqual(nav.active["trick"], "spin")
+        vx0, vy0, wz0 = nav.velocity()
+        self.assertEqual((vx0, vy0), (0.0, 0.0))
+        self.assertGreater(wz0, 0.5)
+        for _ in range(int(20 / dt)):
+            vx, vy, wz = nav.velocity()
+            rig.controller.apply(vx, vy, wz)
+            rig.mujoco.mj_step(rig.model, rig.data)
+            yaw = measured_yaw()
+            turned += (yaw - prev + math.pi) % (2 * math.pi) - math.pi
+            prev = yaw
+            if nav.state != "tricking":
+                break
+        self.assertEqual(nav.state, "idle", nav.active)
+        self.assertEqual(nav.active["status"], "completed")
+        self.assertGreater(abs(turned), 4.0, f"spin turned only {turned:.2f} rad")
+        self.assertGreater(float(rig.data.qpos[2]), 0.17, "robot lost standing height")
+        drift = math.dist(tuple(float(v) for v in rig.data.qpos[:2]), start_p)
+        self.assertLess(drift, 0.6, f"spin drifted {drift:.2f} m")
+
+    def test_trick_wiggle_completes_and_unknown_trick_fails_without_motion(self):
+        rig = Rig("empty-000")
+        nav = rig.navigator
+        dt = rig.model.opt.timestep
+        nav.command("trick", trick="moonwalk")
+        self.assertEqual(nav.active["status"], "failed")
+        self.assertEqual(nav.state, "failed")  # same convention as a rejected turn
+        self.assertEqual(nav.velocity(), (0.0, 0.0, 0.0))
+        nav.command("trick", trick="wiggle")
+        self.assertEqual(nav.state, "tricking")
+        saw_left = saw_right = False
+        for _ in range(int(10 / dt)):
+            vx, vy, wz = nav.velocity()
+            saw_left |= vy > 0.2
+            saw_right |= vy < -0.2
+            rig.controller.apply(vx, vy, wz)
+            rig.mujoco.mj_step(rig.model, rig.data)
+            if nav.state != "tricking":
+                break
+        self.assertTrue(saw_left and saw_right, "wiggle must strafe both ways")
+        self.assertEqual(nav.active["status"], "completed")
+        self.assertIn("wiggle", nav.active["detail"])
+
+    def test_trick_refuses_to_start_into_a_wall(self):
+        rig = Rig("empty-000")
+        nav = rig.navigator
+        # Face the nearest wall and ask for a forward-going trick: it must be
+        # refused before any motion, with the reason in the receipt.
+        lo_x, hi_x, lo_y, hi_y = nav.bounds
+        x, y = float(rig.data.qpos[0]), float(rig.data.qpos[1])
+        # Move the base near the +x wall for this check only (a test fixture, not a policy path).
+        rig.data.qpos[0] = hi_x - 0.3
+        rig.mujoco.mj_forward(rig.model, rig.data)
+        nav.command("trick", trick="circle")
+        self.assertEqual(nav.active["status"], "failed", nav.active)
+        self.assertIn("clearance", nav.active["detail"])
+        self.assertEqual(nav.velocity(), (0.0, 0.0, 0.0))
+
+    def test_trick_is_interrupted_by_stop(self):
+        rig = Rig("empty-000")
+        nav = rig.navigator
+        nav.command("trick", trick="circle")
+        self.assertEqual(nav.state, "tricking")
+        nav.command("stop")
+        self.assertEqual(nav.state, "stopped")
+        self.assertEqual(nav.velocity(), (0.0, 0.0, 0.0))
+        self.assertEqual(nav.commands[-2]["status"], "failed")  # the trick was superseded
+
     def test_navigator_without_scene_uses_default_room(self):
         rig = Rig("safe_bed-000")
         nav = Navigator(rig.model, rig.data, None)

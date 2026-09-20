@@ -48,10 +48,16 @@ def validate_control(value, scene_ids=()):
     }:
         raise ValueError("action must be play, pause, reset, step, camera, or hold")
     if value["action"] == "mission":
-        if not set(value) <= {"action", "cmd", "waypoint", "command_id", "heading"} or value.get(
+        if not set(value) <= {"action", "cmd", "waypoint", "command_id", "heading", "trick"} or value.get(
             "cmd"
-        ) not in {"goto", "patrol", "stop", "resume", "look", "turn"}:
+        ) not in {"goto", "patrol", "stop", "resume", "look", "turn", "trick"}:
             raise ValueError("invalid mission")
+        if value['cmd'] == 'trick':
+            from robot.simulation.tricks import TRICKS
+            if value.get('trick') not in TRICKS:
+                raise ValueError('trick must be one of ' + ', '.join(sorted(TRICKS)))
+        elif 'trick' in value:
+            raise ValueError('trick is only valid for the trick command')
         if value["cmd"] == "goto" and value.get("waypoint") not in {
             "home",
             "living-room",
@@ -1271,6 +1277,7 @@ def run(args):
                             command.get("waypoint"),
                             command.get("command_id"),
                             heading=command.get('heading'),
+                            trick=command.get('trick'),
                         )
                         session.running = session.physics_error is None
                     else:

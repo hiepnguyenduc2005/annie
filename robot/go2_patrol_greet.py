@@ -49,6 +49,10 @@ from go2_probe import extract_lowstate, extract_pose, safe_error  # noqa: E402
 from go2_smart_patrol import (HeadingBandit, OccupancyGrid, PatrolPlanner, StallDetector, body_frame,  # noqa: E402
                               quaternion_yaw, sector_ranges, voxel_points_world, wrap_angle)
 from go2_target_id import TargetIdentifier  # noqa: E402
+try:
+    from go2_spacetime import SpacetimeRecorder  # noqa: E402
+except Exception:  # the recorder module is optional until it lands
+    SpacetimeRecorder = None
 from go2_walk import (MIN_OPERATING_SOC_PERCENT, MOTION_INHIBIT_PATH, TOPIC_LOWSTATE, TOPIC_POSE,  # noqa: E402
                       TOPIC_SPORT, _private_ipv4, _status_code)
 
@@ -171,6 +175,7 @@ VIEW_HTML = r"""<!doctype html><meta charset="utf-8"><title>Annie live</title>
 <div><span class="k">lidar front/left/right</span> <span id="lidar">-</span></div>
 <div><span class="k">perception</span> <span id="fps">-</span> fps</div>
 <div><span class="k">people</span> <span id="people">-</span> &middot; <span class="k">greeted</span> <span id="greet">-</span> &middot; <span class="k">check-ins</span> <span id="chk">-</span></div>
+<div style="margin:8px 0"><a href="/spacetime" target="_blank" style="color:#8cf">4D space-time view</a></div>
 <div style="margin:8px 0"><button onclick="cmd('go_home')">Home base</button> <button onclick="cmd('stop')">Stop</button> <button onclick="cmd('explore')">Explore</button> <button onclick="cmd('scan')">Look around</button> <button onclick="cmd('dance')">Dance</button> <button onclick="cmd('hello')">Wave</button></div>
 <div class="log" id="log"></div></div></div>
 <script>
@@ -217,6 +222,19 @@ class LiveView:
             def do_GET(self):
                 if self.path.startswith("/stream.mjpg"):
                     return self._stream()
+                if self.path.startswith("/spacetime.json"):
+                    rec = getattr(view, "recorder", None)
+                    if rec is None:
+                        return self._send(503, b'{"error":"recorder off"}', "application/json")
+                    from urllib.parse import parse_qs, urlsplit
+                    q = parse_qs(urlsplit(self.path).query)
+                    since = float(q["since"][0]) if q.get("since") else None
+                    return self._send(200, json.dumps(rec.snapshot(since=since)).encode(), "application/json")
+                if self.path.startswith("/spacetime"):
+                    page = Path(__file__).resolve().parent / "spacetime_viewer.html"
+                    if not page.exists():
+                        return self._send(404, b"viewer not built yet", "text/plain")
+                    return self._send(200, page.read_bytes(), "text/html; charset=utf-8")
                 if self.path.startswith("/map.jpg"):
                     data = getattr(view, "map_jpeg", None)
                     return self._send(200, data, "image/jpeg") if data else self._send(404, b"no map yet", "text/plain")
@@ -347,7 +365,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                            planner=None, stall=None, lidar=True, firmware_avoid=False, lidar_stale_s=2.0,
                            stop_on_checkin=False, idle_trick_s=45.0, view=None, no_motion=False, diag_every_s=5.0,
                            imgsz=352, voxel_min_interval_s=0.25, brain=None, brain_period_s=4.0, memory=None,
-                           voice=None, bandit=None, identifier=None):
+                           voice=None, bandit=None, identifier=None, recorder=None):
     loop = asyncio.get_running_loop()
     view = view or LiveView(port=0)
     view_url = view.start()
@@ -375,6 +393,15 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         tracker = _fast_tracker(imgsz=imgsz)
     diag = Diag()
     memory = memory or SightingMemory()
+    if recorder is not None:
+        _memory_add = memory.add
+
+        def _add_and_record(*, t, pose, yaw, kind, people=0, note=None):
+            entry = _memory_add(t=t, pose=pose, yaw=yaw, kind=kind, people=people, note=note)
+            with contextlib.suppress(Exception):
+                recorder.record_event(time.time(), pose[0], pose[1], kind, note or kind)
+            return entry
+        memory.add = _add_and_record
     brain_state = {"decision": None, "until": 0.0, "busy": False, "last": None, "count": 0}
     voice_state = {"intent": None, "until": 0.0, "count": 0}
     report["brain"] = {"enabled": brain is not None, "decisions": [], "failures": 0}
@@ -427,8 +454,12 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     c, sn = math.cos(yaw), math.sin(yaw)
                     wx = pose[0] + c * obs[:, 0] - sn * obs[:, 1]
                     wy = pose[1] + sn * obs[:, 0] + c * obs[:, 1]
-                    grid["map"].observe(np.stack([wx, wy, obs[:, 2]], axis=1))
+                    world_obs = np.stack([wx, wy, obs[:, 2]], axis=1)
+                    grid["map"].observe(world_obs)
                     grid["map"].visit(pose[0], pose[1])
+                    if recorder is not None:
+                        with contextlib.suppress(Exception):
+                            recorder.record_obstacles(time.time(), world_obs)
                     if time.monotonic() - grid["rendered"] > 0.4 and view.port:
                         grid["rendered"] = time.monotonic()
                         view.map_jpeg = grid["map"].render(pose, yaw, planner.target_heading)
@@ -491,6 +522,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
     perception = Perception(tracker, convert=convert, annotate=annotate if view.port else None, diag=diag,
                             min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier)
     view.commands = voice_state  # POST /command on the live view sets the same bounded override as a voice command
+    view.recorder = recorder
 
     async def on_track(track):
         while not stopped:
@@ -618,6 +650,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         follow_hold = {"tid": None, "since": None}
         follow_hold_s = 8.0
         blocked_times: list[float] = []
+        rec_last = [-1e9]
         bandit = bandit or HeadingBandit()
         bandit_state = {"until": 0.0, "rewarded": False}
         report["bandit"] = None
@@ -707,6 +740,27 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             elif res["t"] is not None and time.monotonic() - res["t"] > 1.0:
                 tracks = []  # perception stalled: do not act on old boxes
             perception.set_context(mode=mode, ranges=tel["ranges"], battery=tel["soc"])
+            if recorder is not None and now - rec_last[0] >= 0.2:
+                rec_last[0] = now
+                with contextlib.suppress(Exception):
+                    wall = time.time()
+                    recorder.record_pose(wall, tel["pose"][0], tel["pose"][1], tel["yaw"])
+                    if tracks and fw:
+                        people_world = []
+                        front_r = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
+                        for t in tracks:
+                            x1, y1, x2, y2 = t["box"]
+                            cx = (x1 + x2) / 2.0 / float(fw)
+                            hfrac = max(0.05, (y2 - y1) / float(fh or 480))
+                            bearing = (0.5 - cx) * math.radians(100.0)  # Go2 front camera is roughly 100 deg wide
+                            dist = front_r if (front_r is not None and abs(cx - 0.5) < 0.18) else min(6.0, 0.55 / hfrac)
+                            ang = tel["yaw"] + bearing
+                            ident = (t.get("identity") or {}).get("name")
+                            people_world.append({"track_id": t.get("track_id"), "x": tel["pose"][0] + dist * math.cos(ang),
+                                                 "y": tel["pose"][1] + dist * math.sin(ang), "z": 0.9,
+                                                 "label": ident or f"person {t.get('track_id')}", "identity": ident,
+                                                 "posture": t.get("posture")})
+                        recorder.record_people(wall, people_world)
             if now - last_diag >= diag_every_s:
                 last_diag = now
                 status(f"diag {diag.line()}")
@@ -963,6 +1017,7 @@ def main(argv=None):
     parser.add_argument("--brain-period", type=float, default=4.0)
     parser.add_argument("--voice", action="store_true", help="listen for 'Annie, ...' commands on the host mic")
     parser.add_argument("--memory-file", default=".data/hardware/sightings.jsonl")
+    parser.add_argument("--spacetime-file", default=".data/hardware/spacetime.jsonl")
     parser.add_argument("--target", default=os.environ.get("ANNIE_TARGET", "Grandma:red"),
                         help="NAME:COLOUR of the person to recognise by shirt colour; empty disables")
     parser.add_argument("--output")
@@ -986,7 +1041,8 @@ def main(argv=None):
                                               brain=VisionBrain() if args.brain else None, brain_period_s=args.brain_period,
                                               memory=SightingMemory(args.memory_file),
                                               voice=CommandListener(lambda c, t: None, status=_say) if args.voice else None,
-                                              identifier=(TargetIdentifier(*args.target.split(":", 1)) if args.target else None)))
+                                              identifier=(TargetIdentifier(*args.target.split(":", 1)) if args.target else None),
+                                              recorder=(SpacetimeRecorder(path=args.spacetime_file) if SpacetimeRecorder else None)))
     except KeyboardInterrupt:
         _say("interrupted")
         return 130

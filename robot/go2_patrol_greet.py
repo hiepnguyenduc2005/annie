@@ -745,16 +745,17 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             if action == "follow":
                 track = next(t for t in tracks if t.get("track_id") == tid)
                 vx, wz, reason = follow_command(track["box"], fw or 640, fh or 480, target_height_frac=0.5,
-                                                too_close_frac=0.8, max_vx=0.45, max_wz=1.0, k_yaw=2.2)
+                                                too_close_frac=0.8, max_vx=0.5, max_wz=1.0, k_yaw=2.2, k_dist=1.8)
                 cx = (track["box"][0] + track["box"][2]) / 2.0 / float(fw or 640)
                 centred = abs(cx - 0.5) <= 0.18
                 front_m = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
                 if centred and front_m is not None:
-                    # depth from the LiDAR beats box size: keep walking while the way is clear, hold at ~0.8 m
-                    if front_m > 1.1 and reason != "too_close":
-                        vx, reason = max(vx, 0.3), "lidar_far"
-                    elif front_m < 0.75:
+                    # depth from the LiDAR beats box size: fast while far, ease off with distance, hold at ~0.75 m
+                    if front_m < 0.75:
                         vx, reason = 0.0, "lidar_close"
+                    elif reason != "too_close":
+                        vx = min(0.5, max(0.2, 0.35 * (front_m - 0.75)))  # 2 m -> 0.44, 1.2 m -> 0.2
+                        reason = "lidar_far" if front_m > 1.1 else "lidar_near"
                 if 0.0 < vx < 0.2:
                     vx = 0.2  # walking deadband: either walk properly or hold
                 last_seen.update(tid=tid, t=now, side=1.0 if cx < 0.5 else -1.0)

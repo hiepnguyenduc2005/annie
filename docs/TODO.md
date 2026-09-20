@@ -19,7 +19,8 @@ as work progresses and record a reason for blocked work.
 - [ ] TASK-007: Physical Go2 patrol within the operator's requested five-metre boundary (REQ-001; HW-04–HW-06).
   - Verified: V3 authentication, Wi-Fi AP, 720p camera, measured pose/battery, LiDAR, firmware 1.1.15, and enabled obstacle avoidance. See [hardware setup](../robot/SETUP.md).
   - Prepared: [offline patrol supervisor](../robot/patrol/README.md), with 44 pure gate tests and 11 mocked bridge cases; physical adapter integration remains open. No verification flags are inferred from stationary acknowledgments.
-  - Blockers: operator has no physical controller; independent stop/recovery, moving-stop and link-loss behavior, physical map alignment, and enforced boundary are unverified. A stop acknowledgment at rest and an offline driver fix do not satisfy these checks.
+  - Current: operator confirmed a paired physical controller. Short tests produced small odometry changes, but the 20 cm route timed out; no circle/patrol is verified. Last battery was 23%; replace/charge according to Unitree’s below-40% guidance before more motion.
+  - Blockers: independent stop/recovery, moving-stop and link-loss behavior, physical map alignment, and enforced boundary are unverified. MCF uses `error_code` for gait state; `mode=0` is not idle proof. Small pose changes, acknowledgments and offline driver tests do not satisfy execution checks.
   - Done when: a nearby operator can reliably stop the robot and one deliberately slow, bounded physical route completes with measured pose and execution evidence.
 
 - [ ] TASK-008: Persist profiles server-side (MongoDB was proposed) so the app and dog profiles, their kinds, and which was created first survive across devices.

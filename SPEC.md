@@ -68,6 +68,13 @@ retention policy, named owner for brain integration, and notification/playback
 acknowledgements before physical signoff. Measure demo latency and false alerts
 on stated scenarios instead of inventing performance figures.
 
+Manual Go2 control must clear held input and attempt neutral input plus a
+stand-preserving StopMove before disconnect, navigation away, or loss of page
+focus. Returning focus alone must not resume motion. The separate damping
+control must clearly say that it relaxes the motors. Hardware commissioning
+must follow the manufacturer's battery operating guidance; small odometry
+changes and command acknowledgments do not establish a completed patrol.
+
 ## Detailed acceptance and codebase quality targets
 
 [Acceptance target 1](docs/ACCEPTANCE.md) specifies component tests, exact

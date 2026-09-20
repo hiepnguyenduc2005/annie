@@ -80,7 +80,11 @@ def validate_control(value, scene_ids=()):
             raise ValueError("invalid autonomy mode")
         return value
     if value['action']=='intelligence':
-        if set(value)!={'action','enabled','goal'} or type(value['enabled']) is not bool or not isinstance(value['goal'],str) or not 1<=len(value['goal'].strip())<=500:
+        if (not {'action','enabled','goal'} <= set(value)
+                or not set(value) <= {'action','enabled','goal','require_speech'}
+                or type(value['enabled']) is not bool or not isinstance(value['goal'],str)
+                or not 1<=len(value['goal'].strip())<=500
+                or ('require_speech' in value and type(value['require_speech']) is not bool)):
             raise ValueError('intelligence requires enabled and a goal up to 500 characters')
         return value
     if value["action"] == "speed":
@@ -743,6 +747,7 @@ class MujocoSession:
         self.resident_guard = {'blocked': False, 'source': 'authored_simulator_proximity'}
         self.autonomy_mode, self.autonomy_revision = 'paused', 0
         self.intelligence_enabled, self.intelligence_revision = False, 0
+        self.intelligence_require_speech = False
         self.intelligence_goal = 'Explore the ground floor and check on the resident. Describe what you see, stay clear of people, and choose your next action from camera evidence.'
         self.person_safety = person_safety
         self.person_policy = person_policy
@@ -841,6 +846,7 @@ class MujocoSession:
         self.autonomy_mode = 'paused'
         self.autonomy_revision += 1
         self.intelligence_enabled = False
+        self.intelligence_require_speech = False
         self.intelligence_revision += 1
         if self.navigator:
             self.navigator = type(self.navigator)(self.model, self.data, self.scene)
@@ -1054,6 +1060,7 @@ class MujocoSession:
             "intelligence_enabled": self.intelligence_enabled,
             "intelligence_goal": self.intelligence_goal,
             "intelligence_revision": self.intelligence_revision,
+            "intelligence_require_speech": self.intelligence_require_speech,
             "simulation_time": simulation_time,
             "scene_elapsed": simulation_time,
             "active_wall_time": self.active_wall_time,
@@ -1247,6 +1254,7 @@ def run(args):
                 elif action == 'intelligence':
                     session.intelligence_enabled = command['enabled']
                     session.intelligence_goal = command['goal'].strip()
+                    session.intelligence_require_speech = command.get('require_speech', False)
                     session.intelligence_revision += 1
                     session.autonomy_mode='paused'
                     if not command['enabled'] and session.navigator:

@@ -36,6 +36,12 @@ The UI shows model decisions separately from accepted commands, measured
 completion, generated audio, and completed playback. Historical memories retain
 capture IDs, timestamps, and observer poses.
 
+Both story submissions include `require_speech: true`. The simulator records
+speech command IDs with the issuing map and goal revision. A generated clip,
+failed playback, missing receipt, or speech from an older goal cannot complete
+this delivery requirement. Observation-only custom goals can omit it. This
+checks execution; the model still chooses its route, words, and actions.
+
 ## Phone-memory prelude
 
 The house contains a life-size smartphone on the chair. Before Zach's message,
@@ -61,6 +67,39 @@ On 2026-09-19, Gemini 3.8 Flash captioned the phone image as a wooden armchair
 with dark cushions and a smartphone standing on the seat. Inference took
 1.859 seconds and Graphiti acknowledged the original capture. This verifies
 the prelude; a full story run must separately verify search and delivery.
+
+## Measured live run, 2026-09-19
+
+Both story forms were submitted through the live frontend. Annie selected the
+living-room waypoint from the initial entrance camera, walked there under the
+trained locomotion policy, and received a measured arrival receipt. Its exact
+saved camera frame shows Janine seated on the chair. The model generated:
+“Hi Janine, Zach asked me to remind you to plug in your phone and check his messages.”
+The 4.36-second native audio clip completed playback before goal completion.
+
+The operator then submitted “I lost my phone.” Graphiti retrieved the original
+phone prelude capture, and Annie spoke a historical chair location. That
+10.36-second clip also completed playback before the second goal finished.
+The first answer read a Unix timestamp aloud; the planner now receives derived
+memory ages and instructions to speak natural relative times. Exact timestamps
+and capture IDs remain in evidence.
+
+| Measurement | Result |
+| --- | --- |
+| Zach: first frame → goal completion | 21.714 s |
+| Janine: first frame → goal completion | 23.758 s |
+| Image/model calls across both goals | 8 |
+| Provider median / range | 1.532 s / 1.435–2.074 s |
+| Memory provider | Local Graphiti, connected |
+| Measured simulation speed | Approximately 1.00× |
+
+The operator's pause between the two goals is excluded from those durations.
+The raw record is `output/live-zach-janine-story.json`; exact accepted frames
+are retained with matching perception metadata under `output/story-*.jpg` and
+`.json`. Independent frontend checks saved `output/story-ui-zach-observation.json`
+and `output/story-ui-janine-observation.json`. These results establish local
+device playback, not that a human heard or acknowledged the message. The reply
+was typed by the demo actor; the phone prelude remains an explicit setup capture.
 
 ## Acceptance
 

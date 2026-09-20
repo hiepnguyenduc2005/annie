@@ -68,6 +68,8 @@ class Bridge:
         self.progress = {}
         self.last_person_sighting = None
         self.goal_completion = None
+        self.agent_goal_scope = None
+        self.issued_speech = []
 
     def remember_person(self, citation, map_id):
         """Retain accepted positive evidence; an empty view cannot erase it."""
@@ -262,6 +264,8 @@ class Bridge:
             self.agent_feedback.clear()
             self.last_person_sighting = None
             self.goal_completion = None
+            self.agent_goal_scope = None
+            self.issued_speech.clear()
             self.pending_agent_command = None
             self.recent_events = []
             self.incident_episode_active = False
@@ -441,7 +445,15 @@ class Bridge:
     async def think(self, initial_state):
         """One image-grounded model turn, followed by fresh execution checks."""
         from robot.simulation.agent_execution import gate_action
+        from robot.simulation.goal_completion import IssuedSpeech, goal_speech_completion
         goal = initial_state.get('intelligence_goal','Check on the resident and explore the home carefully.')
+        scope = (initial_state['map_id'], initial_state.get('intelligence_revision', 0), goal)
+        if self.agent_goal_scope != scope:
+            self.agent_goal_scope = scope
+            self.issued_speech.clear()
+            self.goal_completion = None
+            self.agent_state = None
+            self.agent_feedback.clear()
         self.agent_state = {**(self.agent_state or {}),'thinking':True,'goal':goal}
         try:
             memories = await self.retrieve_memories(goal, initial_state['map_id'],
@@ -504,13 +516,19 @@ class Bridge:
             if not state.get('intelligence_enabled') or state.get('intelligence_revision')!=initial_state.get('intelligence_revision'):
                 command,detail=None,'Goal was paused or changed while the model was thinking'
             completed = action['action'] == 'finish' and detail == 'Model completed the goal'
+            delivery = goal_speech_completion(self.issued_speech, outstanding, state.get('speech', []),
+                map_id=state['map_id'], goal_revision=state.get('intelligence_revision', 0),
+                require_speech=state.get('intelligence_require_speech', False))
+            if completed and not delivery.allows_completion:
+                completed = False
+                detail = delivery.detail
             if completed and (not self.ingest_accepted or any(item.get('status') not in TERMINAL for item in outstanding)):
                 completed = False
                 detail = 'Completion needs accepted evidence and terminal execution receipts'
             if completed:
                 self.goal_completion = {'map_id': state['map_id'], 'revision': state.get('intelligence_revision'),
                     'goal': goal, 'result': action['reason'], 'frame_id': frame['frame_id'],
-                    'ts': int(self.clock()*1000)}
+                    'ts': int(self.clock()*1000), 'speech_delivery': delivery.state}
             receipt=None
             if command:
                 # An uncertain enqueue outcome holds further actions until
@@ -519,6 +537,7 @@ class Bridge:
                 if command['cmd']=='say':
                     receipt=await self.request(self.app,'POST','/say',json={'text':command['text']})
                     self.agent_last_speech_ms=int(self.clock()*1000)
+                    self.issued_speech.append(IssuedSpeech(receipt['command_id'], scope[0], scope[1]))
                 else:
                     receipt=await self.request(self.app,'POST','/commands',json=command)
                 self.pending_agent_command = receipt['command_id']
@@ -526,6 +545,8 @@ class Bridge:
                 'status':'completed' if completed else 'queued' if receipt else 'waiting' if action['action']=='wait' else 'rejected','detail':detail}])[-2:]
             self.agent_state={'thinking':False,'goal':goal,'action':action,'execution':detail,
                 'goal_status':'completed' if completed else 'active',
+                'goal_revision': initial_state.get('intelligence_revision', 0),
+                'speech_delivery': delivery.state,
                 'command_id':receipt['command_id'] if receipt else None,'frame_id':frame['frame_id'],
                 'ts':frame['ts'],'model':result['provider']['model'],'latency_ms':result['latency_ms'],
                 'context':result.get('context'),'usage':result['provider'].get('usage')}

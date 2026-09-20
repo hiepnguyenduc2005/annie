@@ -10,11 +10,24 @@ let catalogGeneration = null;
 let catalogRequest = false;
 let generationPending = false;
 let activeSceneId = null;
-let intelligenceRevision = null;
+let intelligenceContext = null;
 let demoStarting = false;
 let demoStagesSignature = null;
 let previousDemoStatus = null;
 const pendingOverlays = new Map();
+
+function syncGoalState(state) {
+  const context = JSON.stringify([state.map_id, state.intelligence_revision, state.intelligence_goal]);
+  if (intelligenceContext === context) return;
+  intelligenceContext = context;
+  if (document.activeElement !== $('intelligence-goal') && state.intelligence_goal)
+    $('intelligence-goal').value = state.intelligence_goal;
+  $('goal-completion').hidden = true;
+  $('goal-completion').textContent = '';
+  $('agent-reason').textContent = '';
+  $('autonomy-status').textContent = state.intelligence_enabled
+    ? 'Waiting for the current goal.' : 'Paused';
+}
 
 async function loadCatalog() {
   if (catalogRequest) return;
@@ -124,9 +137,7 @@ function renderScene() {
     if (activeSceneId !== scene.id) {
       activeSceneId = scene.id;
       document.querySelectorAll('[data-camera]').forEach(button => button.setAttribute('aria-pressed', 'false'));
-      notice(
-        `Loaded: ${scene.title}. Simulation ${current?.running ? "running" : "paused at its starting pose"}.`,
-      );
+      notice(`Loaded: ${scene.title}.`);
     }
   }
   for (const id of ["previous-scene", "next-scene", "scene-select"])
@@ -184,6 +195,7 @@ async function pollState() {
     const response = await fetch("/state", { cache: "no-store" });
     if (!response.ok) throw new Error("Simulator unavailable");
     current = await response.json();
+    syncGoalState(current);
     cameraController.sync(current);
     renderSpatial(current);
     if (!wasConnected && catalogGeneration !== null) catalogGeneration = null;
@@ -203,11 +215,6 @@ async function pollState() {
       wasConnected = true;
     }
     renderMission(current);
-    if (intelligenceRevision !== current.intelligence_revision) {
-      intelligenceRevision=current.intelligence_revision;
-      if (document.activeElement !== $('intelligence-goal') && current.intelligence_goal)
-        $('intelligence-goal').value=current.intelligence_goal;
-    }
     $('demo-voice').closest('label').hidden = current.audio_output === 'native';
     $('browser-voice-hint').hidden = current.audio_output === 'native';
     const resident = current.resident;
@@ -381,7 +388,7 @@ async function submitStoryMessage(actor) {
   button.textContent = 'Sending…';
   try {
     await postJSON(actor === 'zach' ? '/agent/start' : '/control', {
-      action: 'intelligence', enabled: true, goal,
+      action: 'intelligence', enabled: true, goal, require_speech: true,
     });
     status.textContent = `${actor === 'zach' ? 'Zach’s message' : 'Janine’s reply'} queued for Annie. Follow execution and speech receipts below.`;
     status.hidden = false;
@@ -549,7 +556,7 @@ async function pollBrain() {
     if (!response.ok)
       throw new Error(data.last_error || "Brain bridge not connected");
     const sameContext = !!current?.map_id && data.context_map_id === current.map_id;
-    const agent = sameContext ? data.agent : null;
+    const agent = sameContext && data.agent?.goal === current?.intelligence_goal ? data.agent : null;
     const limitReached = sameContext && data.inference_limit_reached;
     const completion = data.goal_completion;
     const completed = completion && completion.map_id === current?.map_id &&
@@ -566,7 +573,7 @@ async function pollBrain() {
     }));
     $('autonomy-status').textContent = agent
       ? `${completed ? 'Goal completed' : current?.intelligence_enabled ? (agent.thinking ? 'Thinking…' : agent.action?.action || 'Ready') : 'Paused'} · ${agent.model || 'vision-language model'}${agent.latency_ms ? ' · '+Math.round(agent.latency_ms)+' ms' : ''}`
-      : 'Waiting for the model planner.';
+      : current?.intelligence_enabled ? 'Waiting for the current goal.' : 'Paused';
     $('agent-reason').textContent = agent ? `${agent.action?.reason || ''} · ${agent.execution || ''}` : '';
     $('agent-context').textContent = agent?.context
       ? `${agent.context.memories_included} cited memories · ~${agent.context.estimated_text_tokens} context text tokens · ${agent.usage?.prompt_tokens ?? '—'} actual input tokens including image · ${agent.context.output_token_limit} output-token cap`
@@ -966,10 +973,12 @@ async function pollDemo() {
     const data = await response.json();
     if (demoStarting) return;
     const running = data.status === 'running';
+    $('demo-evidence-panel').querySelector('h2').textContent =
+      ['passed', 'failed'].includes(data.status) ? 'Previous staged check-in run' : 'Staged check-in demo';
     $('demo-evidence-panel').dataset.status = data.status;
     $('demo-run-status').textContent = {
-      running:'Demonstrating live…', passed:'Last full-house run passed',
-      failed:'Run incomplete', not_started:'Ready to demonstrate'
+      running:'Staged check-in running…', passed:'Previous check-in passed',
+      failed:'Previous check-in incomplete', not_started:'Ready to demonstrate'
     }[data.status] || data.status;
     $('start-house-demo').disabled = running;
     $('start-house-demo').textContent = running ? 'Demo in progress…' : 'Run full-house demo →';

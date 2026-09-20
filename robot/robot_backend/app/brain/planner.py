@@ -92,6 +92,12 @@ PLANNER_PROMPT += (
     'has been satisfied, choose finish and state the observed result in reason. '
     'finish ends planning for this goal, so use it only for completed finite tasks, '
     'after all requested motion and speech have completed execution receipts. '
+    'Speak naturally to the resident. Use memory age_seconds for an approximate '
+    'relative time such as "a few minutes ago"; never read Unix timestamps, '
+    'frame IDs, or coordinates aloud. Keep those exact citations in context. '
+    'Say "I last saw a phone" for historical evidence; do not infer ownership '
+    'or who placed it there. A completed playback receipt establishes device '
+    'output, not that the person heard it. '
     'Use wait for ongoing monitoring or incomplete tasks. Reasons '
     'are brief user-facing decisions (at most 120 characters), not hidden reasoning.'
 )
@@ -101,6 +107,7 @@ Return JSON only: {"perception":{"person":true,"posture":"standing","location":"
 Use actual image evidence, not the example. person means a visible human; if absent use false, unknown posture and unknown location. posture: standing/sitting/lying/unknown. location: bed/floor/chair/unknown. Caption <=80 characters; reason <=60 characters. Actions: goto (known waypoint_id), look (scan), say (text <=80 characters), wait, stop. Omit waypoint_id except goto and text except say. Do not repeat a completed visit to your current waypoint. If no human is visible, explore an unvisited waypoint or look. Never approach through an active person stop; observe or speak from where you stopped. Return one action, never a sequence.'''
 LOCAL_PLANNER_PROMPT += '\nprogress.last_person_sighting is historical positive evidence, with camera pose and capture time. Empty current pixels do not erase that sighting. Do not claim nobody was found when it exists; do not infer identity or current location from it.'
 LOCAL_PLANNER_PROMPT += '\nYou may choose finish (reason only) to end a completed finite goal after requested movement and speech have completed execution receipts. Use wait for ongoing monitoring or incomplete tasks.'
+LOCAL_PLANNER_PROMPT += '\nFor speech, use memory age_seconds as an approximate relative time; never read Unix timestamps, frame IDs or coordinates aloud. Describe historical observations without inferring object ownership or who placed them.'
 
 
 class Waypoint(StrictModel):

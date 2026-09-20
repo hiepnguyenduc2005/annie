@@ -6,10 +6,6 @@ as work progresses and record a reason for blocked work.
 
 ## Now
 
-- [ ] TASK-015: Demonstrate Zach → Annie → Janine search/delivery and the lost-phone memory reply (REQ-014; [story](../robot/simulation/STORY_DEMO.md)).
-  - Implemented: story composers, camera-visible phone prop, real image-inference prelude, and local Graphiti persistence/retrieval.
-  - Done when: one live run records model-selected movement, Zach's message completing playback, and a spoken phone answer citing the observed chair frame. Pending that combined run; isolated components are verified.
-
 - [ ] TASK-014: Intelligent dog brain, step 1 (design: `superpowers/specs/2026-09-19-intelligent-dog-brain-design.md`; plan: `superpowers/plans/2026-09-19-intelligent-dog-brain-step1.md`). Done when the simulated and physical dog search systematically, trigger the fall check-in from two independent signals, listen to a live reply, and local plans pass the 5 s gate.
   - Shipped 2026-09-19 (offline tests, documented checks pass): `robot/simulation/mission.py` (search progress), `posture.py` + `person_tracker.py` (keypoint posture, ByteTrack), `app_backend` `POST /recall` (embedding recall with lexical fallback), `robot/go2_perception.py` (hardware camera + posture + cited inference, no motion), `robot/simulation/live_listener.py` (VAD-gated microphone reply, `source: microphone`), `robot/go2_host_voice.py` (host speech + listening with `source: host` receipts; verified end to end on the Mac against the app).
   - Open: wire `MissionState` and `/recall` into the planner/bridge (Codex owns `planner.py`, `context.py`, `bridge.py`, `task_progress.py`); benchmark mlx-vlm runtimes for sub-second local perception; a `person_seen` waypoint never retires, so cap the "return to last sighting" rule; test the posture rule on dog's-eye footage of a person on the floor; hardware runs need the dog in range and charged above 40%.
@@ -41,6 +37,8 @@ as work progresses and record a reason for blocked work.
   - Dependency or blocker: the backend owner's requirements for profile storage and API shape, and which service owns it. No MongoDB is installed locally; the swift mock backend has no MongoDB driver.
 
 ## Done
+
+- [x] TASK-015: Live Zach → Annie → Janine story completed (REQ-014; [measurements](../robot/simulation/STORY_DEMO.md)): model-selected walking, camera person detection, Zach's reminder played, then a Graphiti-grounded phone answer played. Both frontend submissions and execution receipts verified; 8 image/model calls, 1.532 s median provider latency. Janine's reply is demo-actor text; phone memory is a real inferred setup capture.
 
 - [x] TASK-013: Added interactive camera controls, an operator workspace, and DimOS-derived raycast LiDAR, measured-trail and planned-route layers (REQ-013). Browser-verified orbit/pan/zoom/reset and layer acknowledgement; toggling layers changes operator frames while robot-camera frames remain byte-identical.
 

@@ -79,7 +79,11 @@ BASE_HEIGHT_M = 0.32  # Go2 standing base height above the floor; anchors the Li
 STAND_UP, BALANCE_STAND, STOP_MOVE, MOVE, HELLO, EULER = 1004, 1002, 1003, 1008, 1016, 1007
 LOOK_UP_PITCH = -0.25  # body pitch (rad) that lifts the fixed head camera toward a close person's face; BalanceStand levels it
 # Greeting tricks, one per new person in rotation: (name, sport api id, seconds to let it finish).
-GREET_TRICKS = [("hello", HELLO, 4.0)]  # a quick wave only: greetings should not eat exploration time (Henry, 2026-09-20)
+_TRICK_TABLE = {"hello": (HELLO, 4.0), "dance": (1022, 10.0), "heart": (1036, 6.0), "stretch": (1017, 5.0)}
+# Default: a quick wave only, so greetings do not eat exploration time. ANNIE_GREET_TRICKS=hello,dance makes every
+# other greeting a dance (showpiece mode, Henry 2026-09-20 demo).
+GREET_TRICKS = [(n, *_TRICK_TABLE[n]) for n in (os.environ.get("ANNIE_GREET_TRICKS") or "hello").replace(" ", "").split(",")
+                if n in _TRICK_TABLE] or [("hello", HELLO, 4.0)]
 TOPIC_VOXELS, TOPIC_LIDAR_SWITCH, TOPIC_SPORT_STATE = "rt/utlidar/voxel_map_compressed", "rt/utlidar/switch", "rt/lf/sportmodestate"
 TOPIC_AVOID, AVOID_SWITCH_SET, AVOID_USE_API = "rt/api/obstacles_avoid/request", 1001, 1004
 

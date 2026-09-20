@@ -95,6 +95,16 @@ class CompanionService:
     # ---- live facts from the dog process (its space-time graph), merged ahead of the seeded ones ----
     live_facts: list = []
 
+    @staticmethod
+    def family_wording(sentence: str) -> str:
+        """The dog's memory sentences are written for its planner; trim the technical asides for the family."""
+        t = re.sub(r"\s*\((?:\d+ tracker id\(s\)|ids churn)[^)]*\)", "", sentence)
+        t = re.sub(r",?\s*\d+ occupied voxels remembered", "", t)
+        t = t.replace("an unidentified person", "someone").replace("An unidentified person", "Someone")
+        t = re.sub(r"\bplace-(\d+)\b", r"spot \1", t)
+        t = re.sub(r"\bthe dog\b", "Annie", t)
+        return t.strip()
+
     def merge_live(self, telemetry: dict, now=None) -> int:
         """Turn the dog process' /telemetry.json into memory facts: what it remembers (graph sentences), who it
         greeted, check-ins, instructions. Replaces the previous live batch; ids are negative so they never
@@ -102,7 +112,10 @@ class CompanionService:
         now = now or datetime.now()
         facts = []
         base = 10_000
-        for i, sentence in enumerate(list((telemetry or {}).get('graph_sentences') or [])[:8]):
+        for i, raw in enumerate(list((telemetry or {}).get('graph_sentences') or [])[:8]):
+            sentence = self.family_wording(raw)
+            if not sentence:
+                continue
             facts.append({'id': -(base + i), 'subject': 'annie', 'relation': 'remembers', 'object': 'scene', 'room': 'home',
                           'timestamp': _iso(now), 'text': sentence[0].upper() + sentence[1:] + ('.' if not sentence.endswith('.') else '')})
         state = (telemetry or {}).get('state') or {}
@@ -142,5 +155,10 @@ class CompanionService:
             if score > best_score:
                 best, best_score = fact, score
         if best is None:
+            if RESIDENT.lower() in words:  # asked about her, no sighting by name: say what was seen, honestly
+                seen = next((f for f in reversed(self.live_facts) if 'someone' in f['text'].lower() and 'seen' in f['text'].lower()), None)
+                if seen:
+                    return f"I haven't recognised {RESIDENT} by name yet. {seen['text']}"
+                return f"I haven't seen {RESIDENT} yet today, but I'm keeping watch."
             return "I don't have anything on that yet, but I'm keeping watch."
         return best['text']

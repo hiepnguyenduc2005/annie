@@ -39,3 +39,16 @@ def test_ask_understands_grandma_and_she_as_the_resident():
     assert "near the chair" in c.ask("Where is Grandma?")
     assert "near the chair" in c.ask("where is she right now")
     assert "near the chair" in c.ask("Where is Jeanine?")
+
+
+def test_family_wording_and_honest_unknown_resident():
+    c = CompanionService()
+    c.merge_live({"state": {"t_s": 10.0}, "graph_sentences": [
+        "an unidentified person last seen just now near place-1, upright (4 tracker id(s) in the last 2 min; ids churn, not a head count)",
+        "1 place(s) explored over 31 s, 875 occupied voxels remembered; the dog is in place-1"]})
+    texts = [f["text"] for f in c.live_facts]
+    assert texts[0] == "Someone last seen just now near spot 1, upright."
+    assert "voxels" not in texts[1] and "Annie is in spot 1" in texts[1]
+    assert c.ask("Where is Grandma?").startswith("I haven't recognised Jeanine by name yet. Someone last seen")
+    c.live_facts = []
+    assert c.ask("where is she") == "I haven't seen Jeanine yet today, but I'm keeping watch."

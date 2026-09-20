@@ -43,6 +43,7 @@ DEFAULT_BOUNDARY_M = 2.5  # operator's requested 5 m patrol width
 STOPPED_SPEED_MPS = 0.05
 MIN_OPERATING_SOC_PERCENT = 40.0  # Unitree recommends stopping below 40%.
 DEFAULT_MIN_SOC_PERCENT = MIN_OPERATING_SOC_PERCENT
+MOTION_INHIBIT_PATH = Path(__file__).resolve().parents[1] / '.cache/go2-private/motion-inhibit'
 
 
 def _validate_min_soc(min_soc: float) -> None:
@@ -348,6 +349,12 @@ def main(argv=None) -> int:
         parser.error(str(exc))
     if not (0.02 <= args.tick <= 0.5):
         parser.error("--tick must be 0.02-0.5 s")
+
+    # Inhibit legacy queued launchers while another task diagnoses this robot.
+    # Validate arguments first, then refuse before credentials or connection.
+    if MOTION_INHIBIT_PATH.exists():
+        _say('physical motion inhibited by the active hardware task; no connection opened')
+        return 2
 
     # Robot signaling must stay on the local link; vendor logs can echo auth material.
     for key in [k for k in os.environ if k.lower() in ("http_proxy", "https_proxy", "all_proxy")]:

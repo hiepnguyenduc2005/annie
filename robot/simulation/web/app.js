@@ -353,6 +353,54 @@ for (const button of document.querySelectorAll("[data-camera]")) {
 document.querySelectorAll('[data-resident]').forEach(button => {
   button.addEventListener('click', () => control({action:'resident',cmd:button.dataset.resident}));
 });
+let storySubmitting = false;
+function storyGoal(actor, text) {
+  const message = text.trim();
+  if (!message) throw new Error('Enter a message first.');
+  if (message.length > 280) throw new Error('Keep the message to 280 characters.');
+  const goal = actor === 'zach'
+    ? `Zach texts Annie: ${message}\nFind Janine (Grandma) using camera evidence; choose your own search. Speak Zach's request to her. Finish only after speech playback completes.`
+    : `Janine replies: ${message}\nRecall recorded phone observations; answer from evidence, citing when and where it was last seen. If evidence is missing, say so. Speak your answer; finish after playback.`;
+  if (goal.length > 500) throw new Error('Message is too long for the agent goal.');
+  return goal;
+}
+async function submitStoryMessage(actor) {
+  if (storySubmitting) return;
+  const id = actor === 'zach' ? 'zach-message' : 'janine-reply';
+  const status = $(`${id}-status`);
+  setPanelError(`${id}-error`, null);
+  status.hidden = true;
+  let goal;
+  try { goal = storyGoal(actor, $(id).value); }
+  catch (error) { setPanelError(`${id}-error`, error.message); return; }
+  storySubmitting = true;
+  const button = $(`${id}-send`);
+  const label = button.innerHTML;
+  $('zach-message-send').disabled = true;
+  $('janine-reply-send').disabled = true;
+  button.textContent = 'Sending…';
+  try {
+    await postJSON(actor === 'zach' ? '/agent/start' : '/control', {
+      action: 'intelligence', enabled: true, goal,
+    });
+    status.textContent = `${actor === 'zach' ? 'Zach’s message' : 'Janine’s reply'} queued for Annie. Follow execution and speech receipts below.`;
+    status.hidden = false;
+    await pollState();
+  } catch (error) {
+    setPanelError(`${id}-error`, error.message);
+  } finally {
+    storySubmitting = false;
+    button.innerHTML = label;
+    $('zach-message-send').disabled = false;
+    $('janine-reply-send').disabled = false;
+  }
+}
+for (const [actor, form] of [['zach', 'zach-message-form'], ['janine', 'janine-reply-form']]) {
+  $(form).addEventListener('submit', event => {
+    event.preventDefault();
+    submitStoryMessage(actor);
+  });
+}
 $('intelligence-form').addEventListener('submit', async event => {
   event.preventDefault();
   const button = $('intelligence-start');
@@ -500,7 +548,9 @@ async function pollBrain() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok)
       throw new Error(data.last_error || "Brain bridge not connected");
-    const agent = data.agent;
+    const sameContext = !!current?.map_id && data.context_map_id === current.map_id;
+    const agent = sameContext ? data.agent : null;
+    const limitReached = sameContext && data.inference_limit_reached;
     const completion = data.goal_completion;
     const completed = completion && completion.map_id === current?.map_id &&
       completion.revision === current?.intelligence_revision && completion.goal === current?.intelligence_goal;
@@ -530,7 +580,7 @@ async function pollBrain() {
     const sameMap = !data.last_perception || data.last_perception.pose?.map_id === current?.map_id;
     const p = sameMap ? data.last_perception ?? null : null;
     const stale = p && Date.now() - p.ts > 5000;
-    $("brain-mode").textContent = data.inference_limit_reached ? 'CALL LIMIT REACHED' : stale ? 'STALE OBSERVATION' : mode;
+    $("brain-mode").textContent = !sameContext ? 'WAITING FOR SCENE' : limitReached ? 'CALL LIMIT REACHED' : stale ? 'STALE OBSERVATION' : mode;
     $("brain-caption").textContent = p?.caption
       ? String(p.caption).slice(0, 300)
       : p
@@ -568,11 +618,11 @@ async function pollBrain() {
       ? new Date(p.ts).toLocaleTimeString()
       : "—";
     $("brain-note").textContent =
-      data.inference_limit_reached ? 'Configured inference allowance used; movement and voice remain available. Restart the bridge deliberately for a new bounded run.' : !sameMap ? 'Waiting for an observation from the current scene.' : stale ? 'Historical capture; this is not a current view of the resident.' : mode === "DISABLED"
+      !sameContext || !sameMap ? 'Waiting for an observation from the current scene.' : limitReached ? 'The configured inference limit has been reached. The planner is paused.' : stale ? 'Historical capture; this is not a current view of the resident.' : mode === "DISABLED"
         ? "Vision inference is disabled in the brain bridge configuration; this panel shows connection state only. Scene labels in the ground truth section are authored simulation data, not image inference."
         : "Actual image inference from the configured vision model — distinct from the authored simulation ground truth section.";
     renderPersonSafety(current?.person_safety);
-    setPanelError("brain-error", data.last_error || null);
+    setPanelError("brain-error", sameContext ? data.last_error || null : null);
   } catch (error) {
     $("brain-mode").textContent = "DISCONNECTED";
     $('autonomy-status').textContent = 'Planner disconnected';

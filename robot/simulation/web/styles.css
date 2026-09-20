@@ -321,3 +321,10 @@ h1 { font-size: 29px; font-weight: 550; letter-spacing: -.9px; }
 }
 
 .goal-completion { padding: 11px 12px; border: 1px solid #486840; border-radius: 6px; background: #23341f; color: #cee6be; font-size: 12px; line-height: 1.6; margin: 14px 0 0; }
+.story-panel { border-color: #62785a; }
+.story-panel label { display: block; color: #d3dfce; font-size: 11px; margin-bottom: 8px; }
+.story-panel textarea { margin-bottom: 12px; }
+.story-panel #janine-reply { min-height: 68px; }
+.story-reply form { margin-top: 14px; }
+.custom-goal { margin: 0 0 14px; padding: 0 0 13px; border-top: 0; border-bottom: 1px solid var(--line); }
+.custom-goal form { margin-top: 12px; }

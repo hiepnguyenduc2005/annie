@@ -87,14 +87,41 @@
           </div>
         </div>
         <aside class="control-rail" aria-label="Demo and AI controls">
+          <section class="panel story-panel" aria-labelledby="story-title">
+            <div class="section-kicker"><p class="eyebrow">FAMILY MESSAGE</p><span class="badge quiet-badge">SIMULATION</span></div>
+            <h2 id="story-title">Find Grandma</h2>
+            <form id="zach-message-form">
+              <label for="zach-message">Zach → Annie</label>
+              <textarea id="zach-message" maxlength="280" rows="5" required>Hi Annie, my messages to Grandma haven't been delivered for two days. Please find Janine, remind her to plug in her phone, and ask her to check my messages.</textarea>
+              <button id="zach-message-send" type="submit" class="primary full-width">Send to Annie <span aria-hidden="true">→</span></button>
+            </form>
+            <p class="hint">Annie chooses where to search, finds Janine, and speaks to her.</p>
+            <p id="zach-message-status" class="hint" role="status" hidden></p>
+            <p id="zach-message-error" class="hint error" role="alert" hidden></p>
+            <details class="disclosure story-reply">
+              <summary>Janine’s reply <span class="summary-count">Second step</span></summary>
+              <p id="janine-reply-help" class="hint">After Annie speaks, enter Janine’s reply here as the demo actor.</p>
+              <form id="janine-reply-form">
+                <label for="janine-reply">Janine → Annie · demo actor text</label>
+                <textarea id="janine-reply" aria-describedby="janine-reply-help" maxlength="280" rows="2" required>I lost my phone.</textarea>
+                <button id="janine-reply-send" type="submit" class="full-width">Send Janine’s reply <span aria-hidden="true">→</span></button>
+              </form>
+              <p id="janine-reply-status" class="hint" role="status" hidden></p>
+              <p id="janine-reply-error" class="hint error" role="alert" hidden></p>
+              <p class="hint">Annie checks recorded observations before answering. Sources appear in Thinking &amp; memory below.</p>
+            </details>
+          </section>
           <section class="panel ai-panel" aria-labelledby="ai-title">
             <div class="section-kicker"><p class="eyebrow">AGENT CONTROL</p><span class="badge quiet-badge">MODEL PLANNER</span></div>
-            <h2 id="ai-title">Agent goal</h2>
+            <h2 id="ai-title">Annie’s progress</h2>
+            <details class="disclosure custom-goal"><summary>Custom agent goal</summary>
             <form id="intelligence-form">
               <label class="visually-hidden" for="intelligence-goal">Give Annie a goal</label>
               <textarea id="intelligence-goal" maxlength="500" rows="4">Explore the ground floor, find the resident using camera evidence, and tell me what you observed. Decide which rooms to inspect yourself.</textarea>
-              <div class="button-row"><button id="intelligence-start" type="submit" class="primary">Start AI / resume</button><button id="intelligence-stop" type="button">Pause AI</button></div>
+              <div class="button-row"><button id="intelligence-start" type="submit" class="primary">Start AI / resume</button></div>
             </form>
+            </details>
+            <button id="intelligence-stop" type="button">Pause AI</button>
             <p id="autonomy-status" class="status-line">Waiting for the model planner.</p>
             <p id="goal-completion" class="goal-completion" role="status" hidden></p>
             <p id="agent-reason" class="hint reasoning"></p>

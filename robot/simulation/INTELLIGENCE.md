@@ -18,6 +18,13 @@ returns to model planning instead of indefinitely requesting confirmation
 images. The incident rules remain responsible for correlated check-in replies
 and alert delivery; these are not decisions made by the language model.
 
+For a finite goal, the model can select `finish` with its observed result.
+Completion requires fresh accepted evidence, no incident check-in, and terminal
+motion/audio receipts. It records `goal_completion` and ends further planning
+for that exact map and goal revision; body telemetry keeps running. A new
+operator goal/resume starts another revision. The completion text is the model's
+reported result, not independent proof of the goal's semantic success.
+
 Use **Start AI / resume** with an open-ended goal such as “Explore the ground
 floor and find the resident using camera evidence.” The separate full-house
 demo button deliberately stages an incident and replays recorded speech.

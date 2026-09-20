@@ -2,11 +2,60 @@
 import asyncio
 import json
 import httpx
+import pytest
 from types import SimpleNamespace
 
 from robot.simulation.bridge import Bridge
 from robot.simulation.navigation import Navigator
 from robot.simulation.task_progress import task_progress, execution_outcomes
+
+
+@pytest.mark.parametrize('accepted,pending', [(True, False), (False, False), (True, True)])
+def test_model_completion_ends_calls_only_after_evidence_and_receipts(accepted, pending):
+    async def check():
+        bridge = Bridge(None, None, None, perception='agent', continuous_local=True, clock=lambda: 1.)
+        bridge.map_id = 'home'
+        pose = {'x': 0., 'y': 0., 'yaw': 0., 'map_id': 'home'}
+        frame = {'frame_id': 'current-frame', 'ts': 1000, 'pose': pose,
+                 'source': 'simulation_render', 'jpeg_b64': 'mocked-camera'}
+        state = {'ready': True, 'map_id': 'home', 'running': True, 'intelligence_enabled': True,
+                 'intelligence_revision': 7, 'intelligence_goal': 'Observe the room',
+                 'navigation': {'state': 'idle', 'waypoints': [], 'commands': []}, 'speech': []}
+        calls = []
+        async def request(client, method, path, **kwargs):
+            calls.append((method, path))
+            if path in ('/query', '/recall'): return {'citations': []}
+            if path == '/events': return []
+            if path == '/observation': return frame
+            if path == '/state': return state
+            if path == '/status': return {'pending_checkin': None}
+            if path == '/commands' and method == 'GET':
+                return [{'cmd': 'say', 'status': 'queued'}] if pending else []
+            if path == '/plan': return {'frame_id': frame['frame_id'], 'ts': frame['ts'], 'pose': pose,
+                'perception': {'person': False, 'posture': 'unknown', 'location': 'unknown',
+                               'confidence': .9, 'caption': 'A chair is visible.'},
+                'action': {'action': 'finish', 'reason': 'Observed a chair.'},
+                'provider': {'model': 'mock', 'mode': 'local'}, 'latency_ms': 10}
+            raise AssertionError((method, path))
+        body_updates = []
+        async def body(*args): body_updates.append(True)
+        async def ingest(*args): return {'accepted': accepted}
+        bridge.request, bridge.ingest, bridge.body = request, ingest, body
+        await bridge.think(state)
+        assert bool(bridge.goal_completion) == (accepted and not pending)
+        assert ('POST', '/commands') not in calls and ('POST', '/say') not in calls
+        if bridge.goal_completion:
+            assert bridge.agent_state['goal_status'] == 'completed'
+            bridge.next_inference = 0
+            await bridge.tick(wait_vision=True)
+            assert body_updates and calls.count(('POST', '/plan')) == 1
+            # A new operator goal explicitly resumes planning; no timer does.
+            state['intelligence_revision'] = 8
+            state['intelligence_goal'] = 'Observe again'
+            frame['frame_id'] = 'new-frame'
+            await bridge.tick(wait_vision=True)
+            assert calls.count(('POST', '/plan')) == 2
+    asyncio.run(check())
 
 
 def test_memory_retrieval_uses_operator_goal_and_preserves_relevant_citation():

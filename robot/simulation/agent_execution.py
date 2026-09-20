@@ -21,6 +21,13 @@ def gate_action(action, *, state, status, frame, now_ms, last_speech_ms=None):
         return None,'Simulation is paused or faulted'
     if status.get('pending_checkin'):
         return None,'Incident check-in owns motion and speech until resolved'
+    if kind=='finish':
+        if (state.get('navigation') or {}).get('state') in ('moving','scanning','turning'):
+            return None,'Cannot finish while current motion has no terminal execution receipt'
+        if any(clip.get('status') in ('queued','playing','generated') for clip in state.get('speech',[])):
+            return None,'Cannot finish while audio is pending or playing'
+        # Completion ends planning for the operator goal; it sends no motor command.
+        return None,'Model completed the goal'
     safety=state.get('person_safety') or {}
     resident_guard=state.get('resident_guard') or {}
     if kind in ('goto','look'):

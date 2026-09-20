@@ -53,6 +53,52 @@ def test_valid_look_accepted():
     assert command == {"cmd": "look"}
 
 
+def test_finish_completes_goal_without_a_motor_command():
+    assert gate({"action": "finish"}) == (None, "Model completed the goal")
+    # Finished audio and a recent speech cooldown do not imply pending work.
+    state = base_state(speech=[{"status": "completed"}])
+    assert gate({"action": "finish"}, state=state, last_speech_ms=9900) == (
+        None, "Model completed the goal")
+
+
+@pytest.mark.parametrize("nav_state", ["moving", "scanning", "turning"])
+def test_finish_rejects_pending_motion(nav_state):
+    state = base_state(navigation={"state": nav_state, "waypoints": []})
+    command, detail = gate({"action": "finish"}, state=state)
+    assert command is None
+    assert detail == "Cannot finish while current motion has no terminal execution receipt"
+
+
+@pytest.mark.parametrize("clip_status", ["queued", "generated", "playing"])
+def test_finish_rejects_pending_audio(clip_status):
+    state = base_state(speech=[{"status": clip_status}])
+    assert gate({"action": "finish"}, state=state) == (
+        None, "Cannot finish while audio is pending or playing")
+
+
+def test_finish_rejects_pending_checkin():
+    status = {**base_status(), "pending_checkin": {"event_id": "e-1"}}
+    assert gate({"action": "finish"}, status=status) == (
+        None, "Incident check-in owns motion and speech until resolved")
+
+
+@pytest.mark.parametrize("ts", [4999, 10001])
+def test_finish_rejects_stale_or_future_capture(ts):
+    assert gate({"action": "finish"}, frame=frame(ts=ts)) == (
+        None, "Model decision expired before execution")
+
+
+def test_finish_rejects_changed_map():
+    assert gate({"action": "finish"}, state=base_state(map_id="sim-two")) == (
+        None, "Scene changed while the model was thinking")
+
+
+@pytest.mark.parametrize("override", [{"running": False}, {"physics_error": True}])
+def test_finish_rejects_paused_or_faulted_simulation(override):
+    assert gate({"action": "finish"}, state=base_state(**override)) == (
+        None, "Simulation is paused or faulted")
+
+
 def test_expired_plan_frame_is_rejected():
     # Frame is 6 s old relative to now_ms: decision expired.
     assert gate({"action": "goto", "waypoint_id": "hallway"},

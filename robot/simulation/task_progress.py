@@ -1,6 +1,24 @@
 """Measured execution context for the model; this module never chooses actions."""
 
 
+def execution_outcomes(state):
+    """Join typed speech receipts to their clips before sending planner context.
+
+    Older viewer builds omit cmd on audio receipts. Never pass an untyped
+    receipt through, and include completed speech so the model need not repeat it.
+    """
+    speech = {item['command_id']: item for item in state.get('speech', [])}
+    outcomes = []
+    for item in (state.get('navigation') or {}).get('commands', [])[-4:]:
+        clip = speech.get(item.get('command_id'))
+        cmd = item.get('cmd') or ('say' if clip else None)
+        if not cmd: continue
+        detail = ('Speech '+item['status']+': '+str(clip.get('text', ''))) if clip else item.get('detail', '')
+        outcomes.append({'command_id': item['command_id'], 'cmd': cmd,
+                         'status': item['status'], 'detail': detail[:300]})
+    return outcomes
+
+
 def task_progress(state, *, episode_active=False, events=(), now_ms):
     nav = state.get('navigation') or {}
     known = {w['id'] for w in nav.get('waypoints', [])}

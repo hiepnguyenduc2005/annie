@@ -4,7 +4,19 @@ from types import SimpleNamespace
 
 from robot.simulation.bridge import Bridge
 from robot.simulation.navigation import Navigator
-from robot.simulation.task_progress import task_progress
+from robot.simulation.task_progress import task_progress, execution_outcomes
+
+
+def test_completed_speech_without_cmd_still_produces_valid_planner_feedback():
+    from robot.robot_backend.app.brain.planner import RecentOutcome
+    state = {'navigation': {'commands': [
+        {'command_id': 'audio', 'status': 'completed'},
+        {'command_id': 'unknown', 'status': 'completed'}]},
+        'speech': [{'command_id': 'audio', 'text': 'A person is visible.'}]}
+    results = execution_outcomes(state)
+    assert len(results) == 1
+    parsed = RecentOutcome.model_validate(results[0])
+    assert parsed.cmd == 'say' and 'A person is visible.' in parsed.detail
 
 
 def test_only_measured_completed_arrivals_count_as_visits():

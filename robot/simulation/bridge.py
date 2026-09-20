@@ -414,8 +414,8 @@ class Bridge:
             if len(self.frames)>256:
                 self.frames.popitem(last=False)
             frame = {key:observation[key] for key in ('frame_id','ts','pose','source','jpeg_b64')}
-            outcomes = [{key:item[key] for key in ('command_id','cmd','status','detail') if key in item}
-                        for item in initial_state['navigation'].get('commands',[])[-4:]]
+            from robot.simulation.task_progress import execution_outcomes
+            outcomes = execution_outcomes(initial_state)
             nav = initial_state['navigation']
             outcomes.append({'cmd':'status','status':nav['state'], 'detail':
                 f"Current waypoint: {nav.get('waypoint')}; person stop enforced: {initial_state.get('person_safety',{}).get('enforced',True) and initial_state.get('person_safety',{}).get('blocked')}; camera person detections: {len(initial_state.get('person_safety',{}).get('detections',[]))}."})

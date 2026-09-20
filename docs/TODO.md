@@ -21,7 +21,7 @@ as work progresses and record a reason for blocked work.
 - [ ] TASK-004: Connect and evaluate GX10 local image inference. Done when rendered frames produce valid measured observations and the scenario matrix distinguishes VLM results from ground truth.
 - [ ] TASK-005: Integrate actual speech, messaging, and Elastic adapters. Done when provisioned services acknowledge execution and privacy boundaries are verified with synthetic data.
   - Current deployment direction: all local, including Elastic. [Environment template and setup](LOCAL_ENV.md) reuse Ollama, Whisper/macOS speech, and Graphiti; self-hosted Elasticsearch needs a node, index, local API key, CA certificate, and live write/search verification. Cloud-only voice/messaging adapters are deferred for this profile.
-- [ ] TASK-006: Implement `robot_backend`'s side of `contract/family_messages.md` (`POST /dispatch`, `POST /internal/events` calls). Done when a real navigate/speak/listen/recall/speak run on the GX10 posts live events into `app_backend` and completes without `ANNIE_FAMILY_MOCK_ROBOT`.
+- [ ] TASK-009: Implement `robot_backend`'s side of `contract/family_messages.md` (`POST /dispatch`, `POST /internal/events` calls). Done when a real navigate/speak/listen/recall/speak run on the GX10 posts live events into `app_backend` and completes without `ANNIE_FAMILY_MOCK_ROBOT`.
 
 ## Blocked
 
@@ -56,7 +56,8 @@ as work progresses and record a reason for blocked work.
 - [x] Added trained-policy waypoint/patrol movement and robot-camera rendering; no kinematic pose teleporting.
 
 - [x] TASK-002: Integrated the split app service, phone-friendly dashboard, and optional advisory provider. 47 automated checks passed; browser verified bed exemption, reassurance, timeout, acknowledgement, queued message, memory hit/miss, and mobile layout.
-- [x] TASK-007: Implemented app_backend's side of the family message relay (`POST /api/messages`, `GET /api/runs/{run_id}`, `GET /api/thread`, `WS /ws/family`, `POST /internal/events`) per `contract/family_messages.md`, plus a mock-mode dispatch path and connectivity/exercise scripts. 67 automated checks passed; both real dispatch outcomes (success and robot-unreachable, ~0.8s to resolve) and the mock-mode full sequence were run and verified against a live server, not just unit-tested. `robot_backend`'s side remains TASK-006.
+- [x] TASK-010: Implemented app_backend's side of the family message relay (`POST /api/messages`, `GET /api/runs/{run_id}`, `GET /api/thread`, `WS /ws/family`, `POST /internal/events`) per `contract/family_messages.md`, plus a mock-mode dispatch path and connectivity/exercise scripts. 86 automated checks passed; both real dispatch outcomes (success and robot-unreachable, ~0.8s to resolve) and the mock-mode full sequence were run and verified against a live server, not just unit-tested. `robot_backend`'s side remains TASK-009.
+- [x] TASK-011: Household records (app users, dog users, messages, reminders, reminder history, emergencies) persisted to MongoDB with an in-process fallback, plus the three inbound routes robot_backend reports through: the response to a message, compliance with a reminder, and an emergency (REQ-017, DEC-013). 86 automated checks passed, including two against a real mongod; all six collections were round-tripped through a running server and read back out of the database directly. Nothing writes to the inbound routes in production until TASK-009 lands.
 
 - [x] Create the initial documentation scaffold and shared agent instructions.
 - [x] Preserve all supplied HackMIT resources and planning notes; push source capture (`804aa65`).

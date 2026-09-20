@@ -76,7 +76,7 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
 ## DEC-008: Profile registration UI first; MongoDB storage and creation rules deferred
 
 - Date: 2026-09-19.
-- Status: Adopted following explicit user direction; the app-user/dog-user split itself is superseded by [DEC-011](#dec-011-family-only-app-resident-view-removed) (no more dog-user profile), but the on-device-storage-first approach still stands.
+- Status: Adopted following explicit user direction; the app-user/dog-user split itself is superseded by [DEC-011](#dec-011-family-only-app-resident-view-removed) (no more dog-user profile), and the deferred storage question is answered by [DEC-013](#dec-013-household-records-in-mongodb-with-an-in-process-fallback). On-device profiles still exist in the app and are not yet reconciled with the backend collections.
 - Context: The user wants app-user and dog-user profiles tracked, including which was created first, with an app user's registration also creating the dog user's profile, stored in MongoDB. The backend owner may have specific needs, and no MongoDB or driver exists in the Swift mock backend.
 - Decision: Build only the SwiftUI registration screens now. An app user registers and creates both profiles, linked; a dog user can register alone. Profiles are stored on the device (`ProfileStore`), with each profile's creation time and links recorded so "created first" is derivable. Do not add MongoDB, a profile API, or backend changes yet.
 - Alternatives: A separate Python profile service, or profiles inside `app_backend/`, with a local MongoDB; deferred until the backend owner weighs in.
@@ -181,7 +181,7 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
   matched — which is also what an imperative like "check the door" or "tell
   her I'll call" gets, since neither matches anything either), that answer
   carries one explicit button, "Have Annie check with Jeanine in person,"
-  which then dispatches the same text as a real message/run (REQ-010),
+  which then dispatches the same text as a real message/run (REQ-016),
   reported live in the same scrolling conversation. No text is ever
   classified or auto-dispatched; the family member always makes the explicit
   second choice to physically involve the robot.
@@ -199,6 +199,35 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
   are still client-local and not persisted (unchanged from before); a message
   and its run remain the only persisted, cross-device-visible record of Annie
   actually doing something.
+
+## DEC-013: Household records in MongoDB, with an in-process fallback
+
+- Date: 2026-09-20.
+- Status: Adopted; answers the storage question deferred by [DEC-008](#dec-008-profile-registration-ui-first-mongodb-storage-and-creation-rules-deferred).
+- Context: The team agreed a schema covering app users, dog users, messages,
+  reminders, reminder history and emergencies, with three inbound calls from
+  `robot_backend` carrying the robot's response to a message, compliance with
+  a reminder, and an emergency. DEC-008 left storage to the backend owner.
+- Decision: Implement the six collections in `app_backend`, persisted to
+  MongoDB when `MONGODB_URI` is set and reachable, and to an in-process
+  fallback otherwise. `GET /api/storage` reports which is live and why. The
+  three inbound routes require `X-Internal-Secret`, a different credential
+  from the family bearer token, and are rejected outright when it is unset.
+  Messages carry `dog_user_id` and `app_user_id`, which the agreed schema
+  omitted: app users are many-to-one onto dog users, and without them that
+  relationship cannot be expressed.
+- Alternatives: SQLite, reusing the store this service already has for
+  incidents, which was recommended for demo-day robustness; and in-memory
+  only. MongoDB was chosen by the project owner over that recommendation.
+- Reason: The fallback exists so a database being down cannot take the family
+  app down with it. It is announced through `/api/storage` rather than
+  silently substituted, because a demo that appears to persist and does not is
+  worse than one that says which mode it is in.
+- Consequences: Persistence requires a running `mongod`; without one the
+  service still works but loses records on restart. Live runs stay in process
+  by design (they are progress, not record), so a message has a durable half
+  and a transient half. The robot side of the three inbound calls is not
+  implemented yet, so nothing writes to them in production.
 
 ## Future entries
 

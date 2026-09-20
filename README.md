@@ -12,14 +12,14 @@ Annie is two independent services that talk over the LAN, so the resident's
 home and the family's phone can be in different places.
 
 ```text
-  Family (phone / browser)                 Resident's home
-  ┌────────────────────────┐               ┌──────────────────────────────┐
-  │ app_frontend  (SwiftUI)│               │ robot_backend    (GX10)      │
-  │ frontend      (web)    │               │ robot/           (Go2 + sim) │
-  └───────────┬────────────┘               └───────────────┬──────────────┘
-              │ REST + WebSocket                           │
-        ┌─────┴──────────┐   POST /dispatch  ──────────────┘
-        │  app_backend   │ ◄── POST /internal/events ───────
+  Family (phone / browser)                Resident's home
+  ┌────────────────────────┐              ┌──────────────────────────────┐
+  │ app_frontend  (SwiftUI)│              │ robot/  errand brain,        │
+  │ frontend      (web)    │              │         Go2 control, sim     │
+  └───────────┬────────────┘              └───────────────┬──────────────┘
+              │ REST + WebSocket                          │
+        ┌─────┴──────────┐  POST /dispatch ───────────────┘
+        │  app_backend   │ ◄─ POST /internal/events ───────
         │  + MongoDB     │
         └────────────────┘
 ```
@@ -29,8 +29,8 @@ home and the family's phone can be in different places.
 | `app_backend/` | Family-facing API: messages, runs, reminders, observation memory, incident policy | **Working**, 86 tests |
 | `app_frontend/` | SwiftUI app for iPhone and Mac | **Working** on device and simulator |
 | `frontend/` | Phone-friendly web app served at `/app/` | **Working** |
-| `robot_backend/` | The GX10-side service `app_backend` dispatches to | **Scaffold** — see below |
-| `robot/` | Simulator, physical Go2 control, perception, planner | **Working**, see [robot/README.md](robot/README.md) |
+| `robot/` | The robot side: errand brain serving `/dispatch`, physical Go2 control, perception, simulator | **Working**, see [robot/README.md](robot/README.md) |
+| `robot_backend/` | Original top-level placeholder; the working robot service lives under `robot/` | Unused scaffold |
 | `shared/`, `contract/` | Protocol references and exported typed schemas | — |
 
 ## What is real, and what is staged
@@ -44,11 +44,18 @@ of the household schema; the incident state machine; the simulator driving an
 actual Go2 model with a trained walking policy, camera-driven perception, and
 execution receipts.
 
-**Staged or unconnected:** `robot_backend` does not yet implement the two calls
-in [contract/family_messages.md](contract/family_messages.md), so a real dog
-does not move on a message yet — `app_backend/scripts/fake_robot.py` stands in
-for it and is a working reference for that side. Observation memory is seeded
-with synthetic data. Full DimOS, Linq delivery, and Elastic remain unconnected.
+The message boundary is implemented on both sides: `robot/dog/missions/errand.py`
+serves `/dispatch` and reports back through `/internal/events`, and
+`robot/demo_dog.sh` brings up the app, the errand brain and the dog together.
+The first app-to-dog missions ran on the physical Go2 on 2026-09-20 — it found
+the resident, spoke, and relayed her reply. See [docs/TODO.md](docs/TODO.md)
+for the recorded runs and their open items.
+
+**Staged or unconnected:** observation memory is seeded with synthetic data,
+and the resident's spoken replies have been transcribed only in fragments so
+far. Full DimOS, Linq delivery, and Elastic remain unconnected. For working on
+the app alone, `app_backend/scripts/fake_robot.py` stands in for the robot and
+prints everything the two sides exchange.
 
 `fall_confirmed` means **escalation confirmed**, never a medically verified
 fall. Queued, acknowledged, and executed are distinct states throughout.

@@ -1,9 +1,11 @@
 # Family message dispatch — app_backend to robot_backend (draft v0.1)
 
 Added 2026-09-19 alongside the async family-messaging feature in `app_backend`.
-This is a **new** boundary; nothing in `robot_backend` implements its side yet
-— the demo runs against `app_backend`'s mock mode instead (see below). The
-`robot_backend` owner should implement the two calls below to connect for real.
+Both sides are implemented: `robot/dog/missions/errand.py` serves `/dispatch`
+and reports progress through `/internal/events`, and the first app-to-dog
+missions ran on the physical Go2 on 2026-09-20. This document remains the
+authority on the wire format. `app_backend/scripts/fake_robot.py` is a
+standard-library stand-in for working on the app without the dog.
 
 ## Deployment
 

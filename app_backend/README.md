@@ -1,13 +1,28 @@
-# Annie local demo backend
+# Annie app backend
 
-The approved robot-to-app boundary now includes typed maps, captions, observer
-poses, event evidence, released crops, transcripts, and two-way commands. See
-[contract v0.1](../contract/README.md). The older status-only envelope is a
-compatibility option; full frames remain on the trusted local compute network.
+The family-facing service. It carries four things: free-text messages relayed
+to the resident by the robot, the household records behind them, the resident's
+reminders and observation memory, and the possible-incident check-in policy.
 
-Python 3.10+, FastAPI, and SQLite. Run one worker: the event bus and check-in
-state are in process. This is a local demonstration, not a medical device or a
-working robot integration. No calls reach hardware, cloud vision, or speech.
+Python 3.10+ and FastAPI, with storage split by how long each thing should
+live:
+
+| State | Where | Survives restart |
+| --- | --- | --- |
+| Household records (profiles, messages, reminders, history, emergencies) | MongoDB, or an in-process fallback | Yes, with MongoDB |
+| Incident events and the last 1,000 observations | SQLite | Yes |
+| Live runs, the message thread, queued commands | In process | No |
+
+Run one worker: the event bus and check-in state are in process.
+
+**This backend performs no inference and holds no model-provider credentials.**
+All of it happens on the robot side. That is a privacy boundary, not a
+style preference. The robot-to-app contract is
+[contract v0.1](../contract/README.md); full frames never cross it.
+
+This is a demonstration, not a medical device. Queued, acknowledged and
+executed are distinct states throughout, and `fall_confirmed` means escalation
+confirmed, never a medically verified fall.
 
 ## Setup and run
 
@@ -103,9 +118,10 @@ family receipt; it does not resolve physical safety or cancel its check-in.
 `POST /api/messages` accepts a free-text message from one of a hardcoded
 three-person household (`jeanine`, `zach`, `ellis`; no signup, no JWT) and
 returns instantly with a run ID; the actual navigate/speak/listen/recall/speak
-sequence is dispatched to `robot_backend` in a background task. This state is
-entirely in-memory (no SQLite) and does not survive a restart — a deliberate,
-separate carve-out from the rest of this service (see DEC-006). The interface
+sequence is dispatched to `robot_backend` in a background task. A run and its
+live beats are in process and do not survive a restart, deliberately: they are
+progress, not record. The durable half of the same message lives in the
+`messages` collection below (see DEC-006). The interface
 this dispatch call and `POST /internal/events` implement is documented in
 [contract/family_messages.md](../contract/family_messages.md).
 
@@ -129,16 +145,25 @@ For the phone/robot LAN demo, run `uvicorn` with `--host 0.0.0.0` (not
 iPhone and `robot_backend`'s calls to `/internal/events` need it there, or
 `TrustedHostMiddleware` rejects them before they reach the handler.
 
-Two scripts help verify this without waiting on the actual robot:
+Three scripts cover this without the actual robot:
 
 ```sh
-# Prints PASS/FAIL for reaching ROBOT_BACKEND_URL in about five seconds.
+# Is the GX10 reachable? PASS/FAIL in about five seconds, so on demo day you
+# know immediately whether it is the network or the code.
 .venv/bin/python app_backend/scripts/check_robot_backend.py
 
-# Posts a message and prints each run event as it arrives (works great with
-# ANNIE_FAMILY_MOCK_ROBOT=true and no GX10 at all).
+# Post a message and print each run event as it arrives.
 .venv/bin/python app_backend/scripts/demo_family_message.py --text "How are you feeling today?"
+
+# Stand in for robot_backend: print every payload this service sends, and with
+# --auto-reply send the callbacks back so the whole loop runs with no GX10.
+# Standard library only, so it also runs on the GX10 as a reference.
+.venv/bin/python app_backend/scripts/fake_robot.py --auto-reply
 ```
+
+`fake_robot.py` is the quickest way to see what the robot side receives, and
+what it must send back. `ANNIE_FAMILY_MOCK_ROBOT=true` is the other option: it
+skips HTTP entirely and runs a canned sequence in process.
 
 ## Household records
 
@@ -229,6 +254,8 @@ Regenerate schemas after changing models:
 .venv/bin/python contract/export_schemas.py
 ```
 
-Tests use in-memory/temporary SQLite, injected clocks, and TestClient. They do
-not wait eight seconds or contact providers/hardware. `requirements.lock` pins
-the tested development dependency set; review updates before deployment.
+86 tests. They use temporary SQLite, the in-process record fallback, injected
+clocks and TestClient, so they need no database and no network; two additional
+tests exercise a real MongoDB and skip when none is listening. They never wait
+eight seconds or contact providers or hardware. `requirements.lock` pins the
+tested dependency set; review updates before deployment.

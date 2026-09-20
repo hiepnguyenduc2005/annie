@@ -72,6 +72,13 @@ class SightingMemory:
                 pass
         return entry
 
+    def last_seen_named(self, name, *, now, within_s=600.0):
+        """Most recent sighting/greeting of a named person: {"x","y","t","age_s","greeted"} or None."""
+        for e in reversed(self.entries):
+            if e.get("note") == name and now - e["t"] <= within_s and e["kind"] in ("seen", "greet"):
+                return {"x": e["x"], "y": e["y"], "t": e["t"], "age_s": now - e["t"], "greeted": e["kind"] == "greet"}
+        return None
+
     def greeted_here_recently(self, pose, yaw, *, now, radius_m=1.2, within_s=90.0, heading_deg=40.0) -> bool:
         """True when the dog already greeted someone from about this spot and heading a moment ago."""
         for e in self.entries:

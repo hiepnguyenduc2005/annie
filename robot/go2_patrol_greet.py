@@ -48,6 +48,7 @@ from go2_voice_commands import CommandListener  # noqa: E402
 from go2_probe import extract_lowstate, extract_pose, safe_error  # noqa: E402
 from go2_smart_patrol import (HeadingBandit, OccupancyGrid, PatrolPlanner, StallDetector, body_frame,  # noqa: E402
                               quaternion_yaw, sector_ranges, voxel_points_world, wrap_angle)
+from go2_target_id import TargetIdentifier  # noqa: E402
 from go2_walk import (MIN_OPERATING_SOC_PERCENT, MOTION_INHIBIT_PATH, TOPIC_LOWSTATE, TOPIC_POSE,  # noqa: E402
                       TOPIC_SPORT, _private_ipv4, _status_code)
 
@@ -63,7 +64,7 @@ TOPIC_AVOID, AVOID_SWITCH_SET, AVOID_USE_API = "rt/api/obstacles_avoid/request",
 class GreetPolicy:
     """Deterministic greeting decisions from tracker output. No hardware, no model."""
 
-    def __init__(self, *, cooldown_s: float = 240.0, min_height_frac: float = 0.45, center_frac: float = 0.18,
+    def __init__(self, *, cooldown_s: float = 240.0, min_height_frac: float = 0.5, center_frac: float = 0.18,
                  follow_min_height_frac: float = 0.12, checkin_cooldown_s: float = 60.0):
         self.cooldown_s = cooldown_s
         self.min_height_frac = min_height_frac  # greet only when the person is this tall in frame (close)
@@ -110,7 +111,9 @@ class GreetPolicy:
             return "patrol", None
         height, offset, tid = max(people)  # nearest = tallest box
         last = self.greeted.get(tid)
-        close = height >= self.min_height_frac or (front_m is not None and front_m <= 1.1 and height >= 0.3)
+        close = height >= self.min_height_frac or (front_m is not None and front_m <= 1.0 and height >= 0.3)
+        if front_m is not None and front_m > 1.3:
+            close = False  # the LiDAR says they are still far, whatever the box says
         if close and offset <= self.center_frac and (last is None or now_s - last >= self.cooldown_s):
             self.greeted[tid] = now_s
             return "greet", tid
@@ -168,9 +171,13 @@ VIEW_HTML = r"""<!doctype html><meta charset="utf-8"><title>Annie live</title>
 <div><span class="k">lidar front/left/right</span> <span id="lidar">-</span></div>
 <div><span class="k">perception</span> <span id="fps">-</span> fps</div>
 <div><span class="k">people</span> <span id="people">-</span> &middot; <span class="k">greeted</span> <span id="greet">-</span> &middot; <span class="k">check-ins</span> <span id="chk">-</span></div>
+<div style="margin:8px 0"><button onclick="cmd('go_home')">Home base</button> <button onclick="cmd('stop')">Stop</button> <button onclick="cmd('explore')">Explore</button> <button onclick="cmd('scan')">Look around</button> <button onclick="cmd('dance')">Dance</button> <button onclick="cmd('hello')">Wave</button></div>
 <div class="log" id="log"></div></div></div>
 <script>
 const g=id=>document.getElementById(id);
+const cmd=a=>fetch('/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});
+const f=document.getElementById('f');f.onerror=()=>setTimeout(()=>{f.src='/stream.mjpg?'+Date.now()},500);
+setInterval(()=>{f.src='/stream.mjpg?'+Date.now()},90000);  // re-arm the multipart stream before Chrome gives up on it
 const m=document.getElementById('m');setInterval(()=>{m.src='/map.jpg?'+Date.now()},400);
 setInterval(async()=>{try{const s=await (await fetch('/status.json')).json();
 g('mode').textContent=s.mode+(s.action&&s.action!=='patrol'?' / '+s.action:'');g('bat').textContent=s.battery==null?'-':s.battery.toFixed(0)+'%';
@@ -224,6 +231,25 @@ class LiveView:
                         data = json.dumps(view.state).encode()
                     return self._send(200, data, "application/json")
                 self._send(200, VIEW_HTML.encode(), "text/html; charset=utf-8")
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(length) if 0 < length < 4096 else b""
+                if self.path.startswith("/command"):
+                    try:
+                        action = json.loads(raw.decode() or "{}").get("action")
+                    except ValueError:
+                        action = None
+                    if action not in ("go_home", "stop", "explore", "scan", "dance", "hello", "sit", "stand", "follow"):
+                        return self._send(400, b'{"error":"unknown action"}', "application/json")
+                    cmds = getattr(view, "commands", None)
+                    if cmds is None:
+                        return self._send(503, b'{"error":"not running"}', "application/json")
+                    cmds["intent"], cmds["until"] = action, time.monotonic() + (90.0 if action == "go_home" else 12.0)
+                    cmds["source"] = "web"
+                    view.log(f"web command: {action}")
+                    return self._send(202, json.dumps({"accepted": action}).encode(), "application/json")
+                self._send(404, b"not found", "text/plain")
 
             def _send(self, code, data, ctype):
                 self.send_response(code)
@@ -321,7 +347,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                            planner=None, stall=None, lidar=True, firmware_avoid=False, lidar_stale_s=2.0,
                            stop_on_checkin=False, idle_trick_s=45.0, view=None, no_motion=False, diag_every_s=5.0,
                            imgsz=352, voxel_min_interval_s=0.25, brain=None, brain_period_s=4.0, memory=None,
-                           voice=None, bandit=None):
+                           voice=None, bandit=None, identifier=None):
     loop = asyncio.get_running_loop()
     view = view or LiveView(port=0)
     view_url = view.start()
@@ -463,7 +489,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             jpeg, w, h = encoder(frame)
             return np.zeros((h, w, 3), dtype=np.uint8)
     perception = Perception(tracker, convert=convert, annotate=annotate if view.port else None, diag=diag,
-                            min_conf=0.45, min_keypoints=4, min_age_ms=250)
+                            min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier)
+    view.commands = voice_state  # POST /command on the live view sets the same bounded override as a voice command
 
     async def on_track(track):
         while not stopped:
@@ -590,6 +617,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         memory_last_seen = [-1e9]
         follow_hold = {"tid": None, "since": None}
         follow_hold_s = 8.0
+        blocked_times: list[float] = []
         bandit = bandit or HeadingBandit()
         bandit_state = {"until": 0.0, "rewarded": False}
         report["bandit"] = None
@@ -696,7 +724,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 action = "follow"  # same spot, same heading, moments ago: that is the person we already greeted
             if tracks and now - memory_last_seen[0] > 5.0:
                 memory_last_seen[0] = now
-                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="seen", people=len(tracks))
+                named = next(((t.get("identity") or {}).get("name") for t in tracks if t.get("identity")), None)
+                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="seen", people=len(tracks), note=named)
                 grid["map"].mark(tel["pose"][0], tel["pose"][1], "seen")
             # voice commands: a bounded override of what the dog is doing (guardrails still apply below)
             intent = voice_state["intent"] if now < voice_state["until"] else None
@@ -726,7 +755,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 text = policy.greeting_text(track)
                 trick_name, trick_api, trick_settle = GREET_TRICKS[len(report["greetings"]) % len(GREET_TRICKS)]
                 status(f"t={now-start:5.1f}s person (track {tid}) ahead: stopping, {trick_name}, saying {text!r}")
-                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="greet", people=len(tracks), note=trick_name)
+                memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="greet", people=len(tracks),
+                           note=((track.get("identity") or {}).get("name")) or trick_name)
                 grid["map"].mark(tel["pose"][0], tel["pose"][1], "greet")
                 code = await show(trick_name, trick_api, trick_settle, text)
                 report["greetings"].append({"t_s": round(now - start, 1), "track_id": tid, "text": text,
@@ -745,16 +775,16 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             if action == "follow":
                 track = next(t for t in tracks if t.get("track_id") == tid)
                 vx, wz, reason = follow_command(track["box"], fw or 640, fh or 480, target_height_frac=0.5,
-                                                too_close_frac=0.8, max_vx=0.5, max_wz=1.0, k_yaw=2.2, k_dist=1.8)
+                                                too_close_frac=0.9, max_vx=0.5, max_wz=1.0, k_yaw=2.2, k_dist=1.8)
                 cx = (track["box"][0] + track["box"][2]) / 2.0 / float(fw or 640)
                 centred = abs(cx - 0.5) <= 0.18
                 front_m = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
                 if centred and front_m is not None:
                     # depth from the LiDAR beats box size: fast while far, ease off with distance, hold at ~0.75 m
-                    if front_m < 0.75:
+                    if front_m < 0.6:
                         vx, reason = 0.0, "lidar_close"
                     elif reason != "too_close":
-                        vx = min(0.5, max(0.2, 0.35 * (front_m - 0.75)))  # 2 m -> 0.44, 1.2 m -> 0.2
+                        vx = min(0.5, max(0.2, 0.4 * (front_m - 0.6)))  # 2 m -> 0.5, 1.1 m -> 0.2
                         reason = "lidar_far" if front_m > 1.1 else "lidar_near"
                 if 0.0 < vx < 0.2:
                     vx = 0.2  # walking deadband: either walk properly or hold
@@ -823,10 +853,17 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     free = _g.free_ahead(_p[0], _p[1], bandit.sector_heading(a))
                     if free < 0.7:
                         return -1.0  # known wall/desk that way
-                    return 0.3 * min(free, 3.0) / 3.0 + 0.5 * _g.unvisited_ahead(_p[0], _p[1], bandit.sector_heading(a))
+                    bonus = 0.0
+                    if identifier is not None:  # pull toward where the named target was last seen but not yet greeted
+                        seen = memory.last_seen_named(identifier.name, now=now)
+                        if seen and not seen["greeted"]:
+                            heading_to = math.atan2(seen["y"] - _p[1], seen["x"] - _p[0])
+                            if abs(wrap_angle(heading_to - bandit.sector_heading(a))) < math.pi / bandit.n_arms:
+                                bonus = 1.0
+                    return bonus + 0.3 * min(free, 3.0) / 3.0 + 0.5 * _g.unvisited_ahead(_p[0], _p[1], bandit.sector_heading(a))
                 arm = bandit.choose(prior=prior)
                 planner.target_heading = bandit.sector_heading(arm)
-                bandit_state.update(until=now + 8.0, rewarded=False)
+                bandit_state.update(until=now + 12.0, rewarded=False)
                 report["bandit"] = bandit.snapshot()
                 status(f"t={now-start:5.1f}s bandit: explore heading sector {arm} ({math.degrees(planner.target_heading):+.0f} deg)"
                        f" values={[round(v, 1) for v in bandit.value]}")
@@ -835,6 +872,18 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             if new_mode in ("blocked", "backoff") and not bandit_state["rewarded"]:
                 bandit.reward(0.0)  # this heading is a wall
                 bandit_state.update(rewarded=True, until=now + 1.0)  # re-choose soon after clearing
+                blocked_times.append(now)
+                blocked_times[:] = [t for t in blocked_times if now - t < 20.0]
+                if len(blocked_times) >= 3:  # stuck against something (wall, desk): escape toward the freest known direction
+                    g = grid["map"]
+                    best = max(range(bandit.n_arms), key=lambda a: g.free_ahead(tel["pose"][0], tel["pose"][1], bandit.sector_heading(a)))
+                    planner.target_heading = bandit.sector_heading(best)
+                    bandit.current = best
+                    bandit_state.update(until=now + 12.0, rewarded=False)
+                    blocked_times.clear()
+                    memory.add(t=now, pose=tel["pose"], yaw=tel["yaw"], kind="collision", note="stuck")
+                    status(f"t={now-start:5.1f}s stuck: 3 blocks in 20 s, escaping toward sector {best} "
+                           f"({math.degrees(planner.target_heading):+.0f} deg, {g.free_ahead(tel['pose'][0], tel['pose'][1], planner.target_heading):.1f} m free)")
             decision = brain_state["decision"] if brain is not None and now < brain_state["until"] else None
             if intent in ("scan", "explore", "go_home") and now < voice_state["until"]:
                 decision = {"action": intent, "ok": True}
@@ -901,11 +950,11 @@ def main(argv=None):
     parser.add_argument("--ip", type=_private_ipv4, default="192.168.12.1")
     parser.add_argument("--duration", type=float, default=300.0)
     parser.add_argument("--speed", type=float, default=0.35, help="m/s, at most 0.45")
-    parser.add_argument("--boundary", type=float, default=2.5)
+    parser.add_argument("--boundary", type=float, default=5.0, help="metres from the start; the leash is 80% of it")
     parser.add_argument("--no-lidar", action="store_true", help="skip the voxel-map sector ranges (stall detection only)")
     parser.add_argument("--firmware-avoid", action="store_true", help="also switch on the firmware obstacle-avoid service")
     parser.add_argument("--stop-on-checkin", action="store_true", help="end the run after the first lying-person check-in")
-    parser.add_argument("--idle-trick", type=float, default=45.0, help="seconds without a new person before a trick; 0 disables")
+    parser.add_argument("--idle-trick", type=float, default=90.0, help="seconds without a new person before a trick; 0 disables")
     parser.add_argument("--view-port", type=int, default=8011, help="live camera/boxes page on 127.0.0.1; 0 disables")
     parser.add_argument("--no-motion", action="store_true", help="perception-only: never move or perform tricks")
     parser.add_argument("--imgsz", type=int, default=352, help="tracker inference size (multiple of 32)")
@@ -914,6 +963,8 @@ def main(argv=None):
     parser.add_argument("--brain-period", type=float, default=4.0)
     parser.add_argument("--voice", action="store_true", help="listen for 'Annie, ...' commands on the host mic")
     parser.add_argument("--memory-file", default=".data/hardware/sightings.jsonl")
+    parser.add_argument("--target", default=os.environ.get("ANNIE_TARGET", "Grandma:red"),
+                        help="NAME:COLOUR of the person to recognise by shirt colour; empty disables")
     parser.add_argument("--output")
     args = parser.parse_args(argv)
     if not 0.05 <= args.speed <= 0.45:
@@ -934,7 +985,8 @@ def main(argv=None):
                                               imgsz=args.imgsz, diag_every_s=args.diag_every,
                                               brain=VisionBrain() if args.brain else None, brain_period_s=args.brain_period,
                                               memory=SightingMemory(args.memory_file),
-                                              voice=CommandListener(lambda c, t: None, status=_say) if args.voice else None))
+                                              voice=CommandListener(lambda c, t: None, status=_say) if args.voice else None,
+                                              identifier=(TargetIdentifier(*args.target.split(":", 1)) if args.target else None)))
     except KeyboardInterrupt:
         _say("interrupted")
         return 130

@@ -122,8 +122,9 @@ class Perception:
     """Three worker threads; `submit` from the receiver, `latest()` from the control loop."""
 
     def __init__(self, tracker, *, convert, annotate=None, diag: Diag | None = None, min_conf=0.45,
-                 min_keypoints=4, min_age_ms=250):
+                 min_keypoints=4, min_age_ms=250, identifier=None):
         self.tracker, self.convert, self.annotate = tracker, convert, annotate
+        self.identifier = identifier  # e.g. go2_target_id.TargetIdentifier: names tracks by shirt colour
         self.diag = diag or Diag()
         self.filter = dict(min_conf=min_conf, min_keypoints=min_keypoints, min_age_ms=min_age_ms)
         self.in_q: queue.Queue = queue.Queue(maxsize=1)
@@ -189,6 +190,11 @@ class Perception:
                 continue
             self.diag.sample("track_ms", (time.perf_counter() - t0) * 1000)
             tracks = plausible_people(raw, now_ms=now_ms, **self.filter)
+            if self.identifier is not None and tracks:
+                try:
+                    self.identifier.apply(img, tracks)
+                except Exception:
+                    self.diag.count("errors")
             now = time.monotonic()
             with self.lock:
                 self.result = {"seq": self.result["seq"] + 1, "tracks": tracks, "raw_tracks": raw,

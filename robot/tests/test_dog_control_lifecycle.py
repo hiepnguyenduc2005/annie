@@ -14,7 +14,7 @@ def make_view():
     return patrol.LiveView(port=0)
 
 
-async def start_runtime(monkeypatch, dog, view, audio, *, manual=True, duration=0.8):
+async def start_runtime(monkeypatch, dog, view, audio, *, manual=True, duration=0.8, require_selection=False, demo_everyone=False):
     from robot.dog import inference
     monkeypatch.setattr(inference, "shared", lambda: None)
     original_sleep = asyncio.sleep
@@ -32,7 +32,8 @@ async def start_runtime(monkeypatch, dog, view, audio, *, manual=True, duration=
                                      min_turn_s=0.02, leash_m=50.0),
         stall=patrol.StallDetector(window_s=0.05, min_progress_m=0.02),
         view=view, duration_s=duration, idle_trick_s=0, source="simulation",
-        audio=audio, faces_dir=".", manual_control=manual))
+        audio=audio, faces_dir=".", manual_control=manual, require_grandma_selection=require_selection,
+        demo_everyone_grandma=demo_everyone))
     while not hasattr(view, "missions"):
         assert not task.done(), f"runtime exited during setup: {getattr(task, 'exception', lambda: None)()}"
         await original_sleep(0.001)

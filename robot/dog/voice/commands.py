@@ -51,6 +51,14 @@ def parse_command(transcript: str | None, *, require_wake=True) -> dict | None:
     if require_wake and wake is None:
         return None
     raw = text
+    if wake is None:
+        # An open conversation permits dialogue, not incidental motion words.
+        # Keep short, unambiguous stop requests available without addressing Annie.
+        if text in ("stop", "pause", "please stop", "please pause", "stop please", "pause please"):
+            return {"intent": "stop", "phrase": text, "wake": None}
+        if len(raw.split()) >= 2:
+            return {"intent": "instruct", "phrase": raw[:300], "wake": None}
+        return None
     text = re.sub(r"^(please|can you|could you|now|go|just)\s+", "", text).strip()
     for intent, phrases in COMMANDS:
         for phrase in sorted(phrases, key=len, reverse=True):
@@ -74,6 +82,7 @@ class CommandListener:
         self._reopen = None  # set by reopen(): a factory for a new recorder, picked up between utterances
         self.open_until = 0.0   # conversation window: until this time speech needs no wake word (Annie just spoke to someone)
         self.muted_until = 0.0  # while Annie herself is talking, what the mic hears is discarded
+        self._mute_generation = 0
         self.thread = threading.Thread(target=self._loop, daemon=True, name="voice")
 
     def start(self):
@@ -81,10 +90,11 @@ class CommandListener:
         return self
 
     def open_conversation(self, seconds: float = 45.0):
-        """After Annie speaks to someone, their next words need no wake word for `seconds`."""
+        """Allow unwoken dialogue and precise stop requests for `seconds`, not motion commands."""
         self.open_until = max(self.open_until, time.time() + seconds)
 
     def mute(self, seconds: float):
+        self._mute_generation += 1
         self.muted_until = max(self.muted_until, time.time() + seconds)
 
     def reopen(self, recorder_factory):
@@ -118,8 +128,12 @@ class CommandListener:
                         recorder.close()
                     recorder = factory()
                     self.status("voice listener: microphone switched")
+                mute_generation = self._mute_generation
+                capture_muted = time.time() < self.muted_until
                 utt = capture_utterance(recorder, vad, max_ms=self.max_ms)
                 if utt["outcome"] != "speech":
+                    continue
+                if capture_muted or mute_generation != self._mute_generation or time.time() < self.muted_until:
                     continue
                 text = transcriber(pcm16_to_wav(utt["pcm"])).strip()
             except Exception as exc:
@@ -128,7 +142,7 @@ class CommandListener:
                 continue
             if not text:
                 continue
-            if time.time() < self.muted_until:
+            if mute_generation != self._mute_generation or time.time() < self.muted_until:
                 continue  # Annie's own voice
             self.heard += 1
             in_conversation = time.time() < self.open_until

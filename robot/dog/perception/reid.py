@@ -20,8 +20,9 @@ nobody. GUESTS ARE CLOTHING + PLACE ONLY. A guest never consented to anything, s
 or enrols a face for one, never keeps an image, and forgets the clothing vector `forget_after_s` after the last
 sighting. (The one face computation an unnamed person is subject to is the same transient "is this an enrolled
 person?" check the tracker already makes; its embedding is compared and discarded.) `.data/faces/guests.json`
-(git-ignored, 0600) holds appearance vectors, counters, timestamps and the dog's last position only. Naming a
-guest is an enrolment and goes through the family app with that person's agreement.
+(git-ignored, 0600) holds appearance vectors, counters, timestamps and the dog's last position only. Permanent naming of a
+guest is an enrolment and goes through the family app with that person's agreement. An operator may instead
+assign a session-only demo name to visible upper/lower clothing; that is not face enrollment or identification.
 
 None of this is an identification. Clothing says "dressed like the person I saw a minute ago": two people in
 similar dark clothes are one "person" to it, and a change of jacket is a new one. Every identity carries its
@@ -288,6 +289,10 @@ class PersonReid:
         self._face_last_ms = -10 ** 12  # any track: id churn must not turn into a face lookup per frame
         self._candidates: list[dict] = []  # unnamed appearances on their way to becoming a guest
         self._dirty, self._saved_s, self._expired_s = False, 0.0, 0.0
+        self._selection = {"name": None, "guest": None, "state": "unselected", "needs_selection": True}
+        self._selected_sig = None
+        self._selected_seen_s = None
+        self._visible_guests = {}
         self._load()
 
     # -- persistence (clothing vectors, counters, timestamps; never an image or a face) -----------------------
@@ -352,10 +357,62 @@ class PersonReid:
                     for n, a in sorted(self.known.items(), key=lambda kv: int(GUEST_RE.match(kv[0]).group(1)) if kv[1].guest else 0)
                     if a.guest]
 
+    def _selection_lost(self, state):
+        self._selection.update(state=state, needs_selection=True)
+        name = self._selection["name"]
+        self._tracks = {tid: held for tid, held in self._tracks.items() if held["name"] != name}
+
+    def selection_status(self) -> dict:
+        """Session-only selection; loss and ambiguity require explicit assignment again."""
+        with self.lock:
+            if self._selection["state"] == "tracking" and self.clock() - self._selected_seen_s > 2.0:
+                self._selection_lost("lost")
+            return dict(self._selection)
+
+    def assign_guest(self, guest_name, name="Jeanine", *, now_s=None) -> dict:
+        """Assign fresh visible upper/lower clothing without face lookup or enrollment.
+
+        Raises ValueError for an invalid, absent, stale or incomplete guest. No image or
+        assignment is persisted; a restart requires operator selection again.
+        """
+        now_s = self.clock() if now_s is None else float(now_s)
+        if not isinstance(guest_name, str) or not GUEST_RE.fullmatch(guest_name):
+            raise ValueError("Select an existing Guest N")
+        if not isinstance(name, str) or not name.strip() or GUEST_RE.fullmatch(name.strip()):
+            raise ValueError("A non-guest name is required")
+        if not math.isfinite(now_s):
+            raise ValueError("Invalid selection timestamp")
+        with self.lock:
+            item = self.known.get(guest_name)
+            visible = self._visible_guests.get(guest_name)
+            if item is None or not item.guest or visible is None:
+                raise ValueError("Guest is not currently visible")
+            sig, seen_s = visible
+            if not 0.0 <= now_s - seen_s <= 2.0:
+                raise ValueError("Guest observation is stale")
+            if sig is None or sig.lower is None:
+                raise ValueError("Both upper and lower clothing must be visible")
+            old_name = self._selection["name"]
+            name = name.strip()
+            self._tracks = {tid: held for tid, held in self._tracks.items()
+                            if held["name"] not in (old_name, name, guest_name)}
+            self.known.pop(guest_name)
+            self.known.pop(name, None)
+            self._visible_guests.pop(guest_name)
+            self._selected_sig = sig
+            self._selected_seen_s = seen_s
+            self._selection = {"name": name, "guest": guest_name, "state": "tracking", "needs_selection": False}
+            self._dirty = True
+            return dict(self._selection)
+
     def forget(self, name: str) -> bool:
         """Drop a name's clothing signature (a guest disappears entirely); tracks holding the name are released."""
         with self.lock:
             removed = self.known.pop(name, None) is not None
+            self._visible_guests.pop(name, None)
+            if name in (self._selection["name"], self._selection["guest"]):
+                self._selection_lost("lost")
+                removed = True
             for tid in [tid for tid, held in self._tracks.items() if held["name"] == name]:
                 del self._tracks[tid]
                 removed = True
@@ -502,14 +559,28 @@ class PersonReid:
 
         with self.lock:
             self._expire(now_s)
-            rules = self._rules()
+            rules = [(n, c) for n, c in self._rules() if n != self._selection["name"]]
             ruled = {n for n, _ in rules}
             for name in [n for n, a in self.known.items() if a.source == "shirt_colour" and n not in ruled]:
                 del self.known[name]  # the rule was renamed or removed in the app: what it taught goes with it
                 self._dirty = True
             sigs = [ClothingSignature.from_track(img_bgr, t) for t in tracks]
             decided: dict[int, dict] = {}  # index in `tracks` -> identity
-            taken: set[str] = set()  # one name names one person per frame
+            taken: set[str] = {self._selection["name"]} if self._selection["name"] else set()
+            selected_match = None
+            if self._selection["state"] == "tracking":
+                if now_s - self._selected_seen_s > 2.0:
+                    self._selection_lost("lost")
+                else:
+                    matches = [(i, ClothingSignature.distance(self._selected_sig, sig))
+                               for i, sig in enumerate(sigs) if sig is not None]
+                    matches = [(i, d) for i, d in matches if d <= self.match_clothes]
+                    if len(matches) > 1:
+                        self._selection_lost("ambiguous")
+                    elif len(matches) == 1 and sigs[matches[0][0]].lower is not None:
+                        selected_match = matches[0]
+                        self._selected_seen_s = now_s
+                        self._selected_sig = self._selected_sig.blended(sigs[selected_match[0]])
 
             def decide(i, name, score, method):
                 decided[i] = {"name": name, "score": score, "method": method}
@@ -519,6 +590,8 @@ class PersonReid:
             index = self._face_index()
             due = []
             for i, t in enumerate(tracks):
+                if selected_match is not None and i == selected_match[0]:
+                    continue
                 existing, tid = t.get("identity"), t.get("track_id")
                 if existing and existing.get("name") and existing.get("method") in (None, "face") \
                         and existing["name"] not in taken:
@@ -551,6 +624,10 @@ class PersonReid:
                             del self._tracks[tid]
                 self._observe(name, sigs[i], now_s, xy, source="face", confirmed=True)
 
+            if selected_match is not None:
+                i, distance = selected_match
+                decide(i, self._selection["name"], round(1.0 - distance, 4), "clothing")
+
             # 2. clothing, nearest first so the better-fitting track gets a contested name
             pairs = []
             for i, sig in enumerate(sigs):
@@ -558,6 +635,8 @@ class PersonReid:
                     continue
                 held = self._tracks.get(tracks[i].get("track_id"))
                 for name, item in self.known.items():
+                    if name == self._selection["name"]:
+                        continue
                     d = ClothingSignature.distance(item.sig, sig)
                     if d <= self._threshold(item, now_s, xy, same_track=bool(held and held["name"] == name)):
                         pairs.append((d, i, name))
@@ -592,6 +671,8 @@ class PersonReid:
                     decide(i, name, 1.0, "guest")
                     self._dirty, self._saved_s = True, 0.0  # a new guest number is written now, not in 15 s
 
+            self._visible_guests = {ident["name"]: (sigs[i], now_s) for i, ident in decided.items()
+                                    if ident["method"] == "guest"}
             for i, t in enumerate(tracks):
                 ident = decided.get(i)
                 t["identity"] = ident

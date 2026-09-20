@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from robot.dog.planning import agent  # noqa: E402
@@ -48,7 +50,7 @@ def test_rule_plan_relay_and_checkin_and_home():
     p = agent.plan_instruction("go home", {}, validate_command=validate_command)
     assert [s["name"] for s in p["steps"]] == ["go_home"]
     p = agent.plan_instruction("do a backflip", {}, validate_command=validate_command)
-    assert p["steps"] == [] and "did not understand" in p["reply"]
+    assert p["steps"] == [] and "not supported" in p["reply"]
 
 
 class FakeInference:
@@ -74,6 +76,22 @@ def test_model_plan_missing_the_social_half_is_completed_by_rules():
     inf = FakeInference('{"reply": "Turning.", "steps": [{"name": "turn", "args": {"degrees": 180}}]}')
     plan = agent.plan_instruction("turn around and greet the person behind you", {}, inference=inf, validate_command=validate_command)
     assert [s["name"] for s in plan["steps"]] == ["turn", "find_person", "hello", "say"] and plan["source"] == "local:fake+rules"
+
+
+def test_model_recipient_only_greeting_keeps_wave_and_words():
+    inf = FakeInference('{"reply": "I will wave at Grandma.", "steps": [{"name": "find_person", "args": {"name": "Jeanine"}}]}')
+    plan = agent.plan_instruction("Go wave at Grandma", {}, inference=inf, validate_command=validate_command)
+    assert [s["name"] for s in plan["steps"]] == ["find_person", "hello", "say"]
+    assert plan["source"] == "local:fake+rules"
+    assert plan["reply"] == "I will wave at Grandma."  # the model stays the sourced plan
+
+
+def test_model_find_and_say_but_no_wave_still_gets_hello():
+    inf = FakeInference('{"reply": "Hi Grandma!", "steps": [{"name": "find_person", "args": {"name": "Jeanine"}}, '
+                        '{"name": "say", "args": {"text": "Hi Grandma!"}}]}')
+    plan = agent.plan_instruction("go wave at grandma", {}, inference=inf, validate_command=validate_command)
+    assert [s["name"] for s in plan["steps"]] == ["find_person", "hello", "say"]
+    assert plan["source"] == "local:fake+rules"
 
 
 def test_model_failure_falls_back_to_rules():
@@ -175,3 +193,48 @@ def test_conversation_replies_and_concern_is_never_softened():
     assert not line_ok("I see you, and I'm just about to say hello.") and not line_ok("Hello there!")
     assert line_ok("Hi Jeanine, lovely to see you by the window. How are you feeling?", name="Jeanine")
     assert not line_ok("Lovely to see you. How are you?", name="Jeanine")  # knows the name, must use it
+
+
+@pytest.mark.parametrize("text", ["The person in front of you is grandma", "the person ahead is Grandma.",
+                                  "that person is grandma", "everyone here is grandma",
+                                  "the lady in view is my granny", "grandma is the person in front of you",
+                                  "that's grandma", "she is grandma", "Annie, that person is grandma"])
+def test_demo_grandma_identity_statement_is_acknowledged_without_motion(text):
+    sit = {"demo_everyone_grandma": True}
+    plan = agent.plan_instruction(text, sit, inference=None, validate_command=validate_command)
+    assert plan["steps"] == [{"name": "say", "args": {"text": "For this demo, everyone I can see is Grandma."}}]
+    assert plan["reply"] == "For this demo, everyone I can see is Grandma."
+
+
+@pytest.mark.parametrize("text", ["is everyone grandma?", "who is grandma?", "do not assume everyone is grandma",
+                                  "don't treat everyone as grandma", "walk forward", "go wave at Grandma",
+                                  "wave at everyone", "maybe that is grandma"])
+def test_demo_grandma_questions_motion_and_negation_do_not_acknowledge(text):
+    sit = {"demo_everyone_grandma": True}
+    plan = agent.plan_instruction(text, sit, inference=None, validate_command=validate_command)
+    assert plan["reply"] != "For this demo, everyone I can see is Grandma."
+    assert "assume everyone is Grandma" not in plan["reply"] and "is everyone Grandma" not in plan["reply"]
+
+
+def test_demo_grandma_reply_requires_demo_flag():
+    text = "The person in front of you is grandma"
+    plan = agent.plan_instruction(text, {}, inference=None, validate_command=validate_command)
+    assert plan["reply"] != "For this demo, everyone I can see is Grandma."
+
+
+def test_situation_carries_demo_flag_and_describe_notes_it():
+    sit = agent.situation(now=NOW, pose_xy=(0, 0), yaw=0, entities=[], demo_everyone_grandma=True)
+    assert sit["demo_everyone_grandma"] is True and "person is Grandma for this demo" in agent.describe(sit)
+    sit = agent.situation(now=NOW, pose_xy=(0, 0), yaw=0, entities=[])
+    assert sit["demo_everyone_grandma"] is False and "person is Grandma for this demo" not in agent.describe(sit)
+
+
+@pytest.mark.parametrize("text", ["Flip", "Flip over", "stand up and flip", "Do a backflip", "roll over"])
+def test_unsupported_trick_cannot_become_unrelated_model_motion(text):
+    class WrongMotion:
+        def chat(self, *args, **kwargs):
+            pytest.fail("Unsupported acrobatics must be rejected before model planning")
+    for plan in (agent.rule_plan(text), agent.plan_instruction(text, {}, inference=WrongMotion(),
+                                                            validate_command=validate_command)):
+        assert plan["steps"] == []
+        assert "not supported" in plan["reply"]

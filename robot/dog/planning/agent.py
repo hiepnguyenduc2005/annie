@@ -63,7 +63,8 @@ def _ago(s: float) -> str:
 
 
 def situation(*, now, pose_xy, yaw, entities, graph_sentences=(), overhead=None, greeted=(), tracks=(), ranges=None,
-              home_m=0.0, battery=None, mode="-", max_people=6, max_objects=8, horizon_s=600.0) -> dict:
+              home_m=0.0, battery=None, mode="-", max_people=6, max_objects=8, horizon_s=600.0,
+              demo_everyone_grandma=False) -> dict:
     """Bounded, JSON-serialisable picture of the moment. `entities` are `SpacetimeGraph.snapshot()["entities"]`."""
     people, objects = [], []
     for e in entities or ():
@@ -80,6 +81,7 @@ def situation(*, now, pose_xy, yaw, entities, graph_sentences=(), overhead=None,
     objects.sort(key=lambda r: r["age_s"])
     in_view = [{"track_id": t.get("track_id"), "name": ((t.get("identity") or {}).get("name")), "posture": t.get("posture")} for t in tracks or ()]
     return {"t": now, "pose": [round(pose_xy[0], 2), round(pose_xy[1], 2), round(math.degrees(yaw))], "mode": mode,
+            "demo_everyone_grandma": bool(demo_everyone_grandma),
             "battery": battery, "home_m": round(home_m, 1), "ranges": ranges,
             "people_in_view": in_view, "people": people[:max_people], "objects": objects[:max_objects],
             "under_cover": overhead or {"covered": False},
@@ -91,6 +93,8 @@ def describe(sit: dict) -> str:
     pose = sit.get("pose") or [0, 0, 0]
     lines = [f"pose x={pose[0]} y={pose[1]} heading={pose[2]} deg, mode={sit.get('mode', '-')}, "
              f"{len(sit.get('people_in_view') or [])} people in camera view, {sit.get('home_m', 0)} m from home"]
+    if sit.get("demo_everyone_grandma"):
+        lines.append("DEMO: every visible person is Grandma for this demo (no identities are enrolled)")
     r = sit.get("ranges") or {}
     if r:
         fmt = lambda v: "clear" if v is None or v == float("inf") else f"{v:.1f} m"  # noqa: E731
@@ -165,6 +169,9 @@ def _first_name(text: str):
 
 def _conversation_reply(text: str, sit: dict) -> str | None:
     """Recognize direct conversation without inferring a movement request."""
+    demo = _demo_identity_reply(text, sit)
+    if demo is not None:
+        return demo
     low = re.sub(r"[.!?,]+", "", text.lower()).strip()
     low = re.sub(r"^annie\s+|\s+annie$", "", low).strip()
     if low in {"hello", "hi", "hey", "hello there"}:
@@ -182,6 +189,36 @@ def _conversation_reply(text: str, sit: dict) -> str | None:
         if not mode or mode == "-":
             return "I don't have a current activity status to report."
         return f"My current activity is {str(mode).replace('_', ' ')}."[:300]
+    return None
+
+
+_DEMO_GRANDMA = r"(?:grandma|granny|nana|gran)"
+_DEMO_SUBJECT = (r"(?:(?:the|that|this|those)\s+)?"
+                 r"(?:person|people|everyone|everybody|lady|woman|man|one|guy|she|he|they|it)")
+_DEMO_WHERE = r"(?:\s+(?:in front of you|ahead of you|ahead|in view|you (?:can )?see|over there|there|here|near you))?"
+_DEMO_IS = r"(?:\s+(?:is|are|was|were|looks\s+like|must\s+be|should\s+be)|['’]s)"
+_DEMO_MOTION = (r"\b(?:walk|go|come|move|turn|wave|greet|find|follow|approach|dance|sit|stand|patrol|explore|"
+                r"say|tell|check|remind|hello|hi|home)\b")
+_DEMO_REPLY = "For this demo, everyone I can see is Grandma."
+
+
+def _demo_identity_reply(text: str, sit: dict) -> str | None:
+    """Narrow demo-mode acknowledgment of an identity/role assignment ("the person in front of you is Grandma").
+    Speaks only when the operator enabled the demo flag; it enrols nobody and never moves. Questions, negations
+    and anything with a motion verb fall through to the normal rules."""
+    if not (sit or {}).get("demo_everyone_grandma"):
+        return None
+    low = " ".join((text or "").lower().split())
+    low = re.sub(r"^annie[,: ]*\s*", "", low)
+    if "?" in low or re.search(r"\b(?:don'?t|do not|never|not|assume|maybe|who)\b", low) \
+            or re.search(_DEMO_MOTION, low):
+        return None
+    who = rf"(?:my\s+|the\s+)?{_DEMO_GRANDMA}"
+    forward = rf"{_DEMO_SUBJECT}{_DEMO_WHERE}{_DEMO_IS}\s+{who}\s*[.!,]*"
+    reversed_ = rf"{who}{_DEMO_IS}\s+(?:the\s+|that\s+|this\s+)?{_DEMO_SUBJECT}{_DEMO_WHERE}\s*[.!,]*"
+    contraction = rf"(?:that|this|it|she|he)['’]s\s+{who}\s*[.!,]*"
+    if re.fullmatch(rf"(?:ok(?:ay)?[,. ]+)?(?:{forward}|{reversed_}|{contraction})", low):
+        return _DEMO_REPLY
     return None
 
 
@@ -230,6 +267,14 @@ def _step_count_plan(text: str) -> dict | None:
     return None
 
 
+def _unsupported_trick_plan(text: str) -> dict | None:
+    # An unavailable acrobatic action must not be replaced with an unrelated search or movement.
+    if re.search(r"\b(?:flip|backflip|frontflip|sideflip|somersault|roll\s+over)\b", text, re.I):
+        return {"reply": "Flips and rollovers are not supported by this controller.",
+                "steps": [], "source": "rules"}
+    return None
+
+
 def rule_plan(text: str, sit: dict | None = None) -> dict:
     """Keyword fallback: a handful of instructions that must work without any model."""
     t = text.strip()
@@ -239,6 +284,9 @@ def rule_plan(text: str, sit: dict | None = None) -> dict:
     direct = _direct_speech_plan(t)
     if direct is not None:
         return direct
+    unsupported = _unsupported_trick_plan(t)
+    if unsupported is not None:
+        return unsupported
     negated = _negated_action_plan(t)
     if negated is not None:
         return negated
@@ -387,6 +435,8 @@ def plan_instruction(text: str, sit: dict, *, inference=None, validate_command=N
         out = _negated_action_plan(text)
     if out is None:
         out = _step_count_plan(text)
+    if out is None:
+        out = _unsupported_trick_plan(text)
     latency = None
     if inference is not None and out is None:
         try:
@@ -410,8 +460,19 @@ def plan_instruction(text: str, sit: dict, *, inference=None, validate_command=N
         rules = rule_plan(text, sit)
         have = {st["name"] for st in out["steps"]}
         social = [st for st in rules["steps"] if st["name"] in ("find_person", "hello", "say", "listen", "dance", "sit", "stand", "go_home", "patrol")]
-        if social and not have & {st["name"] for st in social}:
+        # An explicit greeting the rules recognise must keep its wave + words even when a small model
+        # already supplied the recipient (or part of the speech): append only the missing greeting
+        # steps, never other motion.
+        greeting_half = "hello" in {st["name"] for st in social} and "find_person" in have \
+            and "hello" not in have
+        if social and (not have & {st["name"] for st in social} or greeting_half):
             extra, _ = validate_steps(social, validate_command) if validate_command is not None else (social, [])
+            if greeting_half:
+                extra = [st for st in extra if st["name"] in ("hello", "say", "listen") and st["name"] not in have]
+                say_at = next((i for i, st in enumerate(out["steps"]) if st["name"] == "say"), None)
+                if say_at is not None:  # wave before speaking, even when the model already planned the words
+                    out["steps"] = out["steps"][:say_at] + [st for st in extra if st["name"] == "hello"] + out["steps"][say_at:]
+                    extra = [st for st in extra if st["name"] != "hello"]
             out["steps"] = (out["steps"] + extra)[:MAX_STEPS]
             out["source"] += "+rules"
     if not out["steps"] and out.get("source", "").startswith(("local", "openrouter", "gemini", "openai")) and rejected:

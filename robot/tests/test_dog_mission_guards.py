@@ -272,7 +272,7 @@ def test_stop_during_show_holds_and_new_mission_resumes_same_runtime(monkeypatch
             encoder=lambda frame: (b"", 640, 480), status=lambda text: None,
             rate_hz=200, stale_s=0.2, lidar_stale_s=0.2, boundary_m=100,
             voxel_min_interval_s=0, bandit=StraightBandit(), frontier_planner=None,
-            view=view, duration_s=0.65, idle_trick_s=0, audio=audio, source="simulation"))
+            view=view, duration_s=2.0, idle_trick_s=0, audio=audio, source="simulation"))
         while not hasattr(view, "missions"):
             await original_sleep(0.001)
         if not autonomous_greeting:

@@ -43,14 +43,21 @@ family Pause path returned a software-stop acknowledgment in 129.7 ms. Physical
 voice/movement qualification and four failing fall scenarios remain open; this
 is not a production signoff.
 
+To rehearse the full message path while the robot is off, run
+`.venv/bin/python robot/demo_sim.py`, then open [the command center](http://127.0.0.1:8111/).
+This isolated stack starts held, uses manual control between missions, and disables cloud inference and real audio.
+Try `hello Annie`, `what do you see`, or `say hi to grandma`; Stop cancels active and queued work.
+The conversation panel labels scripted audio and offers optional browser reading.
+
 Being precise about this matters more than the feature list.
 
 **Real:** the async message path (a message is accepted in ~30 ms and the
 robot's errand is reported afterwards, so the app never blocks on the dog);
 run events streaming to phone and browser over WebSocket; MongoDB persistence
-of the household schema; the incident state machine; the simulator driving an
-actual Go2 model with a trained walking policy, camera-driven perception, and
-execution receipts.
+of the household schema; the incident state machine; camera-driven perception and
+execution receipts. The offline full-stack dog uses a kinematic Go2 in MuJoCo.
+The separate physics simulator has a trained Go1 walking-policy surrogate; neither
+qualifies the Go2's physical navigation.
 
 The message boundary is implemented on both sides: `robot/dog/missions/errand.py`
 serves `/dispatch` and reports back through `/internal/events`, and

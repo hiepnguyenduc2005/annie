@@ -198,6 +198,16 @@ Stop Audio still finalizes and retains a summary locally. Delivery requires
   history slider and fading dots, latency, agent log, mission receipts, controls and an instruction box;
   `/telemetry.json` feeds it. Works from a recording (`robot/dog/view/replay.py`) and from the simulated
   dog (`--sim`, `robot/dog/sim/`) when the hardware is off.
+  Instructions and action buttons display their own correlated receipt through completion, failure, or cancellation.
+  The conversation panel shows operator text, Annie's spoken lines, and resident replies; simulated audio is
+  explicitly marked scripted. Optional browser reading is separate from the robot's audio path.
+  Greetings and current-view/status questions work with inference disabled, without requesting movement.
+  Standalone typed stop/pause bypasses planning, cancels active and queued work, and waits for StopMove acknowledgment.
+  Late cancelled plans cannot control a later instruction. Patrol completion means its requested duration elapsed;
+  home completion requires measured arrival within 0.4 m. Playback and firmware failures fail their receipts.
+  The offline launcher uses `--manual-control`: start held and remain held between explicit missions.
+  Family relay quotes preserve the sender's words (apart from whitespace and the existing length cap);
+  they must not substitute pronouns whose referent is ambiguous.
 - **Perception.** Objects come from the open-vocabulary detector (YOLO-World, folded labels such as
   `door`) when its baked checkpoint exists, warmed off the control thread; the LiDAR guard looks at
   0.10-0.75 m, stops at 0.6 m, holds forward movement when the enabled LiDAR is stale, and a detected object filling the view counts as

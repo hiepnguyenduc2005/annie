@@ -3,7 +3,7 @@
 
 One foreground command brings up the real app_backend, the real errand brain and
 the simulated Go2 (MuJoCo apartment, seated resident) on separate loopback ports,
-with audio mocked and every provider path disabled. No .env is sourced, inherited
+with audio mocked, manual control between missions, and every provider path disabled. No .env is sourced, inherited
 provider credentials and cloud adapters are stripped, MongoDB stays off (memory
 fallback), and all data files live under one unique sim root.
 
@@ -270,7 +270,7 @@ def main(argv=None) -> int:
                         "--body-url", f"http://127.0.0.1:{args.dog_port}",
                         "--app-url", f"http://127.0.0.1:{args.app_port}"]),
             ("dog", [str(dimos_py), "robot/go2_patrol_greet.py", "--sim", args.sim,
-                     "--duration", str(args.duration), "--mock-audio",
+                     "--duration", str(args.duration), "--mock-audio", "--manual-control",
                      "--mock-transcript", "okay thank you",
                      "--view-port", str(args.dog_port),
                      "--memory-file", str(sim_root / "sightings.jsonl"),

@@ -323,10 +323,12 @@ def telemetry_snapshot(view) -> dict:
     Reads the run's report dict from the server thread; every part is optional and failures degrade to empty."""
     with view.lock:
         state = json.loads(json.dumps(view.state))
+        dialogue = list(getattr(view, "dialogue", []))
     report = getattr(view, "report", None) or {}
     out = {"state": state, "connected": (report.get("connection") or {}).get("status") == "connected",
            "source": report.get("source") or "hardware",
            "motion_enabled": report.get("motion_enabled", False), "paused": report.get("paused", False),
+           "control_mode": "manual" if report.get("manual_control") else "autonomous", "dialogue": dialogue,
            "reason": report.get("reason"), "elapsed_s": report.get("elapsed_s"),
            "brain": {"enabled": bool((report.get("brain") or {}).get("enabled")), "period_s": getattr(view, "brain_period_s", None),
                      "decisions": list((report.get("brain") or {}).get("decisions") or [])[-8:]},
@@ -382,7 +384,18 @@ class LiveView:
         self.lock = threading.Lock()
         self.new_frame = threading.Condition(self.lock)
         self.frame_seq = 0
+        self.dialogue = []
+        self.dialogue_seq = 0
         self.server = None
+
+    def record_dialogue(self, role, text, *, source, mocked=False):
+        if not text:
+            return
+        with self.lock:
+            self.dialogue_seq += 1
+            self.dialogue.append({"id": self.dialogue_seq, "role": role, "text": str(text)[:500],
+                                  "at_ms": int(time.time() * 1000), "source": source, "mocked": bool(mocked)})
+            self.dialogue = self.dialogue[-80:]
 
     def start(self):
         if not self.port:
@@ -716,7 +729,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                            stop_on_checkin=False, idle_trick_s=45.0, view=None, no_motion=False, diag_every_s=5.0,
                            imgsz=352, voxel_min_interval_s=0.25, brain=None, brain_period_s=4.0, memory=None,
                            voice=None, bandit=None, identifier=None, recorder=None, frontier_planner="auto",
-                           source="hardware", audio=None, faces_dir=None, start_paused=False):
+                           source="hardware", audio=None, faces_dir=None, start_paused=False, manual_control=False):
+    start_paused = bool(start_paused or manual_control)
     if audio is not None and getattr(audio, "source", None) == "simulation" and source != "simulation":
         raise ValueError("mock audio requires simulation")
     if audio is not None:
@@ -727,6 +741,27 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
     audio_where = "simulation mock" if audio is not None and getattr(audio, "source", None) == "simulation" else None
     loop = asyncio.get_running_loop()
     view = view or LiveView(port=0)
+    original_speak, original_blocking_speak, original_listen = speak, blocking_speak, blocking_listen
+
+    def spoken(text):
+        result = original_speak(text)
+        if result is not False:
+            view.record_dialogue("annie", text, source=source, mocked=bool(audio_where))
+        return result
+
+    def spoken_blocking(text):
+        result = original_blocking_speak(text)
+        if result:
+            view.record_dialogue("annie", text, source=source, mocked=bool(audio_where))
+        return result
+
+    def heard_blocking(max_s):
+        result = original_listen(max_s)
+        if isinstance(result, dict) and result.get("transcript"):
+            view.record_dialogue("resident", result["transcript"], source=source, mocked=bool(audio_where))
+        return result
+
+    speak, blocking_speak, blocking_listen = spoken, spoken_blocking, heard_blocking
     view.mock_audio = bool(audio_where)
     view.motion_enabled = not no_motion
     view_url = view.start()
@@ -738,7 +773,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         view.log(text)
         _status(text)
 
-    report = {"script": SCRIPT_VERSION, "source": source, "motion_enabled": not no_motion, "paused": bool(start_paused), "target_ip": ip, "connection": {"status": "not_started"},
+    report = {"script": SCRIPT_VERSION, "source": source, "motion_enabled": not no_motion, "paused": bool(start_paused), "manual_control": bool(manual_control), "target_ip": ip, "connection": {"status": "not_started"},
               "battery_soc_start": None, "frames": 0, "moves_sent": 0, "greetings": [], "checkins": [],
               "collisions": [], "modes": {}, "lidar": {"maps": 0, "first_ranges": None, "stale_ticks": 0},
               "firmware_avoid": None, "elapsed_s": 0.0, "max_distance_from_origin_m": 0.0, "reason": None,
@@ -984,7 +1019,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             return None
     chat_client = line_inference()
 
-    def plan_instruct(receipt, sit):
+    def plan_instruct(receipt, sit, plan_slot):
         """Runs in a thread: instruction -> steps through the shared inference client (or the rules), then chain."""
         try:
             inf = None
@@ -995,7 +1030,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             plan = agent_mod.plan_instruction(receipt["args"]["text"], sit, inference=inf, validate_command=_validate)
         except Exception as exc:
             plan = {"reply": f"planning failed ({type(exc).__name__})", "steps": [], "source": "error", "rejected": []}
-        instruct_state["plan"] = plan
+        # A cancelled planner may finish after a new instruction has taken over.
+        # Its result belongs only to the receipt that requested it.
+        if plan_slot.get("receipt") is receipt and receipt.get("state") == "executing":
+            plan_slot["plan"] = plan
 
     async def on_track(track):
         while not stopped:
@@ -1173,6 +1211,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         blocked_times: list[float] = []
         rec_last = [-1e9]
         mission_state: dict = {}
+        navigation_state: dict = {}
         mission_paused = bool(start_paused)
         report["paused"] = mission_paused
         needs_stand = bool(start_paused and not no_motion)
@@ -1454,11 +1493,11 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                                 cx = (x1 + x2) / 2.0 / float(fw)
                                 hfrac = max(0.05, (y2 - y1) / float(fh or 480))
                                 bearing = (0.5 - cx) * math.radians(100.0)  # Go2 front camera is roughly 100 deg wide
-                                dist = front_r if (front_r is not None and abs(cx - 0.5) < 0.18) else min(6.0, 0.55 / hfrac)
+                                person_dist = front_r if (front_r is not None and abs(cx - 0.5) < 0.18) else min(6.0, 0.55 / hfrac)
                                 ang = tel["yaw"] + bearing
                                 ident = (t.get("identity") or {}).get("name")
-                                people_world.append({"track_id": t.get("track_id"), "x": tel["pose"][0] + dist * math.cos(ang),
-                                                     "y": tel["pose"][1] + dist * math.sin(ang), "z": 0.9,
+                                people_world.append({"track_id": t.get("track_id"), "x": tel["pose"][0] + person_dist * math.cos(ang),
+                                                     "y": tel["pose"][1] + person_dist * math.sin(ang), "z": 0.9,
                                                      "label": ident or f"person {t.get('track_id')}", "identity": ident,
                                                      "posture": t.get("posture")})
                         else:
@@ -1517,6 +1556,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 if missions.stop_requested:
                     mission_paused = True
                     report["paused"] = mission_paused
+                    voice_state.update(intent=None, until=0.0, resume_requested=False)
+                    instruct_state.update(receipt=None, plan=None, thread=None)
+                    navigation_state.clear()
+                    mission_hold_until[0] = 0.0
                     await process_stop_requests()
                     mission_state.clear()
                     status(f"t={now-start:5.1f}s mission stop: StopMove sent")
@@ -1525,6 +1568,13 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     mission_paused = False
                     report["paused"] = mission_paused
                 new_mission = missions.take()
+                if manual_control and new_mission is None and missions.executing() is None and instruct_state["receipt"] is None:
+                    explicit_roaming = (voice_state.get("intent") in ("explore", "scan", "go_home", "follow", "approach",
+                                                                   "sit", "stand", "dance", "hello", "heart", "stretch")
+                                        and now < voice_state.get("until", 0))
+                    if not explicit_roaming:
+                        mission_paused = True
+                        report["paused"] = True
                 # Publish before hold/mission branches continue: pausing motion must not freeze observation.
                 display_mode = "paused" if mission_paused else mode
                 perception.set_context(mode=display_mode, ranges=ranges, battery=tel["soc"])
@@ -1549,14 +1599,25 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                         await ensure_standing()
                         mission_paused = False
                         report["paused"] = mission_paused
+                    now = loop.time()  # Preparation can take seconds; execution budgets begin after it.
                     status(f"t={now-start:5.1f}s mission {name} {margs if margs else ''}")
                     report["missions"].append({"t_s": round(now - start, 1), "name": name, "args": margs})
                     if name == "instruct":
-                        sit = build_situation(time.time(), tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode=mode, max_age_s=0.0)
-                        instruct_state.update(receipt=new_mission, plan=None)
-                        instruct_state["thread"] = threading.Thread(target=plan_instruct, args=(new_mission, sit), daemon=True, name="instruct")
+                        sit = build_situation(time.time(), tracks=tracks, ranges=tel["ranges"], home_m=dist, battery=tel["soc"], mode="paused" if mission_paused else mode, max_age_s=0.0)
+                        instruct_state = {"receipt": new_mission, "plan": None}
+                        instruct_state["thread"] = threading.Thread(target=plan_instruct, args=(new_mission, sit, instruct_state), daemon=True, name="instruct")
                         instruct_state["thread"].start()
                         missions.progress(new_mission, step="planning")
+                        continue
+                    if name == "stop":
+                        # A planned stop is a real stop barrier, not an unhandled child.
+                        mission_paused = True
+                        report["paused"] = True
+                        voice_state["intent"], voice_state["until"] = None, 0.0
+                        outcome = await process_stop_requests(force=True)
+                        code = outcome["code"]
+                        missions.finish(new_mission, result={"stop_code": code},
+                                        error=outcome["error"] or (None if type(code) is int and code == 0 else "StopMove acknowledgment missing"))
                         continue
                     if name in ("turn", "walk", "look_for"):
                         try:
@@ -1616,12 +1677,14 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                             missions.finish(new_mission, error="no_motion: movement disabled")
                             continue
                         code = await show(name, api, settle, None)
-                        missions.finish(new_mission, result={"codes": {name: code}, "note": "firmware acknowledgment, not evidence the motion happened"})
+                        missions.finish(new_mission, result={"codes": {name: code}, "note": "firmware acknowledgment, not evidence the motion happened"},
+                                        error=None if type(code) is int and code == 0 else f"{name} not acknowledged: {code}")
                         continue
                     if name == "say":
                         send_move(0.0, 0.0)
                         played = await guarded_await(loop.run_in_executor(None, lambda: blocking_speak(margs["text"])))
-                        missions.finish(new_mission, result={"played": bool(played), "where": audio_where or "host speaker", "source": "simulation" if audio_where else source})
+                        missions.finish(new_mission, result={"played": bool(played), "text": margs["text"], "where": audio_where or "host speaker", "source": "simulation" if audio_where else source},
+                                        error=None if played else "speech playback failed")
                         continue
                     if name == "listen":
                         send_move(0.0, 0.0)
@@ -1635,12 +1698,16 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                         missions.finish(new_mission, error="move is not offered by the patrol process; use patrol/go_home")
                         continue
                     if name == "patrol":
+                        mission_hold_until[0] = 0.0
                         voice_state["intent"], voice_state["until"] = "explore", now + margs["duration_s"]
-                        missions.finish(new_mission, result={"note": "exploring", "duration_s": margs["duration_s"]})
+                        navigation_state.update(receipt=new_mission, name=name, deadline=now + margs["duration_s"], since=now)
+                        missions.progress(new_mission, step="exploring", duration_s=margs["duration_s"])
                         continue
                     if name == "go_home":
+                        mission_hold_until[0] = 0.0
                         voice_state["intent"], voice_state["until"], voice_state["source"] = "go_home", now + 90.0, "mission"
-                        missions.finish(new_mission, result={"note": "heading home for up to 90 s", "home_m": round(dist, 2)})
+                        navigation_state.update(receipt=new_mission, name=name, deadline=now + 90.0, since=now)
+                        missions.progress(new_mission, step="returning home", home_m=round(dist, 2))
                         continue
                     if name == "find_person":
                         mission_state.update(receipt=new_mission, name=(margs["name"] or "").lower() or None,
@@ -1657,10 +1724,29 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                            + (f"; rejected {plan['rejected']}" if plan.get("rejected") else ""))
                     report.setdefault("instructions", []).append({"t_s": round(now - start, 1), "text": rec["args"]["text"], "source": plan.get("source"),
                                                                   "steps": [st["name"] for st in plan["steps"]], "reply": plan.get("reply")})
-                    if plan.get("reply"):
+                    if plan.get("reply") and not any(step["name"] == "say" and step.get("args", {}).get("text") == plan["reply"]
+                                                     for step in plan["steps"]):
                         speak(plan["reply"])
                     missions.chain(rec, plan["steps"], reply=plan.get("reply", ""), source=plan.get("source", ""))
+                    send_move(0.0, 0.0)
+                    await asyncio.sleep(tick)
+                    continue
                 mission = missions.executing()
+                if mission is not None and navigation_state.get("receipt") is mission:
+                    going_home = navigation_state["name"] == "go_home"
+                    reached = going_home and dist < 0.4
+                    expired = now >= navigation_state["deadline"]
+                    if reached or expired:
+                        send_move(0.0, 0.0)
+                        missions.finish(mission, result={"home_m": round(dist, 2), "elapsed_s": round(now - navigation_state["since"], 2)},
+                                        error="home timeout: origin not reached" if going_home and not reached else None)
+                        navigation_state.clear()
+                        voice_state["intent"], voice_state["until"] = None, 0.0
+                        if manual_control:
+                            mission_paused = True
+                            report["paused"] = True
+                        continue
+                    action, tid = "patrol", None
                 if mission is not None and mission_state.get("receipt") is mission:
                     if now > mission_state["deadline"]:
                         missions.finish(mission, error="find_person timeout: target not reached", result={"found": False, "track_id": None, "identity": None, "matched_name": False,
@@ -1988,7 +2074,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 mission_paused = True
                 report["paused"] = mission_paused
                 voice_state["resume_requested"] = False
+                voice_state["intent"], voice_state["until"] = None, 0.0
                 mission_state.clear()
+                navigation_state.clear()
+                instruct_state.update(receipt=None, plan=None, thread=None)
                 await process_stop_requests(force=True)
                 continue
         report["reason"] = "duration_complete"
@@ -2049,6 +2138,7 @@ def main(argv=None):
     parser.add_argument("--view-host", default="127.0.0.1", help="bind address; beyond loopback requires ANNIE_BODY_TOKEN "
                         "and ANNIE_VIEW_HOSTS (comma list of this machine's addresses the page may be opened on)")
     parser.add_argument("--start-paused", "--manual-on-demand", action="store_true", help="wait for an explicit command; do not stand or patrol at startup")
+    parser.add_argument("--manual-control", action="store_true", help="start held and stay held between explicit missions; no automatic roaming or greeting")
     parser.add_argument("--no-motion", action="store_true", help="perception-only: never move or perform tricks")
     parser.add_argument("--imgsz", type=int, default=320, help="tracker inference size (multiple of 32); 320 keeps up with the 14 fps stream on this Mac")
     parser.add_argument("--diag-every", type=float, default=5.0, help="seconds between diagnostic lines")
@@ -2110,7 +2200,7 @@ def main(argv=None):
                                               duration_s=args.duration, speed_mps=args.speed, boundary_m=args.boundary,
                                               lidar=not args.no_lidar, firmware_avoid=args.firmware_avoid,
                                               stop_on_checkin=args.stop_on_checkin, idle_trick_s=args.idle_trick,
-                                              view=LiveView(port=args.view_port, host=args.view_host), no_motion=args.no_motion, start_paused=args.start_paused,
+                                              view=LiveView(port=args.view_port, host=args.view_host), no_motion=args.no_motion, start_paused=args.start_paused, manual_control=args.manual_control,
                                               imgsz=args.imgsz, diag_every_s=args.diag_every,
                                               brain=VisionBrain() if args.brain else None, brain_period_s=args.brain_period,
                                               memory=SightingMemory(args.memory_file),

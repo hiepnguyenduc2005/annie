@@ -91,6 +91,11 @@ def test_phrase_truncates_the_quote_so_the_line_fits_one_say():
     assert len(phrase_message("Zach", "x" * 2000)) == 300
 
 
+@pytest.mark.parametrize("message", ["I am thinking of her", "Her sister said she is coming", "Please charge her phone"])
+def test_quoted_family_words_do_not_rewrite_pronoun_referents(message):
+    assert phrase_message("Zach", message).endswith('"' + message + '"')
+
+
 def test_interpret_reply_is_an_exact_phrase_match():
     assert interpret_reply("Okay.") == {"reply": "okay", "mood": "happy", "detail": "Jeanine says okay. 🙂"}
     assert interpret_reply(" Help me! ") == {"reply": "concern", "mood": "worried", "detail": 'Jeanine may need help: "Help me!"'}

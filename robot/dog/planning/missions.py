@@ -11,6 +11,7 @@ starts and finishes. Validation is the body's (`go2_body.validate_command`).
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -18,6 +19,10 @@ from collections import OrderedDict
 TERMINAL = ("completed", "failed", "cancelled")
 MAX_RECEIPTS = 200
 MAX_WAITING = 8  # overlapping missions queue up to this many; beyond that the body answers 409 busy
+_IMMEDIATE_STOP = re.compile(
+    r"(?:annie[\s,]+)?(?:please\s+)?(?:stop|pause)(?:\s+now)?(?:\s+please)?[.!?]*",
+    re.IGNORECASE,
+)
 
 
 class MissionBoard:
@@ -39,6 +44,10 @@ class MissionBoard:
             command_id, name, args = validate_command(payload)
         except ValueError as exc:
             return 400, {"error": str(exc)}
+        # Validate the original instruction first, then bypass planning and the waiting queue
+        # only for an unambiguous whole-message stop. Negation and compound requests stay instructions.
+        if name == "instruct" and _IMMEDIATE_STOP.fullmatch(args["text"]):
+            name, args = "stop", {}
         with self.lock:
             if command_id in self.receipts:
                 return 200, dict(self.receipts[command_id])

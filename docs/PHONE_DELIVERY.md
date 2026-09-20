@@ -4,6 +4,12 @@ Updated 2026-09-20. This is the current integration handoff, not a production
 signoff. The family phone, app API, errand service, and robot body are separate
 connections; a successful phone request alone does not prove robot execution.
 
+Later verification on 2026-09-20: the Mac was unlocked and the native iPhone
+simulator buttons were exercised directly. Reminder delivery, exploration,
+Pause, greeting/reply, and fresh delivery after Pause passed. See the
+[control review and iOS evidence](CONTROL_REVIEW.md). Physical iPhone interaction
+and real robot/audio qualification remain open.
+
 ## What changed
 
 - Remind displays its run directly beneath the reminder, sends `reminder_id`,

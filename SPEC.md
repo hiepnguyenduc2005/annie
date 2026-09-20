@@ -168,6 +168,9 @@ Stop Audio still finalizes and retains a summary locally. Delivery requires
 
 ## Voice, memory, people and the family app (2026-09-20, later)
 
+The native app uses light appearance with its fixed white-paper/black-ink palette,
+including system controls and sheets, so device dark mode cannot make text unreadable.
+
 - **Voice.** ElevenLabs speaks and Deepgram hears whenever their keys are present (`ANNIE_VOICE_CLOUD=0`
   or the app's Settings toggle switches to local `say`/Whisper at runtime; keys may be replaced from the
   app and live in memory only). The wake-word microphone is always on and transcribes through the same

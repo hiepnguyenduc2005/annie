@@ -51,6 +51,14 @@ from robot.dog.planning.smart_patrol import (HeadingBandit, OccupancyGrid, Patro
 from robot.dog.planning.missions import MissionBoard  # noqa: E402
 from robot.dog.perception.target_id import TargetIdentifier  # noqa: E402
 try:
+    from robot.dog.memory.graph import SpacetimeGraph  # noqa: E402
+except Exception:
+    SpacetimeGraph = None
+try:
+    from robot.dog.dimos.frontier import FrontierPlanner  # noqa: E402  (dimOS venv only)
+except Exception:
+    FrontierPlanner = None
+try:
     from robot.dog.perception import objects as objects_mod  # noqa: E402
 except Exception:  # optional: object detection needs cv2/ultralytics
     objects_mod = None
@@ -297,6 +305,14 @@ class LiveView:
                     return
                 if self.path.startswith("/stream.mjpg"):
                     return self._stream()
+                if self.path.startswith("/graph.json"):
+                    g = getattr(view, "graph", None)
+                    if g is None:
+                        return self._send(503, b'{"error":"graph off"}', "application/json")
+                    try:
+                        return self._send(200, json.dumps(g.snapshot()).encode(), "application/json")
+                    except Exception:
+                        return self._send(500, b'{"error":"snapshot failed"}', "application/json")
                 if self.path.startswith("/command/"):
                     board = getattr(view, "missions", None)
                     receipt = board.get(self.path[len("/command/"):].split("?")[0]) if board else None
@@ -452,7 +468,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                            planner=None, stall=None, lidar=True, firmware_avoid=False, lidar_stale_s=2.0,
                            stop_on_checkin=False, idle_trick_s=45.0, view=None, no_motion=False, diag_every_s=5.0,
                            imgsz=352, voxel_min_interval_s=0.25, brain=None, brain_period_s=4.0, memory=None,
-                           voice=None, bandit=None, identifier=None, recorder=None):
+                           voice=None, bandit=None, identifier=None, recorder=None, frontier_planner="auto"):
     loop = asyncio.get_running_loop()
     view = view or LiveView(port=0)
     view_url = view.start()
@@ -487,6 +503,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             entry = _memory_add(t=t, pose=pose, yaw=yaw, kind=kind, people=people, note=note)
             with contextlib.suppress(Exception):
                 recorder.record_event(time.time(), pose[0], pose[1], kind, note or kind)
+            if graph is not None:
+                with contextlib.suppress(Exception):
+                    graph.ingest_event(time.time(), pose[0], pose[1], kind, note or kind)
             return entry
         memory.add = _add_and_record
     brain_state = {"decision": None, "until": 0.0, "busy": False, "last": None, "count": 0}
@@ -547,6 +566,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                     if recorder is not None:
                         with contextlib.suppress(Exception):
                             recorder.record_obstacles(time.time(), world_obs)
+                    if graph is not None:
+                        with contextlib.suppress(Exception):
+                            graph.ingest_obstacles(time.time(), world_obs)
                     if time.monotonic() - grid["rendered"] > 0.4 and view.port:
                         grid["rendered"] = time.monotonic()
                         view.map_jpeg = grid["map"].render(pose, yaw, planner.target_heading)
@@ -620,6 +642,11 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
     missions = MissionBoard()
     view.missions = missions
     report["missions"] = []
+    graph = SpacetimeGraph() if SpacetimeGraph is not None else None  # the 4D knowledge graph (geometry + semantics)
+    view.graph = graph
+    planner_obj = (FrontierPlanner() if FrontierPlanner is not None else None) if frontier_planner == "auto" else frontier_planner
+    frontier = {"planner": planner_obj, "goal": None, "t": 0.0}
+    report["frontier"] = {"available": frontier["planner"] is not None, "goals": 0}
 
     async def on_track(track):
         while not stopped:
@@ -791,7 +818,11 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             try:
                 jpeg = view.jpeg if view.port else None
                 now_s = loop.time()
-                decision = brain.decide(jpeg, brain_status(), memory.summary(tel["pose"], tel["yaw"], now=now_s))
+                sightings = memory.summary(tel["pose"], tel["yaw"], now=now_s)
+                if graph is not None:
+                    with contextlib.suppress(Exception):
+                        sightings = graph.summary(now=time.time(), limit=6).get("sentences", []) + sightings
+                decision = brain.decide(jpeg, brain_status(), sightings[:10])
                 brain_state["decision"], brain_state["last"] = decision, now_s
                 brain_state["until"] = now_s + decision["seconds"]
                 brain_state["count"] += 1
@@ -872,6 +903,12 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                         object_world = objects_mod.sightings(placed, int(wall * 1000))
                     if people_world or object_world:
                         recorder.record_people(wall, people_world + object_world)  # one call: it replaces "now"
+                    if graph is not None:
+                        with contextlib.suppress(Exception):
+                            graph.ingest_pose(wall, tel["pose"][0], tel["pose"][1], tel["yaw"])
+                            if people_world or object_world:
+                                graph.ingest_people(wall, [dict(p, kind="person") for p in people_world]
+                                                    + [dict(o, kind="object") for o in object_world])
             if now - last_diag >= diag_every_s:
                 last_diag = now
                 status(f"diag {diag.line()}")
@@ -1110,7 +1147,24 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                             heading_to = math.atan2(seen["y"] - _p[1], seen["x"] - _p[0])
                             if abs(wrap_angle(heading_to - bandit.sector_heading(a))) < math.pi / bandit.n_arms:
                                 bonus = 1.0
+                    goal = frontier["goal"]
+                    if goal is not None:  # dimOS frontier exploration: prefer the sector that points at the next frontier
+                        to_goal = math.atan2(goal[1] - _p[1], goal[0] - _p[0])
+                        if abs(wrap_angle(to_goal - bandit.sector_heading(a))) < math.pi / bandit.n_arms:
+                            bonus += 0.8
                     return bonus + 0.3 * min(free, 3.0) / 3.0 + 0.5 * _g.unvisited_ahead(_p[0], _p[1], bandit.sector_heading(a))
+                if frontier["planner"] is not None and now - frontier["t"] > 8.0:
+                    frontier["t"] = now
+                    try:  # ~0.4 s of pure Python: run it off the loop
+                        goal = await loop.run_in_executor(None, lambda: frontier["planner"].next_goal(
+                            grid["map"], tel["pose"], tel["yaw"], clear_range_m=1.5))
+                        frontier["goal"] = goal
+                        if goal is not None:
+                            report["frontier"]["goals"] += 1
+                            status(f"t={now-start:5.1f}s frontier (dimOS): next goal {goal[0]:.1f},{goal[1]:.1f}")
+                    except Exception as exc:
+                        frontier["goal"] = None
+                        report["frontier"]["error"] = type(exc).__name__
                 arm = bandit.choose(prior=prior)
                 planner.target_heading = bandit.sector_heading(arm)
                 bandit_state.update(until=now + 12.0, rewarded=False)
@@ -1176,6 +1230,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             voice.stop()
         view.stop()
         report["diag"] = diag.snapshot()
+        if graph is not None:
+            with contextlib.suppress(Exception):
+                report["graph"] = {"places": len(graph.places()), "summary": graph.summary(now=time.time(), limit=6).get("sentences", [])}
         if conn is not None and report["connection"]["status"] == "connected":
             if commanded:
                 report["stop"]["requested"] = True

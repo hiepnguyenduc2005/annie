@@ -25,6 +25,15 @@
 - Mark a task complete only when its stated completion condition is satisfied.
 - For simulator changes, follow `robot/simulation/README.md`; distinguish direct MuJoCo physics, DimOS integration, rendered-image inference, and actual robot runs. Keep model/dependency revisions and measured results reproducible.
 
+## Operator's machine
+
+- Never change this Mac's Wi-Fi association, VPN, or network settings from an agent
+  (`networksetup -setairportnetwork`, CoreWLAN, Internet Sharing, or any other
+  route). The operator joins networks by hand. Ask once, then wait. Joining the
+  robot hotspot drops the operator's connection and has interrupted work.
+- Wi-Fi provisioning of the robot itself over Bluetooth is allowed with the
+  operator's explicit go-ahead for that specific change.
+
 ## Engineering and collaboration
 
 - Keep simulator/demo code, its frontend, app backend, robot backend, and contract under `robot/`. Preserve the separate top-level team services and Swift app; do not spread simulator implementation into them.

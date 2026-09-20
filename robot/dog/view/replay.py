@@ -65,7 +65,7 @@ class Replay:
         except Exception:
             self.graph = None
         self.grid = OccupancyGrid((0.0, 0.0), size_m=grid_size_m)
-        self.report = {"connection": {"status": "connected"}, "reason": None, "elapsed_s": 0.0,
+        self.report = {"connection": {"status": "connected"}, "source": "replay", "reason": None, "elapsed_s": 0.0,
                        "brain": {"enabled": True, "decisions": [], "failures": 0}, "voice": {"commands": []},
                        "greetings": [], "checkins": [], "collisions": [], "frontier": {"available": False, "goals": 0}}
         view.recorder, view.graph, view.report, view.brain_period_s = self.recorder, self.graph, self.report, 6

@@ -18,9 +18,14 @@ LOGS=.data/hardware/demo-logs; mkdir -p "$LOGS"
 set -a; source .env; set +a
 : "${ANNIE_INTERNAL_SECRET:?ANNIE_INTERNAL_SECRET must be set in .env}"
 export UNITREE_AES_128_KEY="${UNITREE_AES_128_KEY:-$(python3 -c "import json;print(json.load(open('.cache/go2-private/connection.json'))['aes_key'])")}"
-MAC_HOTSPOT_IP="$(ifconfig | awk '/inet 172\.20\.10\./{print $2; exit}')"
-[[ -n "$MAC_HOTSPOT_IP" ]] || { echo "no 172.20.10.x address on this Mac: plug the iPhone in (USB tether) and open Personal Hotspot"; exit 2; }
-ping -c 1 -W 1 "$DOG_IP" >/dev/null 2>&1 || { echo "dog not answering at $DOG_IP: power it on / re-provision the hotspot join"; exit 2; }
+hotspot_ip() { ifconfig | awk '/inet 172\.20\.10\./{print $2; exit}'; }
+MAC_HOTSPOT_IP="$(hotspot_ip)"
+if [[ -z "$MAC_HOTSPOT_IP" ]]; then
+  echo "no 172.20.10.x address on this Mac yet: plug the iPhone in (USB tether), open Personal Hotspot; waiting..."
+  until MAC_HOTSPOT_IP="$(hotspot_ip)"; [[ -n "$MAC_HOTSPOT_IP" ]]; do sleep 3; done
+  echo "tether up at $MAC_HOTSPOT_IP"
+fi
+ping -c 1 -W 1 "$DOG_IP" >/dev/null 2>&1 || echo "dog not answering at $DOG_IP yet: the dog process starts when it does (power on / hotspot join)"
 for p in $APP_PORT 8010 8011; do lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null 2>&1 && { echo "port $p is already in use; stop that process first"; exit 2; }; done
 
 export ANNIE_ALLOWED_HOSTS="localhost,127.0.0.1,[::1],$MAC_HOTSPOT_IP"

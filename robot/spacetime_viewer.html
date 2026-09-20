@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annie · spacetime</title>
+<style>
+  :root { --bg:#0a0d12; --panel:rgba(16,20,27,.86); --line:#232b37; --ink:#e6ebf2; --dim:#8a96a8; --accent:#4ade80; --warn:#f87171; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); overflow:hidden;
+    font:13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  canvas#scene { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; cursor:grab; }
+  canvas#scene.drag { cursor:grabbing; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-variant-numeric:tabular-nums; }
+  #top { position:fixed; top:12px; left:12px; display:flex; gap:10px; align-items:center; pointer-events:none; }
+  #top > * { pointer-events:auto; }
+  #title { font-weight:650; letter-spacing:.02em; }
+  #title small { color:var(--dim); font-weight:400; margin-left:6px; }
+  .pill { padding:3px 9px; border-radius:99px; border:1px solid var(--line); background:var(--panel); color:var(--dim); font-size:12px; }
+  .pill.ok { color:var(--accent); border-color:#1f5d3a; } .pill.bad { color:var(--warn); border-color:#6b2a2a; }
+  a.pill { text-decoration:none; } a.pill:hover { color:var(--ink); }
+  #panel { position:fixed; top:12px; right:12px; width:270px; max-height:calc(100% - 110px); overflow:auto; padding:12px 14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; backdrop-filter:blur(6px); }
+  #panel h3 { margin:12px 0 6px; font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--dim); font-weight:600; }
+  #panel h3:first-child { margin-top:0; }
+  label.row { display:flex; align-items:center; gap:8px; margin:4px 0; color:var(--ink); }
+  label.row span.v { margin-left:auto; color:var(--dim); }
+  input[type=range] { accent-color:var(--accent); }
+  label.row input[type=range] { flex:1; min-width:0; }
+  .checks { display:grid; grid-template-columns:1fr 1fr; gap:2px 8px; }
+  .ramp { height:8px; border-radius:4px; background:linear-gradient(90deg,#29db38,#f5db2b 50%,#f51c1f); }
+  .ramp-l { display:flex; justify-content:space-between; color:var(--dim); font-size:11px; margin-top:2px; }
+  .note { color:var(--dim); font-size:11px; margin-top:8px; }
+  #details { min-height:40px; } #details .hint { color:var(--dim); }
+  #details table { border-collapse:collapse; width:100%; } #details td { padding:1px 0; vertical-align:top; word-break:break-word; }
+  #details td:first-child { color:var(--dim); width:74px; } #details .head { font-weight:650; margin-bottom:4px; }
+  #details .lying { color:var(--warn); }
+  button { font:inherit; color:var(--ink); background:#1a212c; border:1px solid var(--line); border-radius:7px; padding:5px 10px; cursor:pointer; }
+  button:hover { border-color:#3a4658; } button.on { color:#06130b; background:var(--accent); border-color:var(--accent); font-weight:650; }
+  #bar { position:fixed; left:12px; right:12px; bottom:12px; padding:10px 12px; display:grid; gap:6px 10px; align-items:center;
+    grid-template-columns:auto auto auto 1fr; background:var(--panel); border:1px solid var(--line); border-radius:10px; backdrop-filter:blur(6px); }
+  #slider { width:100%; grid-column:1 / -1; }
+  #readout { display:flex; flex-wrap:wrap; gap:4px 16px; justify-content:flex-end; color:var(--dim); }
+  #readout b { color:var(--ink); font-weight:600; }
+  #message { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; text-align:center; }
+  #message div { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 24px; max-width:420px; }
+  #message b { display:block; font-size:15px; margin-bottom:4px; } #message span { color:var(--dim); }
+  #message.hidden { display:none; }
+  #menu { display:none; }
+  @media (max-width:760px) {
+    #menu { display:inline-block; } #panel { display:none; top:50px; left:12px; right:12px; width:auto; } #panel.open { display:block; }
+    #bar { grid-template-columns:auto auto auto; } #readout { grid-column:1 / -1; justify-content:flex-start; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="top">
+  <span id="title">Annie<small>spacetime · what the dog saw, and when</small></span>
+  <span id="status" class="pill">loading…</span>
+  <a class="pill" href="/" title="Back to the live camera view">live view</a>
+  <button id="menu" title="Controls">☰</button>
+</div>
+<aside id="panel">
+  <h3>Selected</h3>
+  <div id="details"><span class="hint">Click a person or an event marker for its details.</span></div>
+  <h3>History</h3>
+  <label class="row">window <input id="win" type="range" min="10" max="900" step="10" value="120"><span class="v mono" id="winV">120 s</span></label>
+  <label class="row">point size <input id="psize" type="range" min="0.02" max="0.2" step="0.01" value="0.05"><span class="v mono" id="psizeV">0.05 m</span></label>
+  <div class="ramp"></div>
+  <div class="ramp-l mono"><span>now</span><span>30 s</span><span>≥ 60 s old</span></div>
+  <h3>Layers</h3>
+  <div class="checks">
+    <label class="row"><input type="checkbox" id="lyObs" checked> obstacles</label>
+    <label class="row"><input type="checkbox" id="lyPeople" checked> people</label>
+    <label class="row"><input type="checkbox" id="lyTrail" checked> robot trail</label>
+    <label class="row"><input type="checkbox" id="lyEvents" checked> events</label>
+    <label class="row"><input type="checkbox" id="follow"> follow robot</label>
+    <button id="recenter" title="Recentre the camera on the robot (C)">recentre</button>
+  </div>
+  <div class="note">Drag to rotate · right-drag or shift-drag to pan · wheel to zoom · space play/pause · L live · ←/→ step.
+    Grid cells are 1 m; axes x red, y green, z blue (up). Drop a recorded <span class="mono">.jsonl</span> run on the page to replay it.</div>
+  <div class="note">Obstacle dots are LiDAR occupancy-voxel estimates in the robot's odometry frame (it drifts). People are
+    position estimates from camera bearing + LiDAR range; names and postures are model guesses. Times are host receipt times.</div>
+</aside>
+<footer id="bar">
+  <button id="play" title="Play / pause (space)">▶</button>
+  <button id="speed" title="Replay speed">1×</button>
+  <button id="live" class="on" title="Stay at the newest observation (L)">● live</button>
+  <div id="readout" class="mono"></div>
+  <input id="slider" type="range" min="0" max="1" step="0.1" value="1" aria-label="time">
+</footer>
+<div id="message"><div><b id="msgT">Loading…</b><span id="msgS">Fetching what the dog has observed so far.</span></div></div>
+
+<script>
+(function () {
+"use strict";
+var THREE_URLS = ["https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js", "/three.min.js"]; // second entry: optional same-origin copy for offline use
+var API = "/spacetime.json";
+var POLL_MS = 2000, LOOKBACK_S = 3, FRESH_S = 60, DENSE_S = 150;
+var ICONS = { greet: "👋", checkin: "❗", collision: "💥", voice: "🎙", brain: "🧠" };
+var $ = function (id) { return document.getElementById(id); };
+
+function showMessage(title, sub) { $("msgT").textContent = title; $("msgS").textContent = sub || ""; $("message").classList.remove("hidden"); }
+function hideMessage() { $("message").classList.add("hidden"); }
+function setStatus(text, cls) { var el = $("status"); el.textContent = text; el.className = "pill" + (cls ? " " + cls : ""); }
+
+function loadThree(i) {
+  if (window.THREE) return start();
+  if (i >= THREE_URLS.length) return showMessage("Three.js could not be loaded", "This page needs three.min.js r128 from the CDN (or a copy served at /three.min.js). Check the internet connection and reload.");
+  var s = document.createElement("script");
+  s.src = THREE_URLS[i]; s.onload = function () { window.THREE ? start() : loadThree(i + 1); }; s.onerror = function () { loadThree(i + 1); };
+  document.head.appendChild(s);
+}
+
+function start() {
+  var THREE = window.THREE;
+  var canvas = $("scene"), renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true }); }
+  catch (e) { return showMessage("WebGL is not available", "The 3D view needs WebGL; try another browser."); }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setClearColor(0x0a0d12, 1);
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(50, 1, 0.05, 500);
+  camera.up.set(0, 0, 1);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  var sun = new THREE.DirectionalLight(0xffffff, 0.6); sun.position.set(3, -4, 8); scene.add(sun);
+  var grid = new THREE.GridHelper(60, 60, 0x3a4658, 0x1b222d); grid.rotation.x = Math.PI / 2; scene.add(grid); // XY plane: z is up
+  var axes = new THREE.AxesHelper(1); axes.position.z = 0.002; scene.add(axes);
+
+  // ---------- data ----------
+  var data = { poses: [], frames: [], people: [], events: [], t0: null, t1: null };
+  var seen = { poses: new Set(), frames: new Set(), people: new Set(), events: new Set() };
+  var sel = null, live = true, playing = false, speed = 1, windowS = 120, dirty = true;
+  var scrubbing = false, replayName = null, needReset = false, fails = 0, lastOk = 0, framed = false, picked = null;
+
+  function keyOf(stream, r) {
+    if (stream === "poses") return r[0];
+    if (stream === "frames") return r.t;
+    if (stream === "people") return r.t + "|" + r.track_id;
+    return r.t + "|" + r.kind + "|" + r.text;
+  }
+  function timeOf(stream, r) { return stream === "poses" ? r[0] : r.t; }
+  function merge(stream, items) {
+    var arr = data[stream], set = seen[stream], sorted = true, added = 0;
+    for (var i = 0; i < items.length; i++) {
+      var r = items[i], t = timeOf(stream, r);
+      if (typeof t !== "number" || !isFinite(t)) continue;
+      var k = keyOf(stream, r);
+      if (set.has(k)) continue;
+      set.add(k);
+      if (stream === "frames") {
+        var src = r.points || [], pts = new Float32Array(src.length * 3);
+        for (var j = 0; j < src.length; j++) { pts[3 * j] = src[j][0]; pts[3 * j + 1] = src[j][1]; pts[3 * j + 2] = src[j][2]; }
+        r = { t: t, pts: pts, n: src.length };
+      }
+      if (arr.length && timeOf(stream, arr[arr.length - 1]) > t) sorted = false;
+      arr.push(r); added++;
+    }
+    if (!sorted) arr.sort(function (a, b) { return timeOf(stream, a) - timeOf(stream, b); });
+    return added;
+  }
+  function ingest(snap, reset, prune) {
+    if (reset) { ["poses", "frames", "people", "events"].forEach(function (s) { data[s] = []; seen[s] = new Set(); }); picked = null; showDetails(null); }
+    var added = 0;
+    ["poses", "frames", "people", "events"].forEach(function (s) { added += merge(s, Array.isArray(snap[s]) ? snap[s] : []); });
+    var cutoff = prune && snap.span ? snap.span[0] : null; // the recorder forgot everything before this: so do we
+    var t0 = Infinity, t1 = -Infinity;
+    ["poses", "frames", "people", "events"].forEach(function (s) {
+      var arr = data[s];
+      if (cutoff != null && arr.length && timeOf(s, arr[0]) < cutoff) {
+        var i = 0; while (i < arr.length && timeOf(s, arr[i]) < cutoff) i++;
+        arr = data[s] = arr.slice(i); seen[s] = new Set(arr.map(function (r) { return keyOf(s, r); }));
+      }
+      if (arr.length) { t0 = Math.min(t0, timeOf(s, arr[0])); t1 = Math.max(t1, timeOf(s, arr[arr.length - 1])); }
+    });
+    data.t0 = isFinite(t0) ? t0 : null; data.t1 = isFinite(t1) ? t1 : null;
+    if (data.t1 == null) { sel = null; showMessage("No observations yet", replayName ? "That file held no records." : "Waiting for the dog to report poses, LiDAR voxels or people…"); }
+    else {
+      hideMessage();
+      if (live || sel == null) sel = data.t1;
+      sel = Math.min(Math.max(sel, data.t0), data.t1);
+      if (!framed) { framed = true; recenter(true); }
+    }
+    syncSlider(); dirty = true;
+    return added;
+  }
+
+  // ---------- helpers ----------
+  function upper(arr, stream, t) { // first index with time > t
+    var lo = 0, hi = arr.length;
+    while (lo < hi) { var m = (lo + hi) >> 1; if (timeOf(stream, arr[m]) <= t) lo = m + 1; else hi = m; }
+    return lo;
+  }
+  function ramp(age, out, o) { // green (fresh) -> yellow (30 s) -> red (>= 60 s), dimming towards the end of the window
+    var u = Math.min(Math.max(age / FRESH_S, 0), 1);
+    var r = u < 0.5 ? 0.16 + 1.6 * u : 0.96, g = u < 0.5 ? 0.86 : 0.86 - 1.5 * (u - 0.5), b = 0.22 - 0.1 * u;
+    var dim = age > FRESH_S && windowS > FRESH_S ? 1 - 0.5 * Math.min((age - FRESH_S) / (windowS - FRESH_S), 1) : 1;
+    out[o] = r * dim; out[o + 1] = g * dim; out[o + 2] = b * dim;
+  }
+  function Dyn(make) { // growable position+colour buffers behind a THREE.Points / THREE.Line
+    this.cap = 0; this.geo = new THREE.BufferGeometry(); this.obj = make(this.geo); this.obj.frustumCulled = false; this.reserve(1024);
+  }
+  Dyn.prototype.reserve = function (n) {
+    if (n <= this.cap) return;
+    this.cap = Math.ceil(n * 1.5); this.pos = new Float32Array(this.cap * 3); this.col = new Float32Array(this.cap * 3);
+    this.geo.setAttribute("position", new THREE.BufferAttribute(this.pos, 3)); this.geo.setAttribute("color", new THREE.BufferAttribute(this.col, 3));
+  };
+  Dyn.prototype.commit = function (n) {
+    this.geo.setDrawRange(0, n); this.geo.attributes.position.needsUpdate = true; this.geo.attributes.color.needsUpdate = true;
+  };
+  var cloudMat = new THREE.PointsMaterial({ size: 0.05, vertexColors: true, sizeAttenuation: true });
+  var cloud = new Dyn(function (g) { return new THREE.Points(g, cloudMat); });
+  var dots = new Dyn(function (g) { return new THREE.Points(g, new THREE.PointsMaterial({ size: 0.09, vertexColors: true, sizeAttenuation: true })); });
+  var trail = new Dyn(function (g) { return new THREE.Line(g, new THREE.LineBasicMaterial({ vertexColors: true })); });
+  scene.add(cloud.obj, dots.obj, trail.obj);
+
+  var robot = new THREE.Group();
+  var coneGeo = new THREE.ConeGeometry(0.16, 0.5, 20); coneGeo.rotateZ(-Math.PI / 2); // tip along +x, the robot's heading
+  var cone = new THREE.Mesh(coneGeo, new THREE.MeshLambertMaterial({ color: 0x60a5fa })); cone.position.z = 0.3; robot.add(cone);
+  var foot = new THREE.Mesh(new THREE.RingGeometry(0.26, 0.3, 32), new THREE.MeshBasicMaterial({ color: 0x60a5fa, side: THREE.DoubleSide, transparent: true, opacity: 0.6 }));
+  foot.position.z = 0.01; robot.add(foot); robot.visible = false; scene.add(robot);
+  var halo = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.015, 8, 40), new THREE.MeshBasicMaterial({ color: 0xffffff })); halo.visible = false; scene.add(halo);
+
+  var labelCache = new Map();
+  function labelTexture(text, color) {
+    var key = color + "|" + text, hit = labelCache.get(key);
+    if (hit) return hit;
+    if (labelCache.size > 300) { labelCache.forEach(function (v) { v.tex.dispose(); }); labelCache.clear(); }
+    var c = document.createElement("canvas"), ctx = c.getContext("2d"), font = '600 40px system-ui,-apple-system,"Segoe UI","Apple Color Emoji","Segoe UI Emoji",sans-serif';
+    ctx.font = font; c.width = Math.ceil(ctx.measureText(text).width) + 36; c.height = 64;
+    ctx = c.getContext("2d"); ctx.font = font; ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(9,12,17,0.8)"; var w = c.width, h = c.height, r = 16;
+    ctx.beginPath(); ctx.moveTo(r, 0); ctx.arcTo(w, 0, w, h, r); ctx.arcTo(w, h, 0, h, r); ctx.arcTo(0, h, 0, 0, r); ctx.arcTo(0, 0, w, 0, r); ctx.fill();
+    ctx.fillStyle = color; ctx.fillText(text, 18, 34);
+    var tex = new THREE.CanvasTexture(c); tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+    hit = { tex: tex, aspect: w / h }; labelCache.set(key, hit); return hit;
+  }
+  function makeSprite() {
+    var s = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true, sizeAttenuation: false }));
+    s.renderOrder = 10; s.visible = false; scene.add(s); return s;
+  }
+  function setSprite(s, text, color, height, opacity) {
+    var l = labelTexture(text, color);
+    if (s.material.map !== l.tex) { s.material.map = l.tex; s.material.needsUpdate = true; }
+    s.material.opacity = opacity; s.scale.set(height * l.aspect, height, 1); s.visible = true;
+  }
+  var sphereGeo = new THREE.SphereGeometry(0.15, 20, 14), personPool = [], eventPool = [];
+  function personAt(i) {
+    if (!personPool[i]) {
+      var m = new THREE.Mesh(sphereGeo, new THREE.MeshLambertMaterial({ color: 0xffffff })); scene.add(m);
+      personPool[i] = { mesh: m, label: makeSprite() };
+    }
+    return personPool[i];
+  }
+  function eventAt(i) { if (!eventPool[i]) eventPool[i] = makeSprite(); return eventPool[i]; }
+  function personName(p) { return p.identity || ((p.label || "person") + " " + (p.track_id == null ? "?" : p.track_id)); }
+  function eventKind(e) { return String(e.kind || "event").toLowerCase().replace(/[-_ ]/g, ""); }
+
+  // ---------- rebuild the scene for the selected time ----------
+  var pickables = [], tmpCol = [0, 0, 0], shown = { points: 0, people: 0, events: 0 };
+  function rebuild() {
+    pickables = []; shown.points = shown.people = shown.events = 0;
+    var has = sel != null, from = has ? sel - windowS : 0, i, n = 0;
+    // obstacles
+    cloud.obj.visible = has && $("lyObs").checked;
+    if (cloud.obj.visible) {
+      var lo = upper(data.frames, "frames", from), hi = upper(data.frames, "frames", sel), total = 0;
+      for (i = lo; i < hi; i++) total += data.frames[i].n;
+      cloud.reserve(total);
+      for (i = lo; i < hi; i++) {
+        var f = data.frames[i]; ramp(sel - f.t, tmpCol, 0);
+        cloud.pos.set(f.pts, 3 * n);
+        for (var j = 0, o = 3 * n; j < f.n; j++, o += 3) { cloud.col[o] = tmpCol[0]; cloud.col[o + 1] = tmpCol[1]; cloud.col[o + 2] = tmpCol[2]; }
+        n += f.n;
+      }
+      cloud.commit(n); shown.points = n;
+    }
+    // people: every observation in the window is a dot, the newest per track is a labelled sphere
+    var showPeople = has && $("lyPeople").checked, used = 0, latest = new Map();
+    dots.obj.visible = showPeople;
+    if (showPeople) {
+      var pl = upper(data.people, "people", from), ph = upper(data.people, "people", sel);
+      dots.reserve(ph - pl);
+      for (i = pl, n = 0; i < ph; i++, n++) {
+        var p = data.people[i];
+        dots.pos[3 * n] = p.x; dots.pos[3 * n + 1] = p.y; dots.pos[3 * n + 2] = Math.max(p.z || 0, 0.15);
+        ramp(sel - p.t, dots.col, 3 * n); latest.set(String(p.track_id), p);
+      }
+      dots.commit(n);
+      var newest = Array.from(latest.values()).sort(function (a, b) { return b.t - a.t; }).slice(0, 80);
+      newest.forEach(function (p) {
+        var slot = personAt(used++), z = Math.max(p.z || 0, 0.15), lying = String(p.posture || "").toLowerCase() === "lying", age = sel - p.t;
+        ramp(age, tmpCol, 0); slot.mesh.material.color.setRGB(tmpCol[0], tmpCol[1], tmpCol[2]);
+        slot.mesh.position.set(p.x, p.y, z); slot.mesh.scale.set(lying ? 1.7 : 1, lying ? 1.7 : 1, lying ? 0.5 : 1); slot.mesh.visible = true;
+        setSprite(slot.label, personName(p) + (lying ? " · lying" : ""), lying ? "#ff6b6b" : "#e6ebf2", 0.034, age > FRESH_S ? 0.6 : 1);
+        slot.label.position.set(p.x, p.y, z + 0.42);
+        pickables.push({ type: "person", rec: p, pos: slot.mesh.position });
+      });
+      shown.people = newest.length;
+    }
+    for (i = used; i < personPool.length; i++) { personPool[i].mesh.visible = false; personPool[i].label.visible = false; }
+    // robot trail (everything up to the selected time; grey once older than the window) and the robot itself
+    var ph2 = has ? upper(data.poses, "poses", sel) : 0;
+    trail.obj.visible = has && $("lyTrail").checked && ph2 > 1;
+    if (trail.obj.visible) {
+      trail.reserve(ph2);
+      for (i = 0; i < ph2; i++) {
+        var q = data.poses[i], age2 = sel - q[0];
+        trail.pos[3 * i] = q[1]; trail.pos[3 * i + 1] = q[2]; trail.pos[3 * i + 2] = 0.03;
+        if (age2 > windowS) { trail.col[3 * i] = 0.2; trail.col[3 * i + 1] = 0.25; trail.col[3 * i + 2] = 0.33; } else ramp(age2, trail.col, 3 * i);
+      }
+      trail.commit(ph2);
+    }
+    robot.visible = ph2 > 0;
+    if (robot.visible) {
+      var a = data.poses[ph2 - 1], b = data.poses[ph2], x = a[1], y = a[2], yaw = a[3];
+      if (b && b[0] > a[0] && b[0] - a[0] < 2) { // interpolate for smooth replay
+        var u = (sel - a[0]) / (b[0] - a[0]), d = Math.atan2(Math.sin(b[3] - a[3]), Math.cos(b[3] - a[3]));
+        x += (b[1] - x) * u; y += (b[2] - y) * u; yaw += d * u;
+      }
+      robot.position.set(x, y, 0); robot.rotation.z = yaw;
+      if (Math.hypot(x - grid.position.x, y - grid.position.y) > 20) { grid.position.x = Math.round(x); grid.position.y = Math.round(y); }
+    }
+    // events
+    var usedE = 0;
+    if (has && $("lyEvents").checked) {
+      var el = upper(data.events, "events", from), eh = upper(data.events, "events", sel);
+      for (i = Math.max(el, eh - 60); i < eh; i++) {
+        var e = data.events[i], kind = eventKind(e), s = eventAt(usedE++), ageE = sel - e.t;
+        setSprite(s, (ICONS[kind] || "•") + " " + (kind === "checkin" ? "check-in" : (e.kind || "event")),
+          kind === "collision" || kind === "checkin" ? "#fca5a5" : "#e6ebf2", 0.03, ageE > FRESH_S ? 0.55 : 1);
+        s.position.set(e.x, e.y, 0.75 + 0.12 * ((i % 3) - 1));
+        pickables.push({ type: "event", rec: e, pos: s.position });
+      }
+      shown.events = usedE;
+    }
+    for (i = usedE; i < eventPool.length; i++) eventPool[i].visible = false;
+    halo.visible = false;
+    if (picked) for (i = 0; i < pickables.length; i++) if (pickables[i].rec === picked.rec) { halo.visible = true; halo.position.copy(pickables[i].pos); }
+    if (picked) showDetails(picked);
+    updateReadout();
+  }
+
+  // ---------- readout, slider, details ----------
+  function clock(s) { s = Math.max(0, s); var m = Math.floor(s / 60); return (m < 10 ? "0" : "") + m + ":" + (s % 60 < 10 ? "0" : "") + (s % 60).toFixed(1); }
+  function wall(t) { return t > 1e9 ? new Date(t * 1000).toLocaleTimeString() : "t=" + t.toFixed(1) + " s"; }
+  function updateReadout() {
+    var el = $("readout"); el.textContent = "";
+    if (sel == null) return;
+    var behind = data.t1 - sel;
+    [["T+", clock(sel - data.t0)], ["", behind < 0.05 ? "latest" : "−" + clock(behind) + " from latest"], ["", wall(sel)],
+     ["", shown.points.toLocaleString() + " pts · " + shown.people + " people · " + shown.events + " events"]].forEach(function (p) {
+      var span = document.createElement("span"), b = document.createElement("b"); span.textContent = p[0]; b.textContent = p[1]; span.appendChild(b); el.appendChild(span);
+    });
+  }
+  function syncSlider() {
+    var s = $("slider"), spanS = data.t1 == null ? 1 : Math.max(data.t1 - data.t0, 0.1);
+    s.max = spanS.toFixed(1); s.disabled = data.t1 == null;
+    if (!scrubbing) s.value = sel == null ? s.max : (sel - data.t0).toFixed(1);
+  }
+  function syncButtons() {
+    $("live").classList.toggle("on", live); $("play").textContent = playing || live ? "⏸" : "▶"; $("speed").textContent = speed + "×";
+  }
+  function setLive(on) { live = on; if (on) { playing = false; if (data.t1 != null) sel = data.t1; } syncButtons(); syncSlider(); dirty = true; }
+  function showDetails(item) {
+    var box = $("details"); box.textContent = "";
+    if (!item) { var hint = document.createElement("span"); hint.className = "hint"; hint.textContent = "Click a person or an event marker for its details."; box.appendChild(hint); return; }
+    var r = item.rec, head = document.createElement("div"), rows;
+    head.className = "head";
+    if (item.type === "person") {
+      head.textContent = personName(r);
+      rows = [["label", r.label], ["track", r.track_id == null ? "–" : r.track_id], ["identity", r.identity || "unknown"], ["posture", r.posture || "–"]];
+    } else {
+      var kind = eventKind(r); head.textContent = (ICONS[kind] || "•") + " " + (r.kind || "event");
+      rows = [["text", r.text || "–"]];
+    }
+    rows.push(["x, y, z", r.x.toFixed(2) + ", " + r.y.toFixed(2) + ", " + (r.z == null ? "–" : r.z.toFixed(2)) + " m"], ["seen", wall(r.t) + " (T+" + clock(r.t - data.t0) + ")"],
+      ["age", sel == null ? "–" : (sel - r.t).toFixed(1) + " s before the selected time"]);
+    if (item.type === "person") rows.push(["note", "estimate from camera bearing + LiDAR range"]);
+    var table = document.createElement("table");
+    rows.forEach(function (kv) {
+      var tr = document.createElement("tr"), k = document.createElement("td"), v = document.createElement("td");
+      k.textContent = kv[0]; v.textContent = String(kv[1]); v.className = "mono" + (kv[0] === "posture" && String(kv[1]).toLowerCase() === "lying" ? " lying" : "");
+      tr.appendChild(k); tr.appendChild(v); table.appendChild(tr);
+    });
+    box.appendChild(head); box.appendChild(table);
+  }
+
+  // ---------- orbit controls (z up): left-drag rotate, right/shift-drag pan, wheel or pinch zoom ----------
+  var orbit = { target: new THREE.Vector3(0, 0, 0.4), r: 9, theta: -Math.PI / 2 - 0.5, phi: 0.95 };
+  var pointers = new Map(), downAt = null, pinch = null;
+  function applyCamera() {
+    orbit.phi = Math.min(Math.max(orbit.phi, 0.02), 1.55); orbit.r = Math.min(Math.max(orbit.r, 0.6), 250);
+    var sp = Math.sin(orbit.phi);
+    camera.position.set(orbit.target.x + orbit.r * sp * Math.cos(orbit.theta), orbit.target.y + orbit.r * sp * Math.sin(orbit.theta), orbit.target.z + orbit.r * Math.cos(orbit.phi));
+    camera.lookAt(orbit.target);
+  }
+  function pan(dx, dy) {
+    var k = orbit.r * 2 * Math.tan(camera.fov * Math.PI / 360) / canvas.clientHeight, c = Math.cos(orbit.theta), s = Math.sin(orbit.theta);
+    orbit.target.x += (s * dx - c * dy) * k; orbit.target.y += (-c * dx - s * dy) * k;
+  }
+  canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  canvas.addEventListener("pointerdown", function (e) {
+    canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 1) downAt = { x: e.clientX, y: e.clientY, t: performance.now() }; else { downAt = null; pinch = null; }
+    canvas.classList.add("drag");
+  });
+  canvas.addEventListener("pointermove", function (e) {
+    var p = pointers.get(e.pointerId); if (!p) return;
+    var dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY;
+    if (pointers.size === 1) {
+      if (e.buttons & 2 || e.shiftKey || e.ctrlKey || e.metaKey) { pan(dx, dy); $("follow").checked = false; }
+      else { orbit.theta -= dx * 0.006; orbit.phi -= dy * 0.006; }
+    } else if (pointers.size === 2) {
+      var ps = Array.from(pointers.values()), dist = Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y);
+      if (pinch) orbit.r *= pinch / Math.max(dist, 1);
+      pinch = dist; pan(dx / 2, dy / 2);
+    }
+  });
+  function pointerEnd(e) {
+    pointers.delete(e.pointerId); pinch = null; if (!pointers.size) canvas.classList.remove("drag");
+    if (downAt && e.type === "pointerup" && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 5 && performance.now() - downAt.t < 600) pick(e.clientX, e.clientY);
+    downAt = null;
+  }
+  canvas.addEventListener("pointerup", pointerEnd); canvas.addEventListener("pointercancel", pointerEnd);
+  canvas.addEventListener("wheel", function (e) { e.preventDefault(); orbit.r *= Math.exp((e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY) * 0.0012); }, { passive: false });
+  var proj = new THREE.Vector3();
+  function pick(cx, cy) { // nearest person/event marker within 26 px on screen
+    var rect = canvas.getBoundingClientRect(), best = null, bestD = 26;
+    pickables.forEach(function (p) {
+      proj.copy(p.pos).project(camera);
+      if (proj.z < -1 || proj.z > 1) return;
+      var d = Math.hypot((proj.x + 1) / 2 * rect.width + rect.left - cx, (1 - proj.y) / 2 * rect.height + rect.top - cy);
+      if (d < bestD) { bestD = d; best = p; }
+    });
+    picked = best; showDetails(best); dirty = true;
+    if (best && window.innerWidth <= 760) $("panel").classList.add("open");
+  }
+  function recenter(fit) {
+    var x = 0, y = 0;
+    if (robot.visible || data.poses.length) { var p = data.poses[Math.max(0, upper(data.poses, "poses", sel == null ? Infinity : sel) - 1)]; if (p) { x = p[1]; y = p[2]; } }
+    else if (data.frames.length && data.frames[data.frames.length - 1].n) { var f = data.frames[data.frames.length - 1]; x = f.pts[0]; y = f.pts[1]; }
+    orbit.target.set(x, y, 0.4);
+    if (fit) {
+      var ext = 3;
+      data.poses.forEach(function (q) { ext = Math.max(ext, Math.hypot(q[1] - x, q[2] - y)); });
+      orbit.r = Math.min(Math.max(ext * 1.6 + 4, 7), 40);
+    }
+  }
+
+  // ---------- UI wiring ----------
+  $("slider").addEventListener("pointerdown", function () { scrubbing = true; });
+  $("slider").addEventListener("input", function () {
+    if (data.t1 == null) return;
+    sel = data.t0 + parseFloat(this.value); live = false; playing = false; syncButtons(); dirty = true;
+  });
+  var detailTimer = null;
+  function endScrub() { scrubbing = false; clearTimeout(detailTimer); detailTimer = setTimeout(fetchDetail, 350); }
+  $("slider").addEventListener("change", endScrub); $("slider").addEventListener("pointerup", endScrub);
+  $("play").addEventListener("click", function () {
+    if (live || playing) { live = false; playing = false; } else { playing = true; if (data.t1 != null && sel >= data.t1 - 0.05) sel = data.t0; }
+    syncButtons(); dirty = true;
+  });
+  $("speed").addEventListener("click", function () { speed = speed === 1 ? 4 : 1; syncButtons(); });
+  $("live").addEventListener("click", function () { setLive(!live); });
+  $("win").addEventListener("input", function () { windowS = parseFloat(this.value); $("winV").textContent = windowS + " s"; dirty = true; });
+  $("psize").addEventListener("input", function () { cloudMat.size = parseFloat(this.value); $("psizeV").textContent = cloudMat.size.toFixed(2) + " m"; });
+  ["lyObs", "lyPeople", "lyTrail", "lyEvents"].forEach(function (id) { $(id).addEventListener("change", function () { dirty = true; }); });
+  $("recenter").addEventListener("click", function () { recenter(false); });
+  $("menu").addEventListener("click", function () { $("panel").classList.toggle("open"); });
+  window.addEventListener("keydown", function (e) {
+    if (e.target && /^(INPUT|BUTTON|TEXTAREA)$/.test(e.target.tagName) && e.key === " ") return;
+    if (e.key === " ") { e.preventDefault(); $("play").click(); }
+    else if (e.key === "l" || e.key === "L") setLive(!live);
+    else if (e.key === "c" || e.key === "C") recenter(false);
+    else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && data.t1 != null && e.target.id !== "slider") {
+      live = false; playing = false; sel = Math.min(Math.max(sel + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 10 : 1), data.t0), data.t1); syncButtons(); syncSlider(); dirty = true;
+    }
+  });
+  function resize() { var w = window.innerWidth, h = window.innerHeight; renderer.setSize(w, h, false); camera.aspect = w / Math.max(h, 1); camera.updateProjectionMatrix(); }
+  window.addEventListener("resize", resize); resize();
+
+  // ---------- replay a recorded .jsonl run dropped on the page ----------
+  window.addEventListener("dragover", function (e) { e.preventDefault(); });
+  window.addEventListener("drop", function (e) {
+    e.preventDefault();
+    var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (!file) return;
+    file.text().then(function (text) {
+      var snap = { poses: [], frames: [], people: [], events: [] };
+      text.split("\n").forEach(function (line) {
+        if (!line.trim()) return;
+        try {
+          var d = JSON.parse(line);
+          if (d.type === "pose") snap.poses.push([d.t, d.x, d.y, d.yaw]);
+          else if (d.type === "obstacles") snap.frames.push({ t: d.t, points: d.points });
+          else if (d.type === "people") (d.people || []).forEach(function (p) { p.t = d.t; snap.people.push(p); });
+          else if (d.type === "event") snap.events.push(d);
+        } catch (err) { /* skip a torn line */ }
+      });
+      replayName = file.name; framed = false; live = false; playing = false;
+      ingest(snap, true, false); if (data.t1 != null) sel = data.t0; syncButtons(); syncSlider(); dirty = true;
+      setStatus("replay · " + file.name, "ok");
+    });
+  });
+
+  // ---------- fetching ----------
+  function fetchSnap(query) {
+    var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 10000);
+    return fetch(API + (query || ""), { cache: "no-store", signal: ctl.signal })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .finally(function () { clearTimeout(timer); });
+  }
+  function fetchDetail() { // the full snapshot thins old frames; fetch the selected window at full density on demand
+    if (replayName || live || sel == null) return;
+    fetchSnap("?since=" + (sel - windowS).toFixed(3) + "&until=" + sel.toFixed(3)).then(function (s) { ingest(s, false, false); }).catch(function () {});
+  }
+  function poll() {
+    if (replayName) return;
+    if (scrubbing) return void setTimeout(poll, 500);
+    var full = data.t1 == null || needReset;
+    fetchSnap(full ? "" : "?since=" + (data.t1 - LOOKBACK_S).toFixed(3)).then(function (snap) {
+      if (!full && snap.span && snap.span[1] != null && snap.span[1] < data.t1 - 5) { needReset = true; return 50; } // the recorder restarted with a new clock
+      var thinned = full && snap.counts && snap.counts.frames_total > snap.counts.frames;
+      ingest(snap, full, true); needReset = false; fails = 0; lastOk = performance.now();
+      if (thinned && data.t1 != null) fetchSnap("?since=" + (data.t1 - DENSE_S).toFixed(3)).then(function (s) { ingest(s, false, false); }).catch(function () {});
+      return POLL_MS;
+    }).catch(function () {
+      fails++; setStatus("offline · retrying", "bad");
+      if (data.t1 == null) showMessage("Cannot reach the dog's live view", "Retrying " + API + " …");
+      return Math.min(POLL_MS * Math.pow(1.5, fails), 10000);
+    }).then(function (delay) { setTimeout(poll, delay); });
+  }
+
+  // ---------- main loop ----------
+  var lastTick = performance.now();
+  function tick(now) {
+    var dt = Math.min((now - lastTick) / 1000, 0.25); lastTick = now;
+    if (playing && sel != null) {
+      sel += dt * speed;
+      if (sel >= data.t1) { sel = data.t1; setLive(true); }
+      syncSlider(); dirty = true;
+    }
+    if (dirty) { dirty = false; rebuild(); }
+    if ($("follow").checked && robot.visible) { orbit.target.x += (robot.position.x - orbit.target.x) * 0.1; orbit.target.y += (robot.position.y - orbit.target.y) * 0.1; }
+    if (!replayName && lastOk && fails === 0) setStatus((live ? "live" : "history") + " · updated " + Math.round((now - lastOk) / 1000) + " s ago", "ok");
+    applyCamera(); renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+  syncButtons(); poll(); requestAnimationFrame(tick);
+}
+
+loadThree(0);
+})();
+</script>
+</body>
+</html>

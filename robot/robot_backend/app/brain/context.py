@@ -13,11 +13,19 @@ CONTEXT_BYTES=12000
 def pack_context(request, *, max_bytes=CONTEXT_BYTES):
     data=request.model_dump(mode='json') if hasattr(request,'model_dump') else request
     frame=data['observation']
+    progress=dict(data.get('progress',{}))
+    sighting=progress.get('last_person_sighting')
+    if sighting and (sighting['pose']['map_id'] != frame['pose']['map_id']
+                     or sighting['ts'] > frame['ts']):
+        progress['last_person_sighting']=None
+    elif sighting:
+        progress['last_person_sighting']={**sighting,
+            'age_seconds':round((frame['ts']-sighting['ts'])/1000, 1)}
     context={'goal':data['goal'],
              'current_observation':{k:frame[k] for k in ('frame_id','ts','pose')},
              'admissible_waypoints':data.get('waypoints',[]),
              'execution_feedback':data.get('recent_outcomes',[]),
-             'progress':data.get('progress',{}),
+             'progress':progress,
              'memories':[]}
     waypoints=data.get('waypoints',[])
     if waypoints:
@@ -41,7 +49,10 @@ def pack_context(request, *, max_bytes=CONTEXT_BYTES):
                 or item['ts'] > frame['ts']):
             continue
         seen.add(item['frame_id'])
-        context['memories'].append(item)
+        # Keep the exact citation while giving speech a usable relative age.
+        # Derive this from capture times, never from a scene's shortened day.
+        context['memories'].append({**item,
+            'age_seconds':round((frame['ts']-item['ts'])/1000, 1)})
         candidate=encode()
         if len(candidate.encode('utf-8'))>max_bytes:
             context['memories'].pop()

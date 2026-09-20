@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Annie Audio uses this iPhone's microphone to transmit live audio to the Annie companion.</string>
+	<!-- Shown the first time the app connects to a device on the local network. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Annie Audio connects to the Annie companion on your local network to stream audio.</string>
+	<!-- The backend speaks plain ws:// on the LAN; this allows local-network
+	     addresses only, not arbitrary internet cleartext. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

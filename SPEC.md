@@ -29,6 +29,7 @@ not a medical diagnosis or a replacement for emergency response.
 | REQ-009 | Optional Subconscious advisory team. | Bounded text-only agents run only when configured and opted in; no robot, alert, or messaging authority; provider failure is tested with mocks. |
 | REQ-010 | Asynchronous family message relay to the resident, with live progress. | Posting a message returns a run ID immediately without waiting on the robot; an unreachable robot and normal progress both surface as run events, never a blocked request or a 500; connected family clients see live thread and run updates over WebSocket. |
 | REQ-012 | SwiftUI app registers an app user and a dog user profile and records which was created first. | An app user registering creates both profiles, linked; a dog user can register alone; blank, over-50-character, and repeat registrations are rejected. Profiles are stored on the device only; server-side storage, cross-device pairing, and who may create whom remain open (DEC-008). |
+| REQ-013 | Interactive live simulation and spatial evidence. | The operator can orbit, pan, zoom, and reset the scene camera with pointer, touch, or keyboard; toggle raycast LiDAR hits, measured travel, and planned route; and distinguish those sources without changing robot-camera inference or robot motion. |
 
 The rule uses known floor/chair locations. Unlike the source's literal
 `location != bed`, unknown location requires more evidence. Confidence
@@ -43,7 +44,25 @@ may re-arm only a resolved episode in demo mode, preserving evidence and command
 history without injecting a perception observation. Full-house runs stage the
 resident routine/fall and recorded reply while the model chooses robot actions.
 
+## REQ-014: Zach's message to Janine (current demo)
+
+Zach texts Annie because his messages to his mother, Janine, have not been
+delivered. Annie must choose its search route from camera evidence, find a
+person, and audibly relay Zach's request to charge/check Janine's phone. The
+task completes only after measured movement and speech playback receipts.
+Janine's follow-up that she lost her phone must retrieve a cited historical
+phone observation and communicate uncertainty about its current location.
+Names come from the supplied conversation; face identity and who placed the
+phone are not inferred. This story is the immediate demonstration priority.
+See [the story and acceptance checks](robot/simulation/STORY_DEMO.md).
+
 ## Scope boundaries
+
+The current requested deployment profile runs all runtime services locally,
+including Elasticsearch when selected. Use local vision, Whisper/macOS speech,
+and Graphiti or self-hosted Elastic; cloud audio and advisory agents remain off.
+Prior cloud-based simulator measurements remain historical evidence, not
+acceptance of the all-local profile. See [local setup](docs/LOCAL_ENV.md).
 
 Target integrations: Go2 with DimOS/MuJoCo, GX10-local image-capable Nemotron,
 Deepgram, ElevenLabs, Linq, and Elastic. Track each as simulated/disconnected
@@ -64,7 +83,7 @@ with coordinates do not establish persistent identity or a full 4D graph.
 Full frames stay on the trusted local body/brain network. Cloud audio/text,
 Elastic captions, Linq notifications, released crops, and Subconscious evidence
 can contain personal information. This is local-first, not fully air-gapped.
-The user authorized cloud inference for synthetic simulator frames on 2026-09-19, within a total $20 external inference budget. It is explicitly configured; real resident/hardware frames remain local. No automatic provider fallback is permitted.
+The user authorized cloud inference for synthetic simulator frames on 2026-09-19 and subsequently raised the total external inference budget to $50. Preserve all prior spending and reservations; the shared service cap is $49 because an earlier $1 probe reservation is tracked separately. It is explicitly configured; real resident/hardware frames remain local. No automatic provider fallback is permitted.
 Use synthetic data for the current demo; define retention and crop release
 before collecting actual resident observations. Never put media or secrets in Git.
 
@@ -100,3 +119,15 @@ Where older prose describes current behavior differently, acceptance target 1
 defines the intended next behavior. Existing strict wire contracts remain in
 force until producers, consumers, schemas, and tests migrate together. See the
 acceptance document's inspection baseline for the known implementation gaps.
+
+## Local showcase operation
+
+One repository command starts the simulator app, grandmas-house locomotion viewer
+with advisory person detection, local brain and agent bridge, waits for readiness,
+and tears down its child processes on Ctrl-C. Occupied service ports are refused
+with listener PIDs. Separate HTTP showcase commands run the four-stop patrol,
+stage a fall and observe its identified incident/playback/reply/escalation timeline,
+sequence the five supported tricks by execution receipts, and summarize stack
+status. Each step reports measured elapsed time and has a bounded wait. A trick
+is an optional planner action for celebrating a reassured resident; execution
+still uses the simulator's motion gates. These are simulator workflows only.

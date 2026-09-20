@@ -107,19 +107,23 @@ OpenRouter's `usage.cost`). Missing usage/cost stays absent, never zero. This is
 reported accounting, not a spending limit. A cloud runner must separately enforce
 its authorized budget for providers other than the approved OpenRouter route.
 
-The OpenRouter route is restricted to an approved vision allowlist of
-`qwen/qwen3-vl-32b-instruct:floor`, `deepseek/deepseek-v4.1-flash:floor`, and
-`xiaomi/mimo-v2.5:floor` (the last also being the approved audio model). All
-routes enforce 512 output tokens via `max_tokens`, reasoning disabled with
-`reasoning: {"enabled": false}` ([official reasoning-tokens
-documentation](https://openrouter.ai/docs/use-cases/reasoning-tokens)), no
-provider fallback, and text-only output with no tools. Per-model provider price
+The approved OpenRouter vision models are listed below; `xiaomi/mimo-v2.5:floor`
+also supports the approved audio route. All routes enforce 512 output tokens
+via `max_tokens`, no provider fallback, and text-only output with no tools.
+Reasoning is disabled except for Gemini 3.8, whose smallest supported level is
+`low`; its reasoning content is excluded from returned text. References:
+[OpenRouter reasoning](https://openrouter.ai/docs/use-cases/reasoning-tokens),
+[Google Gemini 3.8 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash).
+The Gemini 3.8 route excludes Flex endpoints to avoid their latency tradeoff.
+Per-model provider price
 ceilings in USD per million tokens and the conservative reservation held per
 attempt (full verified context at the ceiling plus 512 output tokens, kept on
 failures and timeouts):
 
 | Model | Context tokens | Prompt cap | Completion cap | Reservation |
 | --- | --- | --- | --- | --- |
+| `google/gemini-3.8-flash:floor` | 1,048,576 | $0.76 | $3.76 | $0.80 |
+| `google/gemini-2.5-flash-lite:floor` | 1,048,576 | $0.11 | $0.41 | $0.12 |
 | `qwen/qwen3-vl-32b-instruct:floor` | 131,072 | $0.11 | $0.42 | $0.02 |
 | `deepseek/deepseek-v4.1-flash:floor` | 1,048,576 | $0.31 | $1.21 | $0.50 |
 | `xiaomi/mimo-v2.5:floor` | 1,050,000 | $0.15 | $0.29 | $0.20 |
@@ -128,13 +132,16 @@ Reservations draw on one shared persistent ledger across all approved models:
 the budget caps the combined total, not each model separately, so mixing models
 cannot exceed `ANNIE_VISION_BUDGET_USD` (default $20 total, absolute ceiling
 $20). Default 100 attempts of the cheapest model reserves at most $2. A
-corrupt/unwritable ledger fails closed; per-entry amounts and the reported
-total are cross-checked against the fixed reservations. Do not delete or change
+corrupt/unwritable ledger fails closed. Validated successful responses can settle
+their own reservation once to reported provider cost. Historical reservations
+and uncertain failures retain the full debit; missing cost is not zero.
+Per-model charges and outstanding reservations must agree with the total. Do not delete or change
 the ledger path to reset an active budget. This meter covers only requests made
 through this service and depends on the provider honoring its documented
 limits. Price-cap semantics: [OpenRouter official cost
 guide](https://openrouter.ai/blog/tutorials/how-to-get-the-lowest-cost-llm-inference-on-openrouter/).
 Model facts are owner-verified against the public OpenRouter catalog:
+[google/gemini-3.8-flash](https://openrouter.ai/google/gemini-3.8-flash),
 [deepseek/deepseek-v4.1-flash](https://openrouter.ai/deepseek/deepseek-v4.1-flash)
 and
 [xiaomi/mimo-v2.5](https://openrouter.ai/xiaomi/mimo-v2.5).
@@ -142,7 +149,7 @@ and
 The service uses image `image_url` content with a base64 data URI and
 `response_format: {"type":"json_object"}` for provider compatibility; strict
 application validation remains mandatory. OpenRouter requests use the widely
-supported `max_tokens` plus `reasoning: {"enabled": false}`; other providers
+supported `max_tokens` and the model-specific reasoning settings above; other providers
 receive `max_completion_tokens`. Wire format reference:
 [official OpenAI Chat Completions documentation](https://developers.openai.com/api/reference/resources/chat).
 
@@ -158,3 +165,26 @@ Verification uses synthetic JPEGs and mocked HTTP, not GX10 or paid inference:
 ```sh
 .venv/bin/python -m pytest robot/robot_backend/tests/test_brain.py -q
 ```
+
+## Goal-directed planning
+
+`POST /plan` accepts `observation` (the rendered frame contract), `goal`, known
+`waypoints`, bounded `recent_outcomes`, cited `memories`, and `progress`.
+Progress contains measured completed visits, unvisited waypoint IDs, incident
+receipts, and an optional `last_person_sighting` preserving its original frame,
+time, and camera pose. Cross-map and future sightings are excluded from context.
+The bounded context contains at most six rolling memories; the retained positive
+sighting is separate. Captions and execution details are data, not instructions.
+
+The response echoes frame identity and contains perception plus one action:
+`goto` (waypoint ID), `say` (text), `look`, `wait`, `stop`, or `finish`.
+Each action includes a brief user-visible reason. The simulator validates current
+map, five-second capture age, goal revision, command queues, and execution gates
+before dispatch. A selected action is not an executed command.
+
+`finish` is the model's declaration that a finite goal is complete. It sends no
+motor command. The bridge requires accepted evidence, no pending incident, and
+terminal motion/audio receipts before recording `goal_completion`. Further
+planning for that exact map and goal revision stops; telemetry continues. A new
+operator goal/resume permits another run. Completion wording remains a model
+claim and must be assessed against its cited observations and execution receipts.

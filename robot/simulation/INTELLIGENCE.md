@@ -18,6 +18,13 @@ returns to model planning instead of indefinitely requesting confirmation
 images. The incident rules remain responsible for correlated check-in replies
 and alert delivery; these are not decisions made by the language model.
 
+For a finite goal, the model can select `finish` with its observed result.
+Completion requires fresh accepted evidence, no incident check-in, and terminal
+motion/audio receipts. It records `goal_completion` and ends further planning
+for that exact map and goal revision; body telemetry keeps running. A new
+operator goal/resume starts another revision. The completion text is the model's
+reported result, not independent proof of the goal's semantic success.
+
 Use **Start AI / resume** with an open-ended goal such as “Explore the ground
 floor and find the resident using camera evidence.” The separate full-house
 demo button deliberately stages an incident and replays recorded speech.
@@ -25,8 +32,15 @@ Stair traversal is unsupported by the current walking controller.
 
 ## Memory and cost bounds
 
-The default retrieval uses SQLite observations. It retrieves recent person
-sightings and spatially diverse views before acquiring the current image.
+The default retrieval uses SQLite observations. Goal-conditioned `/recall`
+retrieves relevant captions (embeddings when configured, lexical fallback
+otherwise), alongside recent person sightings and spatially diverse views,
+before acquiring the current image. A separate typed `last_person_sighting`
+preserves the newest accepted positive observation beyond the six-frame working
+window. It can be recovered from SQLite after a bridge restart. Person queries
+require stored `person=true`; the phrase “No person visible” is not a sighting.
+Later empty views cannot erase positive historical evidence. This preserves
+evidence in context; model statements still require live verification.
 The optional Elastic adapter remains separately configured. Captions keep
 their capture ID, timestamp, and pose; cross-map and future captures are
 excluded. Completed destinations are recovered from the viewer's retained

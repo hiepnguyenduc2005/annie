@@ -11,6 +11,8 @@ import math
 import time
 from uuid import uuid4
 
+from robot.simulation.tricks import trick_duration_s, trick_footprint, trick_velocity
+
 
 def yaw_of(q):
     w, x, y, z = q
@@ -82,6 +84,7 @@ class Navigator:
         self.path = []
         self.goals = []
         self.state = "idle"
+        self.trick = None
         self.waypoint = None
         self.turn_yaw = None
         self.started = 0
@@ -199,7 +202,7 @@ class Navigator:
         self.state = "failed"
         self.path = []
 
-    def command(self, cmd, waypoint=None, command_id=None, heading=None):
+    def command(self, cmd, waypoint=None, command_id=None, heading=None, trick=None):
         command_id = command_id or str(uuid4())
         # Duplicate suppression covers only the retained 100-command window;
         # upstream callers must dedupe retried IDs older than that.
@@ -215,6 +218,8 @@ class Navigator:
         }
         if cmd == 'goto':
             item['waypoint'] = waypoint
+        if cmd == 'trick':
+            item['trick'] = trick
         self.commands = (self.commands + [item])[-100:]
         self.active = item
         self.started = float(self.data.time)
@@ -253,6 +258,21 @@ class Navigator:
                 self.update(
                     "executing", f"Turning to absolute yaw {heading:.2f} rad"
                 )
+            elif cmd == "trick":
+                # A timed body-velocity script through the same policy as
+                # navigation: real physics, same interlocks, no posed joints.
+                if not isinstance(trick, str):
+                    raise ValueError("Trick name must be a string")
+                duration = trick_duration_s(trick)  # ValueError for unknown names
+                # Pre-flight: the kinematic path must stay in free space with the
+                # planner's inflated margin. The live guard still runs during it.
+                start = tuple(self.data.qpos[:2])
+                path = trick_footprint(trick, start, yaw_of(self.data.qpos[3:7]))
+                if not all(self.free(p) for p in path):
+                    raise ValueError(f"Trick {trick} lacks clearance from walls or furniture here")
+                self.state = "tricking"
+                self.trick = trick
+                self.update("executing", f"Performing {trick} for {duration:.1f} s")
             else:
                 self.goals = (
                     ["living-room", "bedroom", "hallway", "home"]
@@ -281,7 +301,7 @@ class Navigator:
         self.update("executing", f"Walking to {self.waypoint}")
 
     def velocity(self):
-        if self.state not in ("moving", "scanning", "turning"):
+        if self.state not in ("moving", "scanning", "turning", "tricking"):
             return 0.0, 0.0, 0.0
         now = float(self.data.time)
         if now - self.started > 150:
@@ -307,6 +327,13 @@ class Navigator:
                 0.65 if elapsed < 4 else -0.65 if elapsed < 9 else 0
             )
             return 0.0, 0.0, max(-1.0, min(1.0, 3 * angle(target - yaw)))
+        if self.state == "tricking":
+            velocity = trick_velocity(self.trick, now - self.started)
+            if velocity is None:
+                self.state = "idle"
+                self.update("completed", f"Trick {self.trick} finished; measured pose retained")
+                return 0.0, 0.0, 0.0
+            return velocity
         if self.state == "turning":
             error = angle(self.turn_yaw - yaw)
             if abs(error) < 0.12:

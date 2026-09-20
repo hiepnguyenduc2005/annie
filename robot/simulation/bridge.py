@@ -47,6 +47,7 @@ class Bridge:
         self.status_file = Path(status_file) if status_file else None
         self.last_perception = self.last_provider = self.last_latency_ms = None
         self.last_error = self.ingest_accepted = None
+        self.inference_blocked = None
         self.autonomy = None
         self.autonomy_revision = None
         self.auto_commands = {}
@@ -58,7 +59,7 @@ class Bridge:
         self.continuous_local = continuous_local
         self.memory = memory
         self.memory_task = None
-        self.memory_state = {'provider': 'elastic' if memory else 'local_sqlite', 'retrieved': 0}
+        self.memory_state = {'provider': self.memory_provider, 'retrieved': 0}
         self.pending_checkin = None
         self.history = []
         self.pending_agent_command = None
@@ -66,6 +67,28 @@ class Bridge:
         self.incident_episode_active = False
         self.recent_events = []
         self.progress = {}
+        self.last_person_sighting = None
+        self.goal_completion = None
+        self.agent_goal_scope = None
+        self.issued_speech = []
+        from robot.simulation.goal_completion import SpeechReceiptCache
+        self.speech_receipts = SpeechReceiptCache()
+
+    def remember_person(self, citation, map_id):
+        """Retain accepted positive evidence; an empty view cannot erase it."""
+        from robot.robot_backend.app.brain.planner import Memory
+        if (citation.get('pose', {}).get('map_id') != map_id
+                or not 0 <= citation.get('ts', -1) <= self.clock() * 1000):
+            return
+        sighting = Memory.model_validate({k: citation[k] for k in ('caption', 'frame_id', 'ts', 'pose')}).model_dump()
+        previous = self.last_person_sighting
+        if (not previous or previous['pose']['map_id'] != map_id
+                or sighting['ts'] > previous['ts']):
+            self.last_person_sighting = sighting
+
+    @property
+    def memory_provider(self):
+        return getattr(self.memory, 'provider_name', 'elastic') if self.memory else 'local_sqlite'
 
     @property
     def limit_reached(self):
@@ -75,11 +98,25 @@ class Bridge:
         """Retrieve durable evidence before capturing the current image."""
         from robot.robot_backend.app.brain.planner import Memory
         try:
+            retrieval = self.memory_provider if self.memory else 'lexical'
+            try:
+                result = await self.request(self.app, 'POST', '/query', json={'text':'where was the person last seen'})
+                person_items = result.get('citations', [])
+            except httpx.HTTPError:
+                person_items = []
+            for item in person_items:
+                self.remember_person(item, map_id)
             if self.memory:
                 items = await self.memory.search(goal, map_id, ts_to=int(self.clock()*1000))
             else:
-                result = await self.request(self.app, 'POST', '/query', json={'text':'where was the person last seen'})
-                items = result.get('citations', [])
+                try:
+                    recalled = await self.request(self.app, 'POST', '/recall', json={
+                        'goal': goal, 'map_id': map_id, 'ts_to': int(self.clock()*1000), 'limit': 6})
+                    goal_items = recalled.get('citations', [])
+                    retrieval = recalled.get('provider', 'goal_recall')
+                except httpx.HTTPError:
+                    goal_items = []
+                items = person_items
                 # Retrieve one recent view per known waypoint, so the last
                 # room does not crowd all earlier exploration out of context.
                 responses = await asyncio.gather(*(self.request(self.app, 'POST', '/query',
@@ -87,7 +124,7 @@ class Bridge:
                     for w in list(waypoints)[:8]), return_exceptions=True)
                 diverse = [r['citations'][0] for r in responses
                            if isinstance(r, dict) and r.get('citations')]
-                items = items[:2] + diverse + items[2:]
+                items = goal_items[:2] + items[:2] + diverse + goal_items[2:] + items[2:]
             cited = []
             seen = set()
             for item in items:
@@ -97,12 +134,13 @@ class Bridge:
                 cited.append(Memory.model_validate({k:item[k] for k in ('caption','frame_id','ts','pose')}).model_dump())
                 seen.add(item['frame_id'])
                 if len(cited) >= 6: break
-            self.memory_state = {'provider':'elastic' if self.memory else 'local_sqlite',
+            self.memory_state = {'provider':self.memory_provider,
                                  'retrieved':len(cited), 'status':'connected',
+                                 'retrieval':retrieval,
                                  'citations':cited[:3]}
             return cited
         except Exception as exc:
-            self.memory_state = {'provider':'elastic' if self.memory else 'local_sqlite',
+            self.memory_state = {'provider':self.memory_provider,
                                  'retrieved':0, 'status':'unavailable', 'error':type(exc).__name__}
             return []
 
@@ -113,12 +151,22 @@ class Bridge:
         except Exception as exc:
             self.memory_state = {**self.memory_state, 'write_error':type(exc).__name__}
 
+    def retain_evidence(self, frame, perception):
+        if self.status_file is None:
+            return
+        try:
+            from robot.simulation.evidence import save_evidence
+            save_evidence(self.status_file.parent/'evidence', frame, perception)
+        except (ValueError, OSError) as exc:
+            self.warn('evidence cache', exc)
+
     def write_status(self):
         if self.status_file is None:
             return
         status = dict(updated_at=int(self.clock() * 1000), perception_mode=self.perception,
             context_map_id=self.map_id,
             inference_limit_reached=self.perception in ('vision','agent') and self.limit_reached,
+            inference_blocked=self.inference_blocked,
             inferences=self.inferences, max_inferences=self.max_inferences,
             continuous_local=self.continuous_local, memory=self.memory_state,
             last_perception=self.last_perception, last_provider=self.last_provider,
@@ -130,6 +178,7 @@ class Bridge:
         status['agent'] = self.agent_state
         status['history'] = self.history[-12:]
         status['progress'] = self.progress
+        status['goal_completion'] = self.goal_completion
         temporary = None
         try:
             encoded = json.dumps(status, allow_nan=False)
@@ -166,6 +215,15 @@ class Bridge:
         # Never log response bodies, images, URLs, tokens or provider exception text.
         code = f" HTTP {exc.response.status_code}" if isinstance(exc, httpx.HTTPStatusError) else ""
         self.last_error = f"{area} unavailable ({type(exc).__name__}{code})"
+        if area in ('agent', 'vision'):
+            from robot.simulation.inference_failures import inference_block_reason
+            reason = inference_block_reason(exc)
+            if reason:
+                # Keep body/receipt synchronization alive, but do not repeatedly
+                # retry a disabled provider or exhausted/invalid spending ledger.
+                # A configured bridge restart explicitly resumes inference.
+                self.inference_blocked = reason
+                self.last_error = reason
         if area in ('agent','vision') and isinstance(exc,httpx.HTTPStatusError):
             try:
                 detail=exc.response.json().get('detail','')
@@ -217,6 +275,11 @@ class Bridge:
             self.auto_commands.clear()
             self.agent_memory.clear()
             self.agent_feedback.clear()
+            self.last_person_sighting = None
+            self.goal_completion = None
+            self.agent_goal_scope = None
+            self.issued_speech.clear()
+            self.speech_receipts.clear()
             self.pending_agent_command = None
             self.recent_events = []
             self.incident_episode_active = False
@@ -238,14 +301,14 @@ class Bridge:
                     "patrolling" if nav["state"] == "moving" else "idle")
         await self.ingest("dog.status", {"ts": ts, "state": activity,
             "battery_pct": 100, "waypoint": nav.get("waypoint"), "pose": pose})
-        await self.process_commands(nav)
+        await self.process_commands(nav, speech_clips=state.get('speech', []))
         if self.perception == 'agent':
             status = await self.request(self.app,'GET','/status')
             self.pending_checkin = status.get('pending_checkin')
             self.incident_episode_active = status.get('incident_episode_active', False)
         from robot.simulation.task_progress import task_progress
         self.progress = task_progress(state, episode_active=self.incident_episode_active,
-                                      events=self.recent_events, now_ms=ts)
+                                      events=self.recent_events, last_person_sighting=self.last_person_sighting, now_ms=ts)
         if state.get('autonomy_mode') not in (None,'paused') and self.perception != 'agent':
             await self.coordinate(state)
         if self.perception == "ground-truth":
@@ -268,8 +331,11 @@ class Bridge:
                 self.ingest_accepted = response.get("accepted") if isinstance(response.get("accepted"), bool) else None
                 self.last_error = None
 
-    async def process_commands(self, nav):
+    async def process_commands(self, nav, *, speech_clips=()):
         queued = await self.request(self.app, "GET", "/commands")
+        if self.agent_goal_scope:
+            self.speech_receipts.merge(self.issued_speech, queued, speech_clips,
+                map_id=self.agent_goal_scope[0], goal_revision=self.agent_goal_scope[1])
         self.command_statuses = {item['command_id']: item['status'] for item in queued}
         if self.pending_agent_command and self.command_statuses.get(self.pending_agent_command) in TERMINAL:
             self.pending_agent_command = None
@@ -291,12 +357,14 @@ class Bridge:
             if not local["sent"]:
                 # Mark before sending: uncertain transport outcomes must not replay motion.
                 local["sent"] = True
-                if item["cmd"] not in {"goto", "stop", "resume", "look", "patrol", "say"}:
+                if item["cmd"] not in {"goto", "stop", "resume", "look", "patrol", "say", "trick"}:
                     local["pending"] = ("failed", "Unsupported simulation command.")
                 else:
                     payload = {"action": "mission", "cmd": item["cmd"], "command_id": cid}
                     if item["cmd"] == "goto":
                         payload["waypoint"] = item["waypoint"]
+                    if item["cmd"] == "trick":
+                        payload["trick"] = item["trick"]
                     try:
                         if item["cmd"] == "say":
                             await self.request(self.viewer, "POST", "/say",
@@ -396,7 +464,16 @@ class Bridge:
     async def think(self, initial_state):
         """One image-grounded model turn, followed by fresh execution checks."""
         from robot.simulation.agent_execution import gate_action
+        from robot.simulation.goal_completion import IssuedSpeech, goal_speech_completion
         goal = initial_state.get('intelligence_goal','Check on the resident and explore the home carefully.')
+        scope = (initial_state['map_id'], initial_state.get('intelligence_revision', 0), goal)
+        if self.agent_goal_scope != scope:
+            self.agent_goal_scope = scope
+            self.issued_speech.clear()
+            self.speech_receipts.clear()
+            self.goal_completion = None
+            self.agent_state = None
+            self.agent_feedback.clear()
         self.agent_state = {**(self.agent_state or {}),'thinking':True,'goal':goal}
         try:
             memories = await self.retrieve_memories(goal, initial_state['map_id'],
@@ -404,7 +481,8 @@ class Bridge:
             self.recent_events = await self.request(self.app, 'GET', '/events')
             from robot.simulation.task_progress import task_progress
             self.progress = task_progress(initial_state, episode_active=self.incident_episode_active,
-                events=self.recent_events, now_ms=int(self.clock()*1000))
+                events=self.recent_events, last_person_sighting=self.last_person_sighting,
+                now_ms=int(self.clock()*1000))
             observation = await self.request(self.viewer,'GET','/observation')
             if not 0 <= self.clock()*1000-observation['ts'] <= 5000:
                 raise ValueError('Camera is not fresh')
@@ -438,6 +516,9 @@ class Bridge:
             response=await self.ingest('brain.perception',perception)
             self.ingest_accepted=response.get('accepted')
             if self.ingest_accepted:
+                self.retain_evidence(frame, perception)
+                if perception['person']:
+                    self.remember_person(perception, frame['pose']['map_id'])
                 self.agent_memory=(self.agent_memory+[{'caption':perception['caption'],'frame_id':frame['frame_id'],
                     'ts':frame['ts'],'pose':frame['pose']}])[-6:]
                 if self.memory and (self.memory_task is None or self.memory_task.done()):
@@ -448,12 +529,29 @@ class Bridge:
             action=result['action']
             command,detail=gate_action(action,state=state,status=status,frame=frame,
                 now_ms=int(self.clock()*1000),last_speech_ms=self.agent_last_speech_ms)
-            if command and command['cmd'] in ('goto','look') and any(
+            if command and command['cmd'] in ('goto','look','trick') and any(
                     item.get('status') not in TERMINAL and item.get('cmd') in
-                    ('goto','look','turn','patrol','resume','stop') for item in outstanding):
+                    ('goto','look','turn','patrol','resume','stop','trick') for item in outstanding):
                 command,detail=None,'An app motion command is awaiting a terminal execution receipt'
             if not state.get('intelligence_enabled') or state.get('intelligence_revision')!=initial_state.get('intelligence_revision'):
                 command,detail=None,'Goal was paused or changed while the model was thinking'
+            completed = action['action'] == 'finish' and detail == 'Model completed the goal'
+            delivery_receipts = self.speech_receipts.merge(self.issued_speech, outstanding,
+                state.get('speech', []), map_id=state['map_id'],
+                goal_revision=state.get('intelligence_revision', 0))
+            delivery = goal_speech_completion(self.issued_speech, delivery_receipts, state.get('speech', []),
+                map_id=state['map_id'], goal_revision=state.get('intelligence_revision', 0),
+                require_speech=state.get('intelligence_require_speech', False))
+            if completed and not delivery.allows_completion:
+                completed = False
+                detail = delivery.detail
+            if completed and (not self.ingest_accepted or any(item.get('status') not in TERMINAL for item in outstanding)):
+                completed = False
+                detail = 'Completion needs accepted evidence and terminal execution receipts'
+            if completed:
+                self.goal_completion = {'map_id': state['map_id'], 'revision': state.get('intelligence_revision'),
+                    'goal': goal, 'result': action['reason'], 'frame_id': frame['frame_id'],
+                    'ts': int(self.clock()*1000), 'speech_delivery': delivery.state}
             receipt=None
             if command:
                 # An uncertain enqueue outcome holds further actions until
@@ -462,12 +560,16 @@ class Bridge:
                 if command['cmd']=='say':
                     receipt=await self.request(self.app,'POST','/say',json={'text':command['text']})
                     self.agent_last_speech_ms=int(self.clock()*1000)
+                    self.issued_speech.append(IssuedSpeech(receipt['command_id'], scope[0], scope[1]))
                 else:
                     receipt=await self.request(self.app,'POST','/commands',json=command)
                 self.pending_agent_command = receipt['command_id']
             self.agent_feedback=(self.agent_feedback+[{'cmd':action['action'],
-                'status':'queued' if receipt else 'waiting' if action['action']=='wait' else 'rejected','detail':detail}])[-2:]
+                'status':'completed' if completed else 'queued' if receipt else 'waiting' if action['action']=='wait' else 'rejected','detail':detail}])[-2:]
             self.agent_state={'thinking':False,'goal':goal,'action':action,'execution':detail,
+                'goal_status':'completed' if completed else 'active',
+                'goal_revision': initial_state.get('intelligence_revision', 0),
+                'speech_delivery': delivery.state,
                 'command_id':receipt['command_id'] if receipt else None,'frame_id':frame['frame_id'],
                 'ts':frame['ts'],'model':result['provider']['model'],'latency_ms':result['latency_ms'],
                 'context':result.get('context'),'usage':result['provider'].get('usage')}
@@ -493,8 +595,11 @@ class Bridge:
             self.write_status()
             return
         if (state.get("ready") and self.perception in ("vision",'agent') and
+                not (self.goal_completion and self.goal_completion['map_id'] == state.get('map_id')
+                     and self.goal_completion['revision'] == state.get('intelligence_revision')
+                     and self.goal_completion['goal'] == state.get('intelligence_goal')) and
                 (self.perception!='agent' or (state.get('intelligence_enabled') and state.get('running'))) and
-                not self.limit_reached and self.monotonic() >= self.next_inference and
+                not self.inference_blocked and not self.limit_reached and self.monotonic() >= self.next_inference and
                 (self.perception != 'agent' or (not self.pending_checkin and
                  (not self.pending_agent_command or state['navigation']['state'] in ('moving','scanning','turning')))) and
                 (self.vision_task is None or self.vision_task.done())):

@@ -138,7 +138,10 @@ def test_openrouter_reserves_before_failed_egress_and_blocks_after_restart(tmp_p
         assert payload['provider']['max_price'] == PRICE_CAPS_USD_PER_M[model]
         assert payload['provider']['allow_fallbacks'] is False
         assert payload['max_tokens'] == 512
-        assert payload['reasoning'] == {'enabled': False}
+        assert payload['reasoning'] == ({'effort': 'low', 'exclude': True}
+            if model == 'google/gemini-3.8-flash:floor' else {'enabled': False})
+        if model == 'google/gemini-3.8-flash:floor':
+            assert payload['provider']['ignore'] == ['google-ai-studio/flex', 'google-vertex/global/flex']
         assert payload['modalities'] == ['text']
         calls.append(request)
         raise httpx.ReadTimeout('ambiguous charge')

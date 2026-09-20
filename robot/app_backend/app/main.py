@@ -186,7 +186,12 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, require_audio_
                 raise HTTPException(422, 'Unknown waypoint')
         elif body.waypoint is not None:
             raise HTTPException(422, 'waypoint is only valid with goto')
-        return app.state.service.queue_command(body.model_dump())
+        if body.cmd == 'trick':
+            if body.trick is None:
+                raise HTTPException(422, 'trick requires a trick name')
+        elif body.trick is not None:
+            raise HTTPException(422, 'trick is only valid with the trick command')
+        return app.state.service.queue_command(body.model_dump(exclude_none=True))
 
     @router.post('/commands/{command_id}/receipt')
     async def command_receipt(command_id: UUID, body: CommandReceipt):

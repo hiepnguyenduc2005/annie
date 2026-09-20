@@ -142,9 +142,10 @@ not sustained app integration or navigation.
 A priority StopMove request was acknowledged while the robot was stationary
 in 44.8 ms. That is request round-trip time, not measured stopping performance.
 At that stage no movement command had been sent. The operator subsequently
-confirmed a paired physical controller and requested supervised walking within
-a five-metre boundary. The boundary, physical stop/recovery, and loss-of-link
-behavior remain unverified; controller availability alone is not a tested stop.
+reported a paired physical controller and requested supervised walking within
+a five-metre boundary, then corrected that report: no physical controller is
+available. The boundary, physical stop/recovery, and loss-of-link behavior
+remain unverified.
 
 The initially installed DimOS 0.0.13.post1 `stop_movement` implementation only
 cancelled its host timer. A local backport emitted neutral joystick input;
@@ -208,7 +209,14 @@ cutoff to work around this guidance.
 
 The tracked `go2_walk.py` commissioning tool now enforces a finite minimum
 battery setting of 40–100%, defaulting to 40%, before opening a connection.
-Its 44 fake-only checks pass, but it is not qualified for physical patrol:
+
+An active hardware task can also inhibit legacy CLI launchers by creating the
+ignored `.cache/go2-private/motion-inhibit` file. While it exists, `go2_walk.py`
+exits before opening a robot connection. This prevents queued CLI jobs from
+starting during another task's diagnosis; it is neither a robot-side stop nor
+a lock covering arbitrary SDK clients. Clear conflicting launch assignments
+and establish current hardware readiness before removing the file.
+Its 45 fake-only checks pass, but it is not qualified for physical patrol:
 the current completion flag measures elapsed command duration rather than
 route execution, and its stop observer does not yet require distinct fresh
 post-stop samples. The MCF command path also needs hardware verification.
@@ -220,8 +228,15 @@ joystick turns. Direct control requires no Unitree cloud login. This Mac's
 single Wi-Fi connection cannot simultaneously remain on its previous internet
 network and the robot AP. Changing to a shared network or providing a second
 internet connection remains necessary for continuous connected assistant work.
-The most recent stationary reconnect attempt could not reach the robot AP;
-23% remains the last measured charge, not a fresh current reading. The local
+The latest stationary checks detected the exact robot's Bluetooth advertisement,
+but GATT connection timed out before Unitree authentication. Neither saved
+hotspot name was found, and targeted LAN discovery returned no robot. NordVPN
+was off; it is not the current diagnosed blocker. The Mac's internet connection
+was restored, with no robot client remaining. The requested demo network is
+MIT; the robot's address on that network has not been verified. Current battery
+is unknown; 23% is only the last historical reading. A physical operator or
+booth technician must restore the dog’s communications/hotspot before the next
+connection attempt. The local
 connection-help patch is preserved in [tooling](tooling/unitree-ui/connection-help.patch)
 against the pinned Unitree UI revision above.
 
@@ -229,18 +244,30 @@ against the pinned Unitree UI revision above.
 
 Two operator tools sit beside the probe. Both use the probe's connection path,
 read `UNITREE_AES_128_KEY` from the environment only, and stop with sanitized
-errors. Neither has run on the physical dog yet: on 2026-09-19 the unit was out
-of Wi-Fi and Bluetooth range from the host and its last battery reading was
-23%, below the operating floor.
+errors. Neither has run on the physical dog yet. Current stationary diagnostics
+and operating constraints are recorded above; radio detection alone is not a
+working robot connection.
 
-- `robot/go2_walk.py`: a supervised walk for HW-04/HW-05. `--distance 1` walks
-  a straight line at 0.3 m/s; `--circle-radius 1 --laps 3` or `--duration 1800`
-  walks a circle. Speed is capped at 0.6 m/s. It sends StandUp, BalanceStand,
-  streams Move at 10 Hz, and sends a priority StopMove on completion, stale
-  telemetry, low battery, leaving the configured boundary (default 2.5 m from
-  the start), any error, or Ctrl-C, then reports pose, stop acknowledgment
-  round trip and post-stop overrun. 26 fakes-only tests. The host-side stop
-  still cannot reach the robot over a lost link; keep an operator beside it.
+- `robot/go2_walk.py`: an unqualified commissioning prototype for HW-04/HW-05.
+  It schedules line or circle motion requests using speed and elapsed time;
+  requested distance or laps are not verified physical execution. It attempts
+  priority StopMove on exit, but its completion and stop-observation issues
+  above remain unresolved. Its 45 fake-only tests do not qualify the MCF path
+  or prove stopping on hardware. Legacy CLI launches are currently inhibited.
+- `robot/go2_tricks.py`: firmware sport-mode tricks (stand, sit, hello,
+  stretch, dance, flips) by api id, with the 40% floor and a 60% floor for the
+  acrobatic tier. Hello and stretch acknowledged (code 0) on the dog at 50%.
+- `robot/go2_patrol_greet.py`: patrol and greet. Motion from
+  `robot/go2_smart_patrol.py` (LiDAR voxel-map sector ranges + odometry stall
+  detector -> cruise / blocked / backoff / homing), greeting each new upright
+  person with the firmware Hello and host speech, and a check-in question for
+  a lying person. First live run greeted 7 people in 100 s; the LiDAR ranges
+  and stall backoff have only been verified against the simulated dog so far.
+  `--firmware-avoid` additionally switches on the robot's own obstacle-avoid
+  service; `--no-lidar` leaves stall detection as the only collision source.
+- `robot/go2_follow.py`: follow the nearest tracked person by visual servo on
+  the bounding box (turn to centre, walk to a target height, stop when too
+  close). Written and unit-tested; not yet run on the dog.
 - `robot/go2_perception.py`: read-only perception loop. It streams the camera,
   runs the tracked keypoint posture detector on every new frame at 5 Hz, sends
   the latest frame to the local brain `/infer` once per second (one in flight,
@@ -248,6 +275,42 @@ of Wi-Fi and Bluetooth range from the host and its last battery reading was
   a measured `dog.status` to the app with `source: hardware`. It sends no motion
   command. 10 fakes-only tests. Capture times are host receipt times paired
   with odometry by receipt time, not calibrated synchronization.
+
+- `robot/go2_host_voice.py`: the viewer's audio role for hardware. It polls the
+  app for queued `say` commands, renders them with the offline `say` adapter,
+  plays them on this host and reports `accepted/executing/completed/failed`
+  receipts with `source: host`; when the app opens a reply window it runs the
+  live VAD-gated microphone listener once per event. Motion commands are left
+  in the queue and counted. Measured 2026-09-19 on this Mac against a throwaway
+  app with `ANNIE_REQUIRE_AUDIO_RECEIPT=true`: ready in ~2 s, the check-in was
+  spoken and completed inside the 8 s audio watchdog, the reply window opened,
+  the microphone heard no speech in a quiet room, and the app recorded
+  `checkin_no_reply` then `fall_confirmed`. A daemon started after the fall
+  misses the watchdog while Whisper warms up, so start it first. 8 fakes-only
+  tests.
+
+## First physical motion (2026-09-19 22:22, HW-05 rehearsal)
+
+Route that worked with the operator's Mac staying on the venue Wi-Fi: the
+venue network isolates clients, so the dog was provisioned over Bluetooth
+(unitree-ui BLE server, `POST /wifi` with `ap_mode=false`) onto the operator's
+iPhone Personal Hotspot while the Mac reached the same hotspot over USB
+(`en7`, 172.20.10.x). The dog appeared at 172.20.10.10 within one second and
+`robot/go2_walk.py` ran against it. Bluetooth-side motion is impossible: the
+Go2 BLE link only does Wi-Fi setup.
+
+| Run | Result | Measured |
+| --- | --- | --- |
+| `--distance 1` (0.3 m/s) | completed | 0.71 m max from origin in 3.4 s; StopMove ack 34 ms; overrun 0.017 m; settled 0.44 s; battery 40% |
+| `--circle-radius 1 --duration 60` | stopped by the script at 34 s: `battery_low` | 336 Move sends; max 0.67 m from origin; StopMove ack 15.8 ms; overrun 0.009 m; settled 0.32 s |
+
+Reports: `output/hardware/2026-09-19-walk-{line,circle}.json` (ignored path).
+Operator stood beside the dog; no physical controller. These are host-timed
+observations, not calibrated stopping-distance measurements, and HW-04 (an
+independent stop over a lost link) remains unverified. The battery floor
+(40%) ended the circle; charge before the next run. Another agent had placed
+`.cache/go2-private/motion-inhibit` to block motion while it ran diagnostics;
+the operator overrode it for this rehearsal.
 
 ## Verification and outstanding work
 

@@ -218,3 +218,38 @@ def test_output_size_bounds_enforced():
     oversized['goal'] = 'x' * 501
     with pytest.raises(ValidationError):
         PlanRequest.model_validate(oversized)
+
+
+@pytest.mark.parametrize('trick', ['spin', 'circle', 'zigzag', 'wiggle', 'figure8'])
+def test_trick_plan_round_trip_and_ollama_schema(trick):
+    from robot.robot_backend.app.brain.planner import LOCAL_PLANNER_PROMPT
+    action = {'action': 'trick', 'trick': trick, 'reason': 'Celebrate reassurance.'}
+    sent = []
+    def handle(req):
+        sent.append(json.loads(req.content))
+        return wire_reply(action=action)
+    with client(handle, config(mode='local', base_url='http://localhost:11434/v1', model='local')) as api:
+        result = api.post('/plan', json=plan_request())
+    assert result.status_code == 200, result.text
+    assert result.json()['action'] == action
+    alternatives = sent[0]['response_format']['json_schema']['schema']['properties']['action']['oneOf']
+    schema = next(item for item in alternatives if item['properties']['action']['const'] == 'trick')
+    assert trick in schema['properties']['trick']['enum']
+    assert set(schema['required']) == {'action', 'reason', 'trick'}
+    assert 'only for celebrating a reassured resident' in PLANNER_PROMPT
+    assert 'only for celebrating a reassured resident' in LOCAL_PLANNER_PROMPT
+
+
+@pytest.mark.parametrize('action', [
+    {'action': 'trick'}, {'action': 'trick', 'trick': 'jump'},
+    {'action': 'trick', 'trick': 'spin', 'text': 'hi'},
+    {'action': 'trick', 'trick': 'spin', 'waypoint_id': 'home'},
+    {'action': 'goto', 'waypoint_id': 'home', 'trick': 'spin'},
+    {'action': 'say', 'text': 'hi', 'trick': 'spin'},
+    {'action': 'wait', 'trick': 'spin'},
+])
+def test_trick_conditional_fields_reject_invalid_actions(action):
+    from pydantic import ValidationError
+    from robot.robot_backend.app.brain.planner import ActionStep
+    with pytest.raises(ValidationError):
+        ActionStep.model_validate({**action, 'reason': 'test'})

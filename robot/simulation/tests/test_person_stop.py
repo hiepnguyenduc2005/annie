@@ -69,3 +69,15 @@ def test_interlock_zeros_controller_without_waiting_for_inference():
     MujocoSession.controls(body)
     assert body.controller.velocity == (0, 0, 0)
     assert body.navigator.state == 'failed'
+
+
+def test_validate_control_accepts_known_tricks_and_rejects_others():
+    import pytest
+    ok = validate_control({'action': 'mission', 'cmd': 'trick', 'trick': 'spin'})
+    assert ok['trick'] == 'spin'
+    for bad in ({'action': 'mission', 'cmd': 'trick'},
+                {'action': 'mission', 'cmd': 'trick', 'trick': 'backflip'},
+                {'action': 'mission', 'cmd': 'trick', 'trick': 'spin', 'waypoint': 'home'},
+                {'action': 'mission', 'cmd': 'goto', 'waypoint': 'home', 'trick': 'spin'}):
+        with pytest.raises(ValueError):
+            validate_control(bad)

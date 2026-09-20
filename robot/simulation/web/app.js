@@ -10,7 +10,24 @@ let catalogGeneration = null;
 let catalogRequest = false;
 let generationPending = false;
 let activeSceneId = null;
-let intelligenceRevision = null;
+let intelligenceContext = null;
+let demoStarting = false;
+let demoStagesSignature = null;
+let previousDemoStatus = null;
+const pendingOverlays = new Map();
+
+function syncGoalState(state) {
+  const context = JSON.stringify([state.map_id, state.intelligence_revision, state.intelligence_goal]);
+  if (intelligenceContext === context) return;
+  intelligenceContext = context;
+  if (document.activeElement !== $('intelligence-goal') && state.intelligence_goal)
+    $('intelligence-goal').value = state.intelligence_goal;
+  $('goal-completion').hidden = true;
+  $('goal-completion').textContent = '';
+  $('agent-reason').textContent = '';
+  $('autonomy-status').textContent = state.intelligence_enabled
+    ? 'Waiting for the current goal.' : 'Paused';
+}
 
 async function loadCatalog() {
   if (catalogRequest) return;
@@ -114,13 +131,13 @@ function renderScene() {
   const scene = catalog.scenes.find((item) => item.id === current?.scene_id);
   if (scene) {
     $("scene-select").value = scene.id;
+    $("scene-label").textContent = scene.title;
     $("scene-description").textContent = scene.description;
     $("ground-truth").textContent = JSON.stringify(scene.ground_truth, null, 2);
     if (activeSceneId !== scene.id) {
       activeSceneId = scene.id;
-      notice(
-        `Loaded: ${scene.title}. Simulation ${current?.running ? "running" : "paused at its starting pose"}.`,
-      );
+      document.querySelectorAll('[data-camera]').forEach(button => button.setAttribute('aria-pressed', 'false'));
+      notice(`Loaded: ${scene.title}.`);
     }
   }
   for (const id of ["previous-scene", "next-scene", "scene-select"])
@@ -164,8 +181,10 @@ async function control(payload) {
           : `${payload.action === "camera" ? "Camera change" : "Simulation control"} accepted.`,
     );
     await pollState();
+    return true;
   } catch (error) {
     notice(error.message, true);
+    return false;
   } finally {
     busy = false;
   }
@@ -176,6 +195,9 @@ async function pollState() {
     const response = await fetch("/state", { cache: "no-store" });
     if (!response.ok) throw new Error("Simulator unavailable");
     current = await response.json();
+    syncGoalState(current);
+    cameraController.sync(current);
+    renderSpatial(current);
     if (!wasConnected && catalogGeneration !== null) catalogGeneration = null;
     const generation = JSON.stringify(current.catalog_generation ?? null);
     if (generation !== catalogGeneration) {
@@ -193,21 +215,17 @@ async function pollState() {
       wasConnected = true;
     }
     renderMission(current);
-    if (intelligenceRevision !== current.intelligence_revision) {
-      intelligenceRevision=current.intelligence_revision;
-      if (document.activeElement !== $('intelligence-goal') && current.intelligence_goal)
-        $('intelligence-goal').value=current.intelligence_goal;
-    }
     $('demo-voice').closest('label').hidden = current.audio_output === 'native';
+    $('browser-voice-hint').hidden = current.audio_output === 'native';
     const resident = current.resident;
     $('resident-activity').textContent = resident?.activity || 'Resident routine';
     $('resident-detail').textContent = resident
-      ? `${resident.phase || resident.posture || ''} · ${resident.source || 'authored actor animation'} · ${Number(current.simulation_time).toFixed(1)} s`
+      ? `${resident.posture || resident.phase || 'Daily routine'} · ${Number(current.simulation_time).toFixed(1)} s into the scene`
       : 'Select an animated daily-life scene. Fixed-pose test scenes remain available.';
     document.querySelectorAll('[data-resident]').forEach(button => { button.disabled = !resident || busy; });
     $('stairs-capability').textContent = current.current_scene?.stairs
       ? 'Two physical floors · 18 household steps · upstairs walking unavailable with the current policy.' : '';
-    $("connection").textContent = "Local simulator connected";
+    $("connection").textContent = "Simulator connected";
     $("connection-dot").className = "online";
     $("run-state").textContent = current.physics_error
       ? "Reset required"
@@ -331,17 +349,80 @@ $("factory-form").addEventListener("submit", async (event) => {
   }
 });
 for (const button of document.querySelectorAll("[data-camera]")) {
-  button.addEventListener("click", () =>
-    control({ action: "camera", preset: button.dataset.camera }),
-  );
+  button.setAttribute("aria-pressed", "false");
+  button.addEventListener("click", async () => {
+    const accepted = await control({ action: "camera", preset: button.dataset.camera });
+    if (accepted) document.querySelectorAll("[data-camera]").forEach(item => {
+      item.setAttribute("aria-pressed", String(item === button));
+    });
+  });
 }
 document.querySelectorAll('[data-resident]').forEach(button => {
   button.addEventListener('click', () => control({action:'resident',cmd:button.dataset.resident}));
 });
-$('intelligence-form').addEventListener('submit', event => {
+let storySubmitting = false;
+function storyGoal(actor, text) {
+  const message = text.trim();
+  if (!message) throw new Error('Enter a message first.');
+  if (message.length > 280) throw new Error('Keep the message to 280 characters.');
+  const goal = actor === 'zach'
+    ? `Zach texts Annie: ${message}\nFind Janine (Grandma) using camera evidence; choose your own search. Speak Zach's request to her. Finish only after speech playback completes.`
+    : `Janine replies: ${message}\nRecall recorded phone observations; answer from evidence, citing when and where it was last seen. If evidence is missing, say so. Speak your answer; finish after playback.`;
+  if (goal.length > 500) throw new Error('Message is too long for the agent goal.');
+  return goal;
+}
+async function submitStoryMessage(actor) {
+  if (storySubmitting) return;
+  const id = actor === 'zach' ? 'zach-message' : 'janine-reply';
+  const status = $(`${id}-status`);
+  setPanelError(`${id}-error`, null);
+  status.hidden = true;
+  let goal;
+  try { goal = storyGoal(actor, $(id).value); }
+  catch (error) { setPanelError(`${id}-error`, error.message); return; }
+  storySubmitting = true;
+  const button = $(`${id}-send`);
+  const label = button.innerHTML;
+  $('zach-message-send').disabled = true;
+  $('janine-reply-send').disabled = true;
+  button.textContent = 'Sending…';
+  try {
+    await postJSON(actor === 'zach' ? '/agent/start' : '/control', {
+      action: 'intelligence', enabled: true, goal, require_speech: true,
+    });
+    status.textContent = `${actor === 'zach' ? 'Zach’s message' : 'Janine’s reply'} queued for Annie. Follow execution and speech receipts below.`;
+    status.hidden = false;
+    await pollState();
+  } catch (error) {
+    setPanelError(`${id}-error`, error.message);
+  } finally {
+    storySubmitting = false;
+    button.innerHTML = label;
+    $('zach-message-send').disabled = false;
+    $('janine-reply-send').disabled = false;
+  }
+}
+for (const [actor, form] of [['zach', 'zach-message-form'], ['janine', 'janine-reply-form']]) {
+  $(form).addEventListener('submit', event => {
+    event.preventDefault();
+    submitStoryMessage(actor);
+  });
+}
+$('intelligence-form').addEventListener('submit', async event => {
   event.preventDefault();
-  postJSON('/agent/start',{action:'intelligence',enabled:true,goal:$('intelligence-goal').value})
-    .catch(error=>setPanelError('brain-error',error.message));
+  const button = $('intelligence-start');
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'Starting AI…';
+  setPanelError('ai-error', null);
+  try {
+    await postJSON('/agent/start', {action:'intelligence', enabled:true, goal:$('intelligence-goal').value});
+  } catch (error) {
+    setPanelError('ai-error', error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Start AI / resume';
+  }
 });
 $('intelligence-stop').addEventListener('click',()=>control({action:'intelligence',enabled:false,goal:$('intelligence-goal').value}));
 $('open-house').addEventListener('click', async () => {
@@ -354,8 +435,8 @@ $('open-house').addEventListener('click', async () => {
 });
 document.addEventListener("keydown", (event) => {
   if (
-    event.code === "Space" &&
-    !["INPUT", "SELECT", "BUTTON", "A"].includes(document.activeElement.tagName)
+    event.code === "Space" && !event.repeat &&
+    !event.target.closest('input, select, textarea, button, a, summary, [contenteditable], [role="tab"]')
   ) {
     event.preventDefault();
     if (current && !current.physics_error)
@@ -474,7 +555,17 @@ async function pollBrain() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok)
       throw new Error(data.last_error || "Brain bridge not connected");
-    const agent = data.agent;
+    const sameContext = !!current?.map_id && data.context_map_id === current.map_id;
+    const agent = sameContext && data.agent?.goal === current?.intelligence_goal ? data.agent : null;
+    const limitReached = sameContext && data.inference_limit_reached;
+    const blocked = sameContext && data.inference_blocked;
+    const agentError = sameContext && data.last_error;
+    const completion = data.goal_completion;
+    const completed = completion && completion.map_id === current?.map_id &&
+      completion.revision === current?.intelligence_revision && completion.goal === current?.intelligence_goal;
+    $('goal-completion').hidden = !completed;
+    $('goal-completion').textContent = completed ? `Goal completed · ${completion.result}` : '';
+    renderExploration(data);
     $('agent-memory').textContent = `Memory: ${data.memory?.provider || 'unavailable'} · ${data.memory?.retrieved ?? 0} retrieved citations · ${data.memory?.status || 'waiting'}`;
     $('agent-history').replaceChildren(...(data.history || []).slice(-4).map(item => {
       const row=document.createElement('li');
@@ -482,9 +573,9 @@ async function pollBrain() {
       row.textContent=`${item.action.action}${item.action.waypoint_id ? ' → '+item.action.waypoint_id : ''} · ${receipt?.status || item.execution} · ${Math.round(item.latency_ms)} ms`;
       return row;
     }));
-    $('autonomy-status').textContent = agent
-      ? `${current?.intelligence_enabled ? (agent.thinking ? 'Thinking…' : agent.action?.action || 'Ready') : 'Paused'} · ${agent.model || 'vision-language model'}${agent.latency_ms ? ' · '+Math.round(agent.latency_ms)+' ms' : ''}`
-      : 'Waiting for the model planner.';
+    $('autonomy-status').textContent = blocked ? 'Planning paused · configuration needs attention' : agentError ? 'Planner unavailable' : agent
+      ? `${completed ? 'Goal completed' : current?.intelligence_enabled ? (agent.thinking ? 'Thinking…' : agent.action?.action || 'Ready') : 'Paused'} · ${agent.model || 'vision-language model'}${agent.latency_ms ? ' · '+Math.round(agent.latency_ms)+' ms' : ''}`
+      : current?.intelligence_enabled ? 'Waiting for the current goal.' : 'Paused';
     $('agent-reason').textContent = agent ? `${agent.action?.reason || ''} · ${agent.execution || ''}` : '';
     $('agent-context').textContent = agent?.context
       ? `${agent.context.memories_included} cited memories · ~${agent.context.estimated_text_tokens} context text tokens · ${agent.usage?.prompt_tokens ?? '—'} actual input tokens including image · ${agent.context.output_token_limit} output-token cap`
@@ -498,7 +589,7 @@ async function pollBrain() {
     const sameMap = !data.last_perception || data.last_perception.pose?.map_id === current?.map_id;
     const p = sameMap ? data.last_perception ?? null : null;
     const stale = p && Date.now() - p.ts > 5000;
-    $("brain-mode").textContent = data.inference_limit_reached ? 'CALL LIMIT REACHED' : stale ? 'STALE OBSERVATION' : mode;
+    $("brain-mode").textContent = !sameContext ? 'WAITING FOR SCENE' : limitReached ? 'CALL LIMIT REACHED' : stale ? 'STALE OBSERVATION' : mode;
     $("brain-caption").textContent = p?.caption
       ? String(p.caption).slice(0, 300)
       : p
@@ -536,13 +627,16 @@ async function pollBrain() {
       ? new Date(p.ts).toLocaleTimeString()
       : "—";
     $("brain-note").textContent =
-      data.inference_limit_reached ? 'Configured inference allowance used; movement and voice remain available. Restart the bridge deliberately for a new bounded run.' : !sameMap ? 'Waiting for an observation from the current scene.' : stale ? 'Historical capture; this is not a current view of the resident.' : mode === "DISABLED"
+      !sameContext || !sameMap ? 'Waiting for an observation from the current scene.' : limitReached ? 'The configured inference limit has been reached. The planner is paused.' : stale ? 'Historical capture; this is not a current view of the resident.' : mode === "DISABLED"
         ? "Vision inference is disabled in the brain bridge configuration; this panel shows connection state only. Scene labels in the ground truth section are authored simulation data, not image inference."
         : "Actual image inference from the configured vision model — distinct from the authored simulation ground truth section.";
     renderPersonSafety(current?.person_safety);
-    setPanelError("brain-error", data.last_error || null);
+    setPanelError("brain-error", sameContext ? data.last_error || null : null);
   } catch (error) {
     $("brain-mode").textContent = "DISCONNECTED";
+    $('autonomy-status').textContent = 'Planner disconnected';
+    $('planner-freshness').hidden = false;
+    $('planner-freshness').textContent = 'Saved actions and room visits may be out of date.';
     renderPersonSafety(null);
     for (const id of fields) $(id).textContent = "—";
     setPanelError("brain-error", `Brain bridge: ${error.message}`);
@@ -813,23 +907,160 @@ async function voiceLoop() {
 }
 voiceLoop();
 
+function renderExploration(data) {
+  const sameScene = !data.context_map_id || data.context_map_id === current?.map_id;
+  const progress = sameScene ? data.progress : null;
+  $('exploration-progress').hidden = !progress;
+  if (progress) {
+    const visits = progress.completed_visits || [];
+    const names = [...new Set(visits.map(visit => visit.waypoint_id))];
+    const label = value => String(value || '').replaceAll('-', ' ');
+    $('exploration-summary').textContent = progress.active_waypoint && progress.navigation_state === 'moving'
+      ? `${label(progress.navigation_state)} · target: ${label(progress.active_waypoint)}`
+      : `${names.length} room${names.length === 1 ? '' : 's'} visited · ${label(progress.navigation_state || 'idle')}`;
+    $('visited-rooms').replaceChildren(...names.map(name => {
+      const chip = document.createElement('span');
+      chip.textContent = `✓ ${label(name)}`;
+      return chip;
+    }));
+    $('unvisited-rooms').textContent = progress.unvisited_waypoints?.length
+      ? `Not yet visited: ${progress.unvisited_waypoints.map(label).join(', ')}` : '';
+  }
+  const age = Number.isFinite(data.updated_at) ? Math.max(0, Date.now() - data.updated_at) : 0;
+  $('planner-freshness').hidden = sameScene && age < 15000;
+  $('planner-freshness').textContent = !sameScene ? 'Planner history belongs to a previous scene. Waiting for this scene’s first decision.' : age < 60000
+    ? `Last planner update ${Math.floor(age / 1000)} s ago. Shown actions are historical.`
+    : `Last planner update ${Math.floor(age / 60000)} min ago. Shown actions are historical.`;
+  const sighting = progress?.last_person_sighting;
+  $('last-person-sighting').textContent = sighting
+    ? `Last person sighting · ${new Date(sighting.ts).toLocaleTimeString()} · ${sighting.caption} · frame …${String(sighting.frame_id).slice(-8)}. Historical evidence; current presence is unconfirmed.` : '';
+  const citations = data.memory?.citations || [];
+  $('memory-citations').replaceChildren(...citations.slice(-4).map(citation => {
+    const row = document.createElement('li');
+    const time = citation.ts ? new Date(citation.ts).toLocaleTimeString() : 'Saved observation';
+    row.textContent = `${time} · ${citation.caption || 'No caption'}${citation.frame_id ? ' · frame …' + String(citation.frame_id).slice(-8) : ''}`;
+    return row;
+  }));
+}
+
+function activateToolTab(tab, focus = false) {
+  document.querySelectorAll('[role="tab"]').forEach(item => {
+    const selected = item === tab;
+    item.setAttribute('aria-selected', String(selected));
+    item.tabIndex = selected ? 0 : -1;
+    $(item.getAttribute('aria-controls')).hidden = !selected;
+  });
+  if (focus) tab.focus();
+}
+const toolTabs = [...document.querySelectorAll('[role="tab"]')];
+toolTabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => activateToolTab(tab));
+  tab.addEventListener('keydown', event => {
+    let next;
+    if (event.key === 'ArrowRight') next = (index + 1) % toolTabs.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + toolTabs.length) % toolTabs.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = toolTabs.length - 1;
+    if (next !== undefined) {
+      event.preventDefault();
+      activateToolTab(toolTabs[next], true);
+    }
+  });
+});
+
 async function pollDemo() {
   try {
-    const response=await fetch('/demo-state',{cache:'no-store'});
+    const response = await fetch('/demo-state', {cache:'no-store'});
     if (!response.ok) return;
-    const data=await response.json();
-    $('demo-run-status').textContent={running:'Demonstrating live…',passed:'Full-house run passed',failed:'Run incomplete',not_started:'Ready to demonstrate'}[data.status] || data.status;
-    $('start-house-demo').disabled=data.status==='running';
-    $('demo-stages').replaceChildren(...(data.stages || []).map(stage=>{
-      const li=document.createElement('li');
-      li.textContent=`${((stage.ts-data.started_at)/1000).toFixed(1)} s · ${stage.detail}${stage.text ? ' — '+stage.text : ''}`;
-      return li;
-    }));
-    $('demo-run-detail').textContent=data.error || data.last_error || (data.model ? `${data.model} · ${data.inferences || 0} image inferences · ${data.last_plan?.execution || 'Waiting for first action'}` : 'Each step appears only when its real result arrives.');
-  } catch (_) { /* Renderer remains usable if the separate demo report is absent. */ }
+    const data = await response.json();
+    if (demoStarting) return;
+    const running = data.status === 'running';
+    $('demo-evidence-panel').querySelector('h2').textContent =
+      ['passed', 'failed'].includes(data.status) ? 'Previous staged check-in run' : 'Staged check-in demo';
+    $('demo-evidence-panel').dataset.status = data.status;
+    $('demo-run-status').textContent = {
+      running:'Staged check-in running…', passed:'Previous check-in passed',
+      failed:'Previous check-in incomplete', not_started:'Ready to demonstrate'
+    }[data.status] || data.status;
+    $('start-house-demo').disabled = running;
+    $('start-house-demo').textContent = running ? 'Demo in progress…' : 'Run full-house demo →';
+    const stages = data.stages || [];
+    $('demo-stage-count').textContent = `${stages.length} steps`;
+    const duration = data.started_at
+      ? Math.max(0, ((data.finished_at || (running ? Date.now() : data.updated_at)) - data.started_at) / 1000) : null;
+    $('demo-summary').textContent = stages.length
+      ? `${stages.length} recorded steps${Number.isFinite(duration) ? ' · ' + duration.toFixed(1) + ' s' : ''}`
+      : 'Camera → check-in → reply → family';
+    // Update the live region only when evidence changes, keeping scrolling and speech stable.
+    const signature = JSON.stringify([data.run_id, stages]);
+    if (signature !== demoStagesSignature) {
+      demoStagesSignature = signature;
+      $('demo-stages').replaceChildren(...stages.map(stage => {
+        const li = document.createElement('li');
+        const time = document.createElement('time');
+        time.textContent = `${((stage.ts - data.started_at) / 1000).toFixed(1)} s`;
+        const detail = document.createElement('span');
+        detail.textContent = `${stage.detail}${stage.text ? ' — ' + stage.text : ''}`;
+        li.append(time, detail);
+        return li;
+      }));
+    }
+    if (running && previousDemoStatus !== 'running') $('demo-receipts').open = true;
+    if (previousDemoStatus !== data.status && data.status !== 'failed') setPanelError('demo-error', null);
+    previousDemoStatus = data.status;
+    $('demo-run-detail').textContent = data.error || data.last_error || (data.model
+      ? `${data.model} · ${data.inferences || 0} image inferences · ${data.last_plan?.execution || 'Waiting for first action'}`
+      : 'Each step appears only when its result arrives.');
+    if (data.status === 'failed') setPanelError('demo-error', data.error || data.last_error || 'The run stopped before every step completed. See run details.');
+  } catch (_) { /* The renderer remains usable when the separate report is unavailable. */ }
 }
-$('start-house-demo').addEventListener('click',async()=>{
-  $('start-house-demo').disabled=true;
-  try { $('demo-stages').replaceChildren(); $('demo-run-detail').textContent=''; await postJSON('/demo/start',{}); $('demo-run-status').textContent='Starting demonstration…'; }
-  catch(error) { $('demo-run-detail').textContent=error.message; $('start-house-demo').disabled=false; }
+$('start-house-demo').addEventListener('click', async () => {
+  if (demoStarting) return;
+  demoStarting = true;
+  $('start-house-demo').disabled = true;
+  $('start-house-demo').textContent = 'Starting demo…';
+  setPanelError('demo-error', null);
+  try {
+    await postJSON('/demo/start', {});
+    $('demo-run-status').textContent = 'Starting demonstration…';
+    $('demo-receipts').open = true;
+  } catch (error) {
+    setPanelError('demo-error', error.message);
+  } finally {
+    demoStarting = false;
+    $('start-house-demo').disabled = false;
+    await pollDemo();
+  }
 });
+
+function renderSpatial(state) {
+  const sensor = state.spatial;
+  for (const name of ['lidar', 'trajectory', 'route']) {
+    const input = $('show-' + name);
+    const pending = pendingOverlays.get(name);
+    if (pending && (state.overlays?.[name] === pending.value || Date.now() - pending.started > 3000)) {
+      if (state.overlays?.[name] !== pending.value) notice('Layer update was not acknowledged by the viewer.', true);
+      pendingOverlays.delete(name);
+    }
+    input.disabled = !state.overlays || pendingOverlays.has(name);
+    if (state.overlays && !pendingOverlays.has(name)) input.checked = !!state.overlays[name];
+  }
+  $('lidar-summary').textContent = sensor?.error || (sensor?.timestamp
+    ? `${sensor.points_world?.length || 0} hits · simulated raycast`
+    : 'Simulated LiDAR awaiting scan');
+}
+for (const name of ['lidar', 'trajectory', 'route']) {
+  $('show-' + name).addEventListener('change', async event => {
+    const input = event.target;
+    const desired = input.checked;
+    pendingOverlays.set(name, {value:desired, started:Date.now()});
+    input.disabled = true;
+    try { await postJSON('/control', {action:'overlays', [name]:desired}); }
+    catch (error) {
+      pendingOverlays.delete(name);
+      input.checked = !desired;
+      input.disabled = false;
+      notice(error.message, true);
+    }
+  });
+}

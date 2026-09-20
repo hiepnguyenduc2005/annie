@@ -36,8 +36,8 @@ class VisionConfig:
             raise ValueError('ANNIE_VISION_TIMEOUT_S must be between 1 and 120')
         if type(self.max_cloud_calls) is not int or not 1 <= self.max_cloud_calls <= 1000:
             raise ValueError('ANNIE_VISION_MAX_CLOUD_CALLS must be between 1 and 1000')
-        if not math.isfinite(self.budget_usd) or not 0 < self.budget_usd <= 20:
-            raise ValueError('ANNIE_VISION_BUDGET_USD must be positive and at most 20')
+        if not math.isfinite(self.budget_usd) or not 0 < self.budget_usd <= 50:
+            raise ValueError('ANNIE_VISION_BUDGET_USD must be positive and at most 50')
         if self.mode == 'disabled':
             return
         if not self.base_url or not self.model.strip() or len(self.model) > 200:
@@ -142,11 +142,29 @@ def sanitize_jpeg(encoded: str, resize_longest_side: int | None = None) -> str:
 # model; verified against OpenRouter's public model catalog. See
 # contract/brain.md for the primary sources.
 PRICE_CAPS_USD_PER_M = {
+    'google/gemini-3.8-flash:floor': {'prompt': 0.76, 'completion': 3.76},
     'google/gemini-2.5-flash-lite:floor': {'prompt': 0.11, 'completion': 0.41},
     'qwen/qwen3-vl-32b-instruct:floor': {'prompt': 0.11, 'completion': 0.42},
     'deepseek/deepseek-v4.1-flash:floor': {'prompt': 0.31, 'completion': 1.21},
     'xiaomi/mimo-v2.5:floor': {'prompt': 0.15, 'completion': 0.29},
 }
+
+
+def provider_preferences(model: str) -> dict:
+    preferences = {'max_price': PRICE_CAPS_USD_PER_M[model],
+                   'allow_fallbacks': False, 'require_parameters': True}
+    if model == 'google/gemini-3.8-flash:floor':
+        # Flex endpoints trade latency for cost. Their seconds-long queues are
+        # unsuitable for the five-second image freshness gate. Standard prices
+        # remain explicitly capped; priority endpoints exceed that ceiling.
+        preferences['ignore'] = ['google-ai-studio/flex', 'google-vertex/global/flex']
+    return preferences
+
+
+def reasoning_preferences(model: str) -> dict:
+    # Gemini 3.8 rejects disabled/minimal thinking; low is its smallest level.
+    # https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash
+    return {'effort': 'low', 'exclude': True} if model == 'google/gemini-3.8-flash:floor' else {'enabled': False}
 
 
 PROMPT = (
@@ -195,9 +213,8 @@ async def infer_image(config: VisionConfig, jpeg_b64: str, *, transport=None) ->
         # max_tokens is more universally supported across OpenRouter providers
         # than max_completion_tokens; 512 bounds the JSON observation output.
         payload['max_tokens'] = 512
-        payload['reasoning'] = {'enabled': False}
-        payload['provider'] = {'max_price': PRICE_CAPS_USD_PER_M[config.model],
-                               'allow_fallbacks': False, 'require_parameters': True}
+        payload['reasoning'] = reasoning_preferences(config.model)
+        payload['provider'] = provider_preferences(config.model)
         payload['modalities'] = ['text']
         # The conservative reservation for the full approved model context
         # (see budget.MODEL_RESERVATION_USD) remains spent after any failure.

@@ -9,6 +9,23 @@ front/side/top cameras. The optional joint-pose hold uses a simple PD controller
 (`kp=40`, `kd=2`) and bounded motor torques; it is not autonomous walking.
 Without hold, zero motor torque lets the robot settle under gravity.
 
+The operator dashboard keeps the live scene, agent goal, and current perception
+visible, with voice, scene generation, and diagnostics in keyboard-accessible
+tabs. Drag the scene to orbit; Shift-drag or right-drag to pan; scroll to zoom.
+Touch supports one-finger orbit and two-finger pan/pinch. When the scene has
+keyboard focus, arrows orbit, Shift-arrows pan, +/- zoom, and R resets the view.
+Double-click and **Reset view** also restore the camera without resetting physics.
+
+The **Layers** controls show cyan simulated LiDAR hits, an amber measured robot
+trail, and the green currently planned route. LiDAR uses 720 MuJoCo rays across
+360 degrees and five elevations, at most 5 scans/s, with a 12 m maximum range.
+It excludes the robot's geometry and reports only actual nearest intersections.
+The virtual mount is 0.18 m above the trunk; it is not a calibrated hardware
+LiDAR model. Route planning still uses authored collision geometry, not SLAM.
+These operator overlays never enter the robot camera or vision-model input.
+The raycasting implementation adapts [DimOS's pinned engine](https://github.com/dimensionalOS/dimos/blob/c1c3cdc9d2ee54ca72259465688395699d7d99a2/dimos/simulation/engines/mujoco_engine.py);
+see [provenance](ASSETS.md#spatial-visualization-code).
+
 From the repository root, using this checkout's existing simulation environment:
 
 ```sh
@@ -310,9 +327,9 @@ ANNIE_MODE=demo ANNIE_REQUIRE_AUDIO_RECEIPT=true \
   .venv/bin/uvicorn robot.app_backend.app.main:app --host 127.0.0.1 --port 8000 \
   --no-proxy-headers --env-file .env
 
-# Terminal 2: this session reserves $1 separately for an earlier probe, so
-# the shared service cap is $19. This does not reset the ledger or spend limit.
-ANNIE_VISION_BUDGET_USD=19 ANNIE_VISION_MAX_CLOUD_CALLS=130 \
+# Terminal 2: the authorized total is $50, including $1 reserved separately
+# for an earlier probe. Preserve the shared ledger and use a $49 service cap.
+ANNIE_VISION_BUDGET_USD=49 ANNIE_VISION_MAX_CLOUD_CALLS=1000 \
   .venv/bin/python robot/simulation/run_brain.py --mode cloud \
   --model google/gemini-2.5-flash-lite:floor --port 8003
 

@@ -63,7 +63,7 @@ protection. Never put tokens in URLs or browser persistent storage.
 | `POST /events/{id}/ack` | `{by:"family"}` → updated event. Idempotent receipt, not proof of resident safety. |
 | `POST /say` | `{text}` → command ID and queued status; not a playback confirmation. |
 | `GET /commands` | Recent commands with actual queued/accepted/executing/completed/failed status. |
-| `POST /commands/{id}/receipt` | Strict `{status,source:"simulation",detail?}`. Validated transitions; terminal receipt retries are idempotent. |
+| `POST /commands/{id}/receipt` | Strict `{status,source:"simulation"\|"host",detail?}`; `host` is audio played on the computer attached to the physical robot (`robot/go2_host_voice.py`). Validated transitions; terminal receipt retries are idempotent. |
 | `POST /commands` | `{cmd,waypoint?}` → queued command; reject unknown waypoints. |
 | `POST /query` | `{text}` → `{answer,answerable,citations:[{frame_id,ts,pose,crop_url}]}`. Local lexical retrieval initially; missing evidence is explicitly unanswerable. |
 | `GET /frames/{id}` | Only an approved stored crop, otherwise 404; never arbitrary files or full frames. |

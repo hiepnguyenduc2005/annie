@@ -6,6 +6,12 @@ as work progresses and record a reason for blocked work.
 
 ## Now
 
+- [ ] TASK-016: Rehearse the one-command local stack and HTTP showcases ([runbook](LIVE_DEMO.md#one-command-local-showcases)). Launcher, showcases, trick bridge/planner support and offline regression checks are implemented. Done when the local patrol, fall timeline and five tricks complete with recorded live timings. Current coding sandbox blocks localhost HTTP and Git writes; live rehearsal and delivery commits remain pending.
+
+- [ ] TASK-014: Intelligent dog brain, step 1 (design: `superpowers/specs/2026-09-19-intelligent-dog-brain-design.md`; plan: `superpowers/plans/2026-09-19-intelligent-dog-brain-step1.md`). Done when the simulated and physical dog search systematically, trigger the fall check-in from two independent signals, listen to a live reply, and local plans pass the 5 s gate.
+  - Shipped 2026-09-19 (offline tests, documented checks pass): `robot/simulation/mission.py` (search progress), `posture.py` + `person_tracker.py` (keypoint posture, ByteTrack), `app_backend` `POST /recall` (embedding recall with lexical fallback), `robot/go2_perception.py` (hardware camera + posture + cited inference, no motion), `robot/simulation/live_listener.py` (VAD-gated microphone reply, `source: microphone`), `robot/go2_host_voice.py` (host speech + listening with `source: host` receipts; verified end to end on the Mac against the app).
+  - Open: wire `MissionState` and `/recall` into the planner/bridge (Codex owns `planner.py`, `context.py`, `bridge.py`, `task_progress.py`); benchmark mlx-vlm runtimes for sub-second local perception; a `person_seen` waypoint never retires, so cap the "return to last sighting" rule; test the posture rule on dog's-eye footage of a person on the floor; hardware runs need the dog in range and charged above 40%.
+
 - [ ] TASK-006: Complete and measure live image/audio inference behind the GX10-compatible service. Keep stale perception out of incident rules; distinguish successful media interpretation from HTTP acceptance.
   - Verified: two full-house model-driven simulator runs completed walking, camera detection, native check-in, correlated recorded reply, family alert and family playback in 41.864 s and 37.974 s. [Evidence](LIVE_DEMO.md).
   - Remaining: full scenario/latency qualification, real microphone input and GX10 deployment.
@@ -14,6 +20,7 @@ as work progresses and record a reason for blocked work.
 
 - [ ] TASK-004: Connect and evaluate GX10 local image inference. Done when rendered frames produce valid measured observations and the scenario matrix distinguishes VLM results from ground truth.
 - [ ] TASK-005: Integrate actual speech, messaging, and Elastic adapters. Done when provisioned services acknowledge execution and privacy boundaries are verified with synthetic data.
+  - Current deployment direction: all local, including Elastic. [Environment template and setup](LOCAL_ENV.md) reuse Ollama, Whisper/macOS speech, and Graphiti; self-hosted Elasticsearch needs a node, index, local API key, CA certificate, and live write/search verification. Cloud-only voice/messaging adapters are deferred for this profile.
 - [ ] TASK-006: Implement `robot_backend`'s side of `contract/family_messages.md` (`POST /dispatch`, `POST /internal/events` calls). Done when a real navigate/speak/listen/recall/speak run on the GX10 posts live events into `app_backend` and completes without `ANNIE_FAMILY_MOCK_ROBOT`.
 
 ## Blocked
@@ -21,9 +28,11 @@ as work progresses and record a reason for blocked work.
 - [ ] TASK-007: Physical Go2 patrol within the operator's requested five-metre boundary (REQ-001; HW-04–HW-06).
   - Verified: V3 authentication, Wi-Fi AP, 720p camera, measured pose/battery, LiDAR, firmware 1.1.15, and enabled obstacle avoidance. See [hardware setup](../robot/SETUP.md).
   - Prepared: [offline patrol supervisor](../robot/patrol/README.md), with 44 pure gate tests and 11 mocked bridge cases; physical adapter integration remains open. No verification flags are inferred from stationary acknowledgments.
-  - Current: operator confirmed a paired physical controller. Short tests produced small odometry changes, but the 20 cm route timed out; no circle/patrol is verified. Last battery was 23%; replace/charge according to Unitree’s below-40% guidance before more motion.
+  - Current: operator corrected the earlier report: no physical controller is available. BLE advertises, but GATT connection times out before authentication; neither saved hotspot appears and LAN discovery is empty. No fresh battery reading or new motion. MIT is the target demo network; the robot's current address there is unverified. Last historical battery was 23%; follow Unitree’s below-40% operating guidance.
   - Blockers: independent stop/recovery, moving-stop and link-loss behavior, physical map alignment, and enforced boundary are unverified. MCF uses `error_code` for gait state; `mode=0` is not idle proof. Small pose changes, acknowledgments and offline driver tests do not satisfy execution checks.
-  - `go2_walk.py` now enforces a 40% minimum battery threshold; 44 fake-only tests pass. Before hardware use, fix its duration-only completion flag and require distinct fresh stop observations, then verify the MCF motion path.
+  - `go2_walk.py` enforces a 40% minimum battery threshold and an active local CLI motion inhibit; 45 fake-only tests pass. Before hardware use, clear competing launch assignments, fix its duration-only completion flag, require distinct fresh stop observations, and verify the MCF motion path. Physical communications/hotspot recovery is the next dependency.
+  - Progress 2026-09-19 22:22: first supervised physical motion. A 1 m line at 0.3 m/s completed with a 34 ms StopMove ack and 1.7 cm overrun; a 1 m-radius circle ran 34 s until the 40% battery floor stopped it. Route: dog on the operator's phone hotspot, Mac tethered by USB, venue Wi-Fi untouched. See [hardware setup](../robot/SETUP.md).
+  - Progress 2026-09-19 22:52: `robot/go2_patrol_greet.py` patrolled and greeted 7 people in 100 s (firmware Hello + host speech, per-person cooldown; report `output/hardware/2026-09-19-patrol-greet-1.json`) until the hotspot link dropped and the stale-telemetry stop fired. `robot/go2_smart_patrol.py` now supplies the motion: LiDAR voxel-map sector ranges plus an odometry stall detector drive cruise/blocked/backoff/homing modes, verified against a simulated dog (`robot/tests/test_go2_patrol_greet_runtime.py`). Physical verification of the LiDAR ranges and stall backoff is pending the next link; the link-loss stop remains software-only.
   - Done when: a nearby operator can reliably stop the robot and one deliberately slow, bounded physical route completes with measured pose and execution evidence.
 
 - [ ] TASK-008: Persist profiles server-side (MongoDB was proposed) so the app and dog profiles, their kinds, and which was created first survive across devices.
@@ -32,6 +41,12 @@ as work progresses and record a reason for blocked work.
   - Dependency or blocker: the backend owner's requirements for profile storage and API shape, and which service owns it. No MongoDB is installed locally; the swift mock backend has no MongoDB driver.
 
 ## Done
+
+- [x] Recovered simulation planner after the cloud reservation cap produced HTTP 503. The user raised the total allowance to $50 ($49 shared ledger plus the existing separate $1 probe); prior usage is preserved. Fixed actionable availability errors, stopped automatic retries for configuration/budget failures, and removed the misleading Ready label. Live exploration again found the resident and completed spoken playback.
+
+- [x] TASK-015: Live Zach → Annie → Janine story completed twice (REQ-014; [measurements](../robot/simulation/STORY_DEMO.md)): model-selected walking, camera person detection, Zach's reminder played, then a Graphiti-grounded phone answer played. The guarded repeat took 21.779 s / 11.606 s, with 7 model calls and 1.827 s median provider latency. Janine's reply is demo-actor text; memory includes real inferred setup and robot-camera captures.
+
+- [x] TASK-013: Added interactive camera controls, an operator workspace, and DimOS-derived raycast LiDAR, measured-trail and planned-route layers (REQ-013). Browser-verified orbit/pan/zoom/reset and layer acknowledgement; toggling layers changes operator frames while robot-camera frames remain byte-identical.
 
 - [x] TASK-001: Recorded SDK launch evidence and platform/asset blockers; direct MuJoCo and trained Go1-surrogate motion run locally. Full DimOS integration remains separate.
 - [x] TASK-003: HTTP body adapter publishes simulated maps/poses and forwards app commands with execution receipts.

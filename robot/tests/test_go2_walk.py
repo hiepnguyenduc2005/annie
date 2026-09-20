@@ -308,3 +308,14 @@ def test_cli_rejects_non_lan_targets(ip):
 def test_cli_speed_cap_enforced():
     with pytest.raises(SystemExit):
         go2_walk.main(["--distance", "1", "--speed", "2.0"])
+
+
+def test_motion_inhibit_blocks_queued_cli_before_starting_async_hardware(monkeypatch, tmp_path):
+    marker = tmp_path / 'motion-inhibit'
+    marker.write_text('Another task owns the physical dog.')
+    monkeypatch.setattr(go2_walk, 'MOTION_INHIBIT_PATH', marker)
+    def forbidden_run(*args, **kwargs):
+        pytest.fail('inhibited CLI must not start the hardware coroutine')
+    monkeypatch.setattr(go2_walk.asyncio, 'run', forbidden_run)
+    assert go2_walk.main(['--distance', '1']) == 2
+    assert go2_walk.main(['--circle-radius', '1', '--duration', '60']) == 2

@@ -11,7 +11,7 @@ def test_context_keeps_citations_and_rejects_cross_map_memory():
     req['memories']=[{'frame_id':'old','ts':50,'caption':'A chair','pose':req['observation']['pose']},
         {'frame_id':'wrong','ts':90,'caption':'Wrong house','pose':{'x':0,'y':0,'yaw':0,'map_id':'away'}}]
     text,stats=pack_context(req)
-    assert json.loads(text)['memories']==req['memories'][:1]
+    assert json.loads(text)['memories']==[{**req['memories'][0], 'age_seconds':0.1}]
     assert stats['memories_included']==1 and stats['memories_omitted']==1
     assert 'jpeg_b64' not in text
 
@@ -28,3 +28,15 @@ def test_goal_and_current_observation_are_never_dropped():
     req=request();req['goal']='x'*2000
     import pytest
     with pytest.raises(ValueError):pack_context(req,max_bytes=500)
+
+def test_memory_age_uses_capture_time_without_mutating_citations():
+    req=request();req['observation']['ts']=120_000
+    memory={'frame_id':'phone','ts':60_000,'caption':'Phone on a chair',
+            'pose':req['observation']['pose']}
+    req['memories']=[memory]
+    req['progress']={'last_person_sighting':memory}
+    context=json.loads(pack_context(req)[0])
+    assert context['memories'][0]['age_seconds']==60
+    assert context['progress']['last_person_sighting']['age_seconds']==60
+    assert context['memories'][0]['ts']==60_000
+    assert 'age_seconds' not in memory

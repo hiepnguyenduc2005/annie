@@ -36,6 +36,7 @@ def validate_control(value, scene_ids=()):
         "reset",
         "step",
         "camera",
+        "overlays",
         "hold",
         "scene",
         "generate",
@@ -47,10 +48,16 @@ def validate_control(value, scene_ids=()):
     }:
         raise ValueError("action must be play, pause, reset, step, camera, or hold")
     if value["action"] == "mission":
-        if not set(value) <= {"action", "cmd", "waypoint", "command_id", "heading"} or value.get(
+        if not set(value) <= {"action", "cmd", "waypoint", "command_id", "heading", "trick"} or value.get(
             "cmd"
-        ) not in {"goto", "patrol", "stop", "resume", "look", "turn"}:
+        ) not in {"goto", "patrol", "stop", "resume", "look", "turn", "trick"}:
             raise ValueError("invalid mission")
+        if value['cmd'] == 'trick':
+            from robot.simulation.tricks import TRICKS
+            if value.get('trick') not in TRICKS:
+                raise ValueError('trick must be one of ' + ', '.join(sorted(TRICKS)))
+        elif 'trick' in value:
+            raise ValueError('trick is only valid for the trick command')
         if value["cmd"] == "goto" and value.get("waypoint") not in {
             "home",
             "living-room",
@@ -79,7 +86,11 @@ def validate_control(value, scene_ids=()):
             raise ValueError("invalid autonomy mode")
         return value
     if value['action']=='intelligence':
-        if set(value)!={'action','enabled','goal'} or type(value['enabled']) is not bool or not isinstance(value['goal'],str) or not 1<=len(value['goal'].strip())<=500:
+        if (not {'action','enabled','goal'} <= set(value)
+                or not set(value) <= {'action','enabled','goal','require_speech'}
+                or type(value['enabled']) is not bool or not isinstance(value['goal'],str)
+                or not 1<=len(value['goal'].strip())<=500
+                or ('require_speech' in value and type(value['require_speech']) is not bool)):
             raise ValueError('intelligence requires enabled and a goal up to 500 characters')
         return value
     if value["action"] == "speed":
@@ -105,6 +116,12 @@ def validate_control(value, scene_ids=()):
         ):
             raise ValueError("scene id must exist in catalog")
         return value
+    if value["action"] == "overlays":
+        if not 2 <= len(value) <= 4 or not set(value) <= {"action", "lidar", "trajectory", "route"}:
+            raise ValueError("overlays requires lidar, trajectory, or route")
+        if any(type(enabled) is not bool for key, enabled in value.items() if key != "action"):
+            raise ValueError("overlay values must be boolean")
+        return value
     if value["action"] == "hold":
         if set(value) != {"action", "enabled"} or not isinstance(
             value["enabled"], bool
@@ -124,10 +141,17 @@ def validate_control(value, scene_ids=()):
             raise ValueError("preset must be front, side, or top")
     else:
         if (
-            not set(value) <= {"action", "azimuth", "elevation", "distance"}
+            not set(value) <= {"action", "azimuth", "elevation", "distance", "lookat"}
             or len(value) < 2
         ):
             raise ValueError("camera requires preset or bounded camera coordinates")
+        if "lookat" in value:
+            point = value["lookat"]
+            if not isinstance(point, list) or len(point) != 3 or any(
+                type(coordinate) not in (int, float) or not math.isfinite(coordinate)
+                or not -100 <= coordinate <= 100 for coordinate in point
+            ):
+                raise ValueError("lookat requires three finite coordinates in [-100, 100] metres")
         for name, bounds in {
             "azimuth": (-360, 360),
             "elevation": (-90, 90),
@@ -729,6 +753,7 @@ class MujocoSession:
         self.resident_guard = {'blocked': False, 'source': 'authored_simulator_proximity'}
         self.autonomy_mode, self.autonomy_revision = 'paused', 0
         self.intelligence_enabled, self.intelligence_revision = False, 0
+        self.intelligence_require_speech = False
         self.intelligence_goal = 'Explore the ground floor and check on the resident. Describe what you see, stay clear of people, and choose your next action from camera evidence.'
         self.person_safety = person_safety
         self.person_policy = person_policy
@@ -797,6 +822,11 @@ class MujocoSession:
         if scene and scene.get("overview"):
             self.set_camera({"preset": "room"})
         self.renderer = mujoco.Renderer(model, height=480, width=640)
+        from robot.simulation.spatial import SpatialSensor
+        self.spatial = SpatialSensor(model)
+        self.spatial_state = {}
+        self.spatial_error = None
+        self.overlays = {"lidar": True, "trajectory": True, "route": True}
 
     def close(self):
         self.renderer.close()
@@ -809,6 +839,9 @@ class MujocoSession:
         self.mj.mj_forward(self.model, self.data)
         self.physics_error = physics_fault(self.data, self.mj)
         self.map_id = "sim-" + str(uuid4())
+        if getattr(self, "spatial", None):
+            self.spatial.reset()
+            self.spatial_state = {}
         if self.person_safety:
             self.person_safety.reset(self.map_id)
         if self.controller:
@@ -819,6 +852,7 @@ class MujocoSession:
         self.autonomy_mode = 'paused'
         self.autonomy_revision += 1
         self.intelligence_enabled = False
+        self.intelligence_require_speech = False
         self.intelligence_revision += 1
         if self.navigator:
             self.navigator = type(self.navigator)(self.model, self.data, self.scene)
@@ -938,6 +972,9 @@ class MujocoSession:
             for name in ("azimuth", "elevation", "distance"):
                 if name in command:
                     setattr(self.camera, name, command[name])
+            if "lookat" in command:
+                self.camera.lookat[:] = command["lookat"]
+                self.track_robot = False
 
     def render(self):
         from PIL import Image
@@ -949,6 +986,20 @@ class MujocoSession:
         self.renderer.update_scene(
             self.data, camera=self.camera, scene_option=self.visual_options
         )
+        # Operator-only overlays: the robot_front observation is rendered separately
+        # and never includes these diagnostic points or planned/measured paths.
+        try:
+            if self.spatial.update(self.data):
+                self.spatial_state = self.spatial.snapshot()
+            self.spatial.draw(
+                self.renderer.scene,
+                lidar=self.overlays["lidar"],
+                trajectory=self.overlays["trajectory"],
+                route=self.navigator.path if self.navigator and self.overlays["route"] else (),
+            )
+            self.spatial_error = None
+        except Exception as exc:
+            self.spatial_error = f"{type(exc).__name__}: spatial overlay unavailable"
         output = io.BytesIO()
         Image.fromarray(self.renderer.render()).save(output, format="JPEG", quality=85)
         self.render_error = None
@@ -1015,6 +1066,7 @@ class MujocoSession:
             "intelligence_enabled": self.intelligence_enabled,
             "intelligence_goal": self.intelligence_goal,
             "intelligence_revision": self.intelligence_revision,
+            "intelligence_require_speech": self.intelligence_require_speech,
             "simulation_time": simulation_time,
             "scene_elapsed": simulation_time,
             "active_wall_time": self.active_wall_time,
@@ -1051,6 +1103,14 @@ class MujocoSession:
             "scene_id": self.scene["id"] if self.scene else None,
             "current_scene": self.scene,
             "camera_mode": "robot" if self.track_robot else "room",
+            "camera": {
+                "azimuth": finite_number(self.camera.azimuth),
+                "elevation": finite_number(self.camera.elevation),
+                "distance": finite_number(self.camera.distance),
+                "lookat": [finite_number(value) for value in self.camera.lookat],
+            },
+            "spatial": {**self.spatial_state, "error": self.spatial_error},
+            "overlays": dict(self.overlays),
         }
 
 
@@ -1200,6 +1260,7 @@ def run(args):
                 elif action == 'intelligence':
                     session.intelligence_enabled = command['enabled']
                     session.intelligence_goal = command['goal'].strip()
+                    session.intelligence_require_speech = command.get('require_speech', False)
                     session.intelligence_revision += 1
                     session.autonomy_mode='paused'
                     if not command['enabled'] and session.navigator:
@@ -1216,6 +1277,7 @@ def run(args):
                             command.get("waypoint"),
                             command.get("command_id"),
                             heading=command.get('heading'),
+                            trick=command.get('trick'),
                         )
                         session.running = session.physics_error is None
                     else:
@@ -1233,6 +1295,8 @@ def run(args):
                     session.step()
                 elif action == "camera":
                     session.set_camera(command)
+                elif action == "overlays":
+                    session.overlays.update({key: value for key, value in command.items() if key != "action"})
             if now >= next_frame and session.physics_error is None:
                 next_frame = now + 0.1
                 try:

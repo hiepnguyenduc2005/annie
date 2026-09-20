@@ -89,3 +89,29 @@ def test_service_receipt_rejects_unknown_and_preserves_history():
     now[0] += 100
     repeat = service.command_receipt(command['command_id'], 'failed', 'simulation', 'no robot')
     assert repeat['updated_at'] == before and repeat['detail'] == 'no robot'
+
+
+def test_trick_command_is_queued_and_receipted_like_goto(client):
+    client.post('/demo/seed')
+    queued = client.post('/commands', json={'cmd': 'trick', 'trick': 'spin'})
+    assert queued.status_code == 200, queued.text
+    item = queued.json()
+    assert item['cmd'] == 'trick' and item['trick'] == 'spin' and item['status'] == 'queued'
+    url = f"/commands/{item['command_id']}/receipt"
+    for status in ('accepted', 'executing'):
+        assert client.post(url, json={'status': status, 'source': 'simulation'}).status_code == 200
+    done = client.post(url, json={'status': 'completed', 'source': 'simulation', 'detail': 'Trick spin finished'})
+    assert done.status_code == 200
+    assert client.get('/commands').json()[-1]['status'] == 'completed'
+
+
+@pytest.mark.parametrize('body', [
+    {'cmd': 'trick'},
+    {'cmd': 'trick', 'trick': 'backflip'},
+    {'cmd': 'trick', 'trick': 'spin', 'waypoint': 'bedroom'},
+    {'cmd': 'goto', 'waypoint': 'bedroom', 'trick': 'spin'},
+    {'cmd': 'look', 'trick': 'spin'},
+])
+def test_trick_field_validation(client, body):
+    client.post('/demo/seed')
+    assert client.post('/commands', json=body).status_code == 422

@@ -36,8 +36,24 @@ is a provider error (502), never executed.
 perception validates against the same strict enums as /infer and feeds the
 existing check-in policy; frame_id, ts, and pose are the verified request
 metadata echoed back. action is exactly one of goto (requires waypoint_id),
-say (requires text, 1-500 chars), wait, look, stop (carry neither); every
-action carries reason (1-500 chars).
+say (requires text, 1-500 chars), trick (requires trick: spin, circle, zigzag,
+wiggle, or figure8), wait, look, stop, finish (carry no conditional fields); every
+action carries reason (1-500 chars). Conditional fields are exclusive to their
+actions. Both prompts reserve tricks for celebrating a reassured resident.
+The simulator applies the usual fresh-frame, incident and person-motion gates,
+and awaits the identified terminal receipt before another motion or finish.
+
+`finish` proposes completion; the simulation independently checks accepted
+evidence, current goal revision, and execution receipts. Simulator intelligence
+controls accept optional boolean `require_speech` (default false); the story
+forms set it true. Required speech must have a current-goal issued command and
+completed playback, not merely a generated clip. Failed or missing receipts
+cannot satisfy it. A new map or goal revision starts a separate requirement.
+
+The internal packed context adds `age_seconds` to retained historical memories,
+derived from current and historical capture timestamps. Original frame IDs,
+timestamps, and observer poses remain intact. Speech uses approximate relative
+time; exact citation identifiers remain in structured evidence.
 
 The provider envelope mirrors the vision contract: one non-retry attempt,
 512 output tokens, response capped at 65,536 bytes, OpenRouter routes reserve

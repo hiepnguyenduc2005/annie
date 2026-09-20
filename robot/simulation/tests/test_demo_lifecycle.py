@@ -88,6 +88,19 @@ def test_ai_start_starts_one_bounded_cloud_bridge_and_pause_preserves_delivery(t
     assert shared.agent_process.poll() is None
 
 
+@pytest.mark.parametrize('value', [None, 1, 'true', []])
+def test_speech_requirement_is_an_explicit_boolean(value):
+    with pytest.raises(ValueError):
+        viewer.validate_control({'action':'intelligence', 'enabled':True,
+                                 'goal':'Deliver a message', 'require_speech':value})
+
+
+def test_speech_required_control_is_compatible_with_existing_goals():
+    command={'action':'intelligence', 'enabled':True, 'goal':'Deliver a message'}
+    assert viewer.validate_control(command)==command
+    assert viewer.validate_control({**command, 'require_speech':True})['require_speech'] is True
+
+
 def test_routine_pause_fails_instead_of_hanging(monkeypatch):
     ticks = iter([0., 0., 2.])
     monkeypatch.setattr(house_demo, 'time', SimpleNamespace(monotonic=lambda: next(ticks)))

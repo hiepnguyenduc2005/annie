@@ -155,6 +155,7 @@
     <button onclick="act('dance', null, this)">Dance</button>
     <button onclick="act('sit', null, this)">Sit</button>
     <button onclick="act('stand', null, this)">Stand</button>
+    <button id="voice-mute" onclick="toggleVoiceMute()" disabled aria-pressed="false">Checking sound…</button>
     <form class="say" onsubmit="return say(event)"><input type="text" id="saytext" placeholder="Tell Annie what to do… (e.g. go back and greet the person behind you)" maxlength="300" /><button type="submit">Send</button></form>
     <span class="sub" id="say-status"></span>
     <span class="toast" id="toast"></span>
@@ -258,6 +259,31 @@
     opts.signal = c.signal;
     return fetch(url, opts).finally(function () { clearTimeout(t); });
   }
+  var voiceMuted = null, muteBusy = false;
+  function renderMute(voice) {
+    if (voice && typeof voice.muted === "boolean") voiceMuted = voice.muted;
+    var b = $("voice-mute");
+    b.disabled = muteBusy || voiceMuted == null;
+    b.textContent = muteBusy ? "Changing sound…" : (voiceMuted == null ? "Sound unavailable" : (voiceMuted ? "Unmute Annie" : "Mute Annie"));
+    b.setAttribute("aria-pressed", String(voiceMuted === true));
+    b.title = voiceMuted ? "Annie’s speaker is muted. Movement controls still work." : "Silence Annie’s speaker and stop current speech.";
+    if (voiceMuted) {
+      $("tts").checked = false;
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+    }
+  }
+  window.toggleVoiceMute = function () {
+    if (muteBusy || voiceMuted == null) return;
+    var desired = !voiceMuted;
+    muteBusy = true; renderMute(null);
+    fetchBounded("/voice", { method: "POST", headers: headers, body: JSON.stringify({ muted: desired }) })
+      .then(function (r) { return r.json().then(function (j) {
+        if (!r.ok || typeof j.muted !== "boolean" || j.muted !== desired) throw new Error(j.error || "Mute was not confirmed");
+        renderMute(j); toast(j.muted ? "Annie muted" : "Annie unmuted");
+      }); })
+      .catch(function (e) { toast("Sound change failed: " + e.message, true); })
+      .finally(function () { muteBusy = false; renderMute(null); });
+  };
   // "Grandma for this demo": the operator points at the right live track by clothing
   // (beige jacket + blue jeans). The POST body carries the track's guest name only;
   // clothing stays an operator instruction, never an automatic classifier.
@@ -658,6 +684,7 @@
     $("fps").textContent = (s.fps || 0).toFixed(1) + " fps";
     var tracks = s.tracks || [], lying = tracks.some(function (x) { return x.posture === "lying"; });
     window.__telemetry = t;
+    renderMute(t.voice);
     $("people").textContent = tracks.length + (tracks.length === 1 ? " person" : " people") + (tracks.length ? ": " + tracks.map(function (x) { return (x.identity && x.identity.name) || ("#" + x.track_id); }).join(", ") : "");
     renderGrandma(tracks);
     $("lying").hidden = !lying;

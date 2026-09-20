@@ -183,6 +183,7 @@ class Shared:
         self.resident_reply = None
         self.demo_process = None
         self.agent_process = None
+        self.agent_max_inferences = 20
         self.demo_brain_url = "http://127.0.0.1:8004"
         self.demo_allow_cloud = False
 
@@ -473,7 +474,7 @@ def handler_for(shared, port):
                             shared.agent_process=subprocess.Popen([
                                 str(root/'.venv/bin/python'),'-m','robot.simulation.bridge',
                                 '--perception','agent','--brain-url',shared.demo_brain_url,
-                                '--max-inferences','20',
+                                '--max-inferences',str(shared.agent_max_inferences),
                                 *([] if shared.demo_allow_cloud else ['--continuous-local'])],
                                 cwd=root,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
@@ -1070,6 +1071,7 @@ def run(args):
     shared = Shared()
     shared.demo_brain_url = args.demo_brain_url
     shared.demo_allow_cloud = args.demo_allow_cloud
+    shared.agent_max_inferences = args.agent_max_inferences
     if args.native_audio:
         shared.native_player = NativeAudioPlayer()
         shared.native_player.start()
@@ -1298,6 +1300,8 @@ def main():
     parser.add_argument('--person-policy', choices=['stop','advisory'], default='stop',
                         help='Simulated person detections stop movement or advise the model')
     parser.add_argument('--demo-brain-url', default='http://127.0.0.1:8004')
+    parser.add_argument('--agent-max-inferences', type=int, default=20,
+                        help='Bound a cloud AI session; provider lifetime and dollar caps still apply')
     parser.add_argument('--demo-allow-cloud', action='store_true',
                         help='Explicitly allow bounded synthetic demo inference using the configured cloud brain')
     parser.add_argument('--person-safety', action='store_true',
@@ -1332,6 +1336,8 @@ def main():
         "--factory-output", type=Path, default=Path(".data/simulation/scenes")
     )
     args = parser.parse_args()
+    if not 1 <= args.agent_max_inferences <= 1000:
+        parser.error('--agent-max-inferences must be between 1 and 1000')
     args.factory_assets = args.factory_assets or args.model.parent
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")

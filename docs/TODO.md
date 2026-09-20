@@ -38,7 +38,7 @@ as work progresses and record a reason for blocked work.
 
 ## Done
 
-- [x] TASK-015: Live Zach → Annie → Janine story completed (REQ-014; [measurements](../robot/simulation/STORY_DEMO.md)): model-selected walking, camera person detection, Zach's reminder played, then a Graphiti-grounded phone answer played. Both frontend submissions and execution receipts verified; 8 image/model calls, 1.532 s median provider latency. Janine's reply is demo-actor text; phone memory is a real inferred setup capture.
+- [x] TASK-015: Live Zach → Annie → Janine story completed twice (REQ-014; [measurements](../robot/simulation/STORY_DEMO.md)): model-selected walking, camera person detection, Zach's reminder played, then a Graphiti-grounded phone answer played. The guarded repeat took 21.779 s / 11.606 s, with 7 model calls and 1.827 s median provider latency. Janine's reply is demo-actor text; memory includes real inferred setup and robot-camera captures.
 
 - [x] TASK-013: Added interactive camera controls, an operator workspace, and DimOS-derived raycast LiDAR, measured-trail and planned-route layers (REQ-013). Browser-verified orbit/pan/zoom/reset and layer acknowledgement; toggling layers changes operator frames while robot-camera frames remain byte-identical.
 

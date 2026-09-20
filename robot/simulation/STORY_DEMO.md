@@ -101,6 +101,30 @@ and `output/story-ui-janine-observation.json`. These results establish local
 device playback, not that a human heard or acknowledged the message. The reply
 was typed by the demo actor; the phone prelude remains an explicit setup capture.
 
+### Repeat after playback and speech-time fixes
+
+A fresh house/map and newly inferred phone prelude repeated both frontend
+submissions with `require_speech: true`. Both goals finished with
+`speech_delivery: completed`. Annie chose the living room, received a measured
+arrival, and its retained camera frame shows Janine seated. The phone reply was:
+“I last saw a phone resting on the living room armchair less than a minute ago.”
+Graphiti returned a robot-camera phone observation captured 27 seconds before
+the reply's inference, along with the original setup-camera citation. The exact
+reply camera also shows the phone against the chair cushion.
+
+- Zach: **21.779 s** from first frame to completion; native clip **4.31 s**.
+- Janine: **11.606 s** from first frame to completion; native clip **3.46 s**.
+- **7** model calls; median **1.827 s**, range **1.427–2.489 s**.
+- Both native playback processes completed before their respective goals.
+- Evidence: `output/live-zach-janine-verified-delivery.json`, with exact speaking
+  frames and metadata at `output/verified-story-*.jpg` and `.json`.
+
+Verification for this milestone: **452 Python tests passed, 1 skipped** in the
+software integration suite; **24 MuJoCo scene/camera tests** and **8 frontend
+regression tests** passed. Schema export, JavaScript syntax, and diff checks
+passed. The skipped embedded graph test requires the isolated Graphiti runtime;
+actual local Graphiti indexing/retrieval was exercised in both live runs.
+
 ## Acceptance
 
 1. Zach's submitted text creates a new goal revision and appears in the UI.

@@ -558,6 +558,8 @@ async function pollBrain() {
     const sameContext = !!current?.map_id && data.context_map_id === current.map_id;
     const agent = sameContext && data.agent?.goal === current?.intelligence_goal ? data.agent : null;
     const limitReached = sameContext && data.inference_limit_reached;
+    const blocked = sameContext && data.inference_blocked;
+    const agentError = sameContext && data.last_error;
     const completion = data.goal_completion;
     const completed = completion && completion.map_id === current?.map_id &&
       completion.revision === current?.intelligence_revision && completion.goal === current?.intelligence_goal;
@@ -571,7 +573,7 @@ async function pollBrain() {
       row.textContent=`${item.action.action}${item.action.waypoint_id ? ' → '+item.action.waypoint_id : ''} · ${receipt?.status || item.execution} · ${Math.round(item.latency_ms)} ms`;
       return row;
     }));
-    $('autonomy-status').textContent = agent
+    $('autonomy-status').textContent = blocked ? 'Planning paused · configuration needs attention' : agentError ? 'Planner unavailable' : agent
       ? `${completed ? 'Goal completed' : current?.intelligence_enabled ? (agent.thinking ? 'Thinking…' : agent.action?.action || 'Ready') : 'Paused'} · ${agent.model || 'vision-language model'}${agent.latency_ms ? ' · '+Math.round(agent.latency_ms)+' ms' : ''}`
       : current?.intelligence_enabled ? 'Waiting for the current goal.' : 'Paused';
     $('agent-reason').textContent = agent ? `${agent.action?.reason || ''} · ${agent.execution || ''}` : '';

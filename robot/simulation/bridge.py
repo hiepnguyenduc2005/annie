@@ -47,6 +47,7 @@ class Bridge:
         self.status_file = Path(status_file) if status_file else None
         self.last_perception = self.last_provider = self.last_latency_ms = None
         self.last_error = self.ingest_accepted = None
+        self.inference_blocked = None
         self.autonomy = None
         self.autonomy_revision = None
         self.auto_commands = {}
@@ -165,6 +166,7 @@ class Bridge:
         status = dict(updated_at=int(self.clock() * 1000), perception_mode=self.perception,
             context_map_id=self.map_id,
             inference_limit_reached=self.perception in ('vision','agent') and self.limit_reached,
+            inference_blocked=self.inference_blocked,
             inferences=self.inferences, max_inferences=self.max_inferences,
             continuous_local=self.continuous_local, memory=self.memory_state,
             last_perception=self.last_perception, last_provider=self.last_provider,
@@ -213,6 +215,15 @@ class Bridge:
         # Never log response bodies, images, URLs, tokens or provider exception text.
         code = f" HTTP {exc.response.status_code}" if isinstance(exc, httpx.HTTPStatusError) else ""
         self.last_error = f"{area} unavailable ({type(exc).__name__}{code})"
+        if area in ('agent', 'vision'):
+            from robot.simulation.inference_failures import inference_block_reason
+            reason = inference_block_reason(exc)
+            if reason:
+                # Keep body/receipt synchronization alive, but do not repeatedly
+                # retry a disabled provider or exhausted/invalid spending ledger.
+                # A configured bridge restart explicitly resumes inference.
+                self.inference_blocked = reason
+                self.last_error = reason
         if area in ('agent','vision') and isinstance(exc,httpx.HTTPStatusError):
             try:
                 detail=exc.response.json().get('detail','')
@@ -586,7 +597,7 @@ class Bridge:
                      and self.goal_completion['revision'] == state.get('intelligence_revision')
                      and self.goal_completion['goal'] == state.get('intelligence_goal')) and
                 (self.perception!='agent' or (state.get('intelligence_enabled') and state.get('running'))) and
-                not self.limit_reached and self.monotonic() >= self.next_inference and
+                not self.inference_blocked and not self.limit_reached and self.monotonic() >= self.next_inference and
                 (self.perception != 'agent' or (not self.pending_checkin and
                  (not self.pending_agent_command or state['navigation']['state'] in ('moving','scanning','turning')))) and
                 (self.vision_task is None or self.vision_task.done())):

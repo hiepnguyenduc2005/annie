@@ -68,10 +68,16 @@ records are archived under ignored `output/house-demo-<run_id>.json`.
 
 Cloud calls accept synthetic rendered frames only. Both `/infer` and `/plan`
 share the same attempt-reservation ledger and provider lock. The existing
-$20 session cap includes earlier vision/audio experiments and the separate
-$1 probe reservation; the service cap is set to $19 to preserve that reserve.
+$50 authorized session cap includes earlier vision/audio experiments and the
+separate $1 probe reservation; the service cap is set to $49 to preserve that reserve.
 A bounded run ends when its call allowance is used; motion commands already
 in flight can finish, and command receipts continue to be processed.
+
+Recognized disabled-provider and reservation-ledger failures pause further
+automatic inference attempts while command receipts continue synchronizing.
+The UI reports the specific configuration issue instead of showing Ready.
+After correcting the configuration or an explicitly authorized budget change,
+restart the bridge to resume planning; never reset the spending ledger.
 
 This is model-directed planning over a known map, not learned locomotion,
 SLAM, calibrated person localization, validated clinical reasoning, or Go2

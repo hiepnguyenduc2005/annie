@@ -36,8 +36,8 @@ class VisionConfig:
             raise ValueError('ANNIE_VISION_TIMEOUT_S must be between 1 and 120')
         if type(self.max_cloud_calls) is not int or not 1 <= self.max_cloud_calls <= 1000:
             raise ValueError('ANNIE_VISION_MAX_CLOUD_CALLS must be between 1 and 1000')
-        if not math.isfinite(self.budget_usd) or not 0 < self.budget_usd <= 20:
-            raise ValueError('ANNIE_VISION_BUDGET_USD must be positive and at most 20')
+        if not math.isfinite(self.budget_usd) or not 0 < self.budget_usd <= 50:
+            raise ValueError('ANNIE_VISION_BUDGET_USD must be positive and at most 50')
         if self.mode == 'disabled':
             return
         if not self.base_url or not self.model.strip() or len(self.model) > 200:

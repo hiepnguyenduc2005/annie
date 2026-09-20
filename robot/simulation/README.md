@@ -327,9 +327,9 @@ ANNIE_MODE=demo ANNIE_REQUIRE_AUDIO_RECEIPT=true \
   .venv/bin/uvicorn robot.app_backend.app.main:app --host 127.0.0.1 --port 8000 \
   --no-proxy-headers --env-file .env
 
-# Terminal 2: this session reserves $1 separately for an earlier probe, so
-# the shared service cap is $19. This does not reset the ledger or spend limit.
-ANNIE_VISION_BUDGET_USD=19 ANNIE_VISION_MAX_CLOUD_CALLS=130 \
+# Terminal 2: the authorized total is $50, including $1 reserved separately
+# for an earlier probe. Preserve the shared ledger and use a $49 service cap.
+ANNIE_VISION_BUDGET_USD=49 ANNIE_VISION_MAX_CLOUD_CALLS=1000 \
   .venv/bin/python robot/simulation/run_brain.py --mode cloud \
   --model google/gemini-2.5-flash-lite:floor --port 8003
 

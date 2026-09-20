@@ -39,6 +39,8 @@ as work progresses and record a reason for blocked work.
 
 ## Done
 
+- [x] Recovered simulation planner after the cloud reservation cap produced HTTP 503. The user raised the total allowance to $50 ($49 shared ledger plus the existing separate $1 probe); prior usage is preserved. Fixed actionable availability errors, stopped automatic retries for configuration/budget failures, and removed the misleading Ready label. Live exploration again found the resident and completed spoken playback.
+
 - [x] TASK-015: Live Zach → Annie → Janine story completed twice (REQ-014; [measurements](../robot/simulation/STORY_DEMO.md)): model-selected walking, camera person detection, Zach's reminder played, then a Graphiti-grounded phone answer played. The guarded repeat took 21.779 s / 11.606 s, with 7 model calls and 1.827 s median provider latency. Janine's reply is demo-actor text; memory includes real inferred setup and robot-camera captures.
 
 - [x] TASK-013: Added interactive camera controls, an operator workspace, and DimOS-derived raycast LiDAR, measured-trail and planned-route layers (REQ-013). Browser-verified orbit/pan/zoom/reset and layer acknowledgement; toggling layers changes operator frames while robot-camera frames remain byte-identical.

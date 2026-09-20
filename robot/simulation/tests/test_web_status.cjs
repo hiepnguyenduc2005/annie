@@ -94,6 +94,26 @@ test('old goal response cannot restore an old completion or reason', async () =>
   assert.equal(element('autonomy-status').textContent, 'Waiting for the current goal.');
 });
 
+test('a blocked planner is never labelled ready', async () => {
+  const reason = 'The cloud inference allowance cannot cover another call.';
+  const { context, element } = fixture({
+    context_map_id: 'map-a', inference_blocked: reason, last_error: reason,
+    agent: { goal: 'Find the phone', thinking: false, execution: reason },
+  });
+  await context.pollBrain();
+  assert.equal(element('autonomy-status').textContent, 'Planning paused · configuration needs attention');
+  assert.equal(element('brain-error').textContent, reason);
+});
+
+test('a current planner error does not advertise readiness', async () => {
+  const { context, element } = fixture({
+    context_map_id: 'map-a', last_error: 'agent unavailable (HTTPStatusError HTTP 503)',
+    agent: { goal: 'Find the phone', thinking: false },
+  });
+  await context.pollBrain();
+  assert.equal(element('autonomy-status').textContent, 'Planner unavailable');
+});
+
 test('matching current completion is displayed; prior-map failures are not', async () => {
   const { context, element, state } = fixture({
     context_map_id: 'map-a', agent: { goal: 'Find the phone', model: 'test-model' },

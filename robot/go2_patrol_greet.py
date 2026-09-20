@@ -48,6 +48,7 @@ from go2_voice_commands import CommandListener  # noqa: E402
 from go2_probe import extract_lowstate, extract_pose, safe_error  # noqa: E402
 from go2_smart_patrol import (HeadingBandit, OccupancyGrid, PatrolPlanner, StallDetector, body_frame,  # noqa: E402
                               quaternion_yaw, sector_ranges, voxel_points_world, wrap_angle)
+from go2_missions import MissionBoard  # noqa: E402
 from go2_target_id import TargetIdentifier  # noqa: E402
 try:
     from go2_spacetime import SpacetimeRecorder  # noqa: E402
@@ -146,6 +147,21 @@ def _speak_host(text: str):
         subprocess.Popen(["say", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def speak_blocking(text: str) -> bool:
+    """Speak on the host and wait for it to finish (text on stdin, never as an argument)."""
+    try:
+        return subprocess.run(["say"], input=text.encode("utf-8"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=60).returncode == 0
+    except Exception:
+        return False
+
+
+def listen_blocking(max_s: float) -> dict:
+    """Host microphone -> transcript (Silero VAD + local Whisper); same path as the body service."""
+    from go2_body import _listen_blocking
+    return _listen_blocking(max_s)
+
+
 def _encode(frame, width=480, quality=70):
     import cv2
     img = frame.to_ndarray(format="bgr24")
@@ -228,6 +244,13 @@ class LiveView:
             def do_GET(self):
                 if self.path.startswith("/stream.mjpg"):
                     return self._stream()
+                if self.path.startswith("/command/"):
+                    board = getattr(view, "missions", None)
+                    receipt = board.get(self.path[len("/command/"):].split("?")[0]) if board else None
+                    return self._send(200, json.dumps(receipt).encode(), "application/json") if receipt \
+                        else self._send(404, b'{"error":"unknown command_id"}', "application/json")
+                if self.path.startswith("/health"):
+                    return self._send(200, b'{"ok": true, "service": "go2-patrol-greet"}', "application/json")
                 if self.path.startswith("/spacetime.json"):
                     rec = getattr(view, "recorder", None)
                     if rec is None:
@@ -258,12 +281,22 @@ class LiveView:
 
             def do_POST(self):
                 length = int(self.headers.get("Content-Length") or 0)
-                raw = self.rfile.read(length) if 0 < length < 4096 else b""
+                raw = self.rfile.read(length) if 0 < length < 65536 else b""
+                board = getattr(view, "missions", None)
+                if self.path == "/stop" and board is not None:  # body contract: cancel the mission, StopMove follows
+                    code, receipt = board.submit({"name": "stop"})
+                    return self._send(200, json.dumps({"stop_code": None, "ack_ms": None, "cancelled": receipt.get("stop_requested", True),
+                                                       "note": "software stop via the patrol loop"}).encode(), "application/json")
                 if self.path.startswith("/command"):
                     try:
-                        action = json.loads(raw.decode() or "{}").get("action")
+                        payload = json.loads(raw.decode() or "{}")
                     except ValueError:
-                        action = None
+                        return self._send(400, b'{"error":"invalid JSON"}', "application/json")
+                    if isinstance(payload, dict) and "name" in payload and board is not None:  # body-shaped mission
+                        code, receipt = board.submit(payload)
+                        view.log(f"mission {receipt.get('name', '?')} -> {code}")
+                        return self._send(code, json.dumps(receipt).encode(), "application/json")
+                    action = payload.get("action") if isinstance(payload, dict) else None
                     if action not in ("go_home", "stop", "explore", "scan", "dance", "hello", "sit", "stand", "follow"):
                         return self._send(400, b'{"error":"unknown action"}', "application/json")
                     cmds = getattr(view, "commands", None)
@@ -529,6 +562,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                             min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier)
     view.commands = voice_state  # POST /command on the live view sets the same bounded override as a voice command
     view.recorder = recorder
+    missions = MissionBoard()
+    view.missions = missions
+    report["missions"] = []
 
     async def on_track(track):
         while not stopped:
@@ -657,6 +693,8 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         follow_hold_s = 8.0
         blocked_times: list[float] = []
         rec_last = [-1e9]
+        mission_state: dict = {}
+        mission_hold_until = [0.0]
         bandit = bandit or HeadingBandit()
         bandit_state = {"until": 0.0, "rewarded": False}
         report["bandit"] = None
@@ -777,6 +815,91 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 report["lidar"]["stale_ticks"] += 1
             front_now = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
             action, tid = policy.step(tracks, fw or 640, fh or 480, now_s=now, front_m=front_now) if fw else ("patrol", None)
+            # ---- missions from the family app (body-command shape); they pre-empt greeting and idle tricks
+            if missions.consume_stop():
+                send_move(0.0, 0.0)
+                with contextlib.suppress(Exception):
+                    await request(STOP_MOVE, priority=True, timeout=3.0)
+                mission_state.clear()
+                status(f"t={now-start:5.1f}s mission stop: StopMove sent")
+            new_mission = missions.take()
+            if new_mission is not None:
+                name, margs = new_mission["name"], new_mission["args"]
+                status(f"t={now-start:5.1f}s mission {name} {margs if margs else ''}")
+                report["missions"].append({"t_s": round(now - start, 1), "name": name, "args": margs})
+                if name in ("hello", "dance", "heart", "stretch", "sit", "stand"):
+                    api = {"sit": 1009, "stand": STAND_UP, "dance": 1022, "hello": HELLO, "heart": 1036, "stretch": 1017}[name]
+                    settle = {"sit": 3.0, "stand": 2.0, "dance": 10.0, "hello": 4.0, "heart": 6.0, "stretch": 5.0}[name]
+                    code = await show(name, api, settle, None)
+                    missions.finish(new_mission, result={"codes": {name: code}, "note": "firmware acknowledgment, not evidence the motion happened"})
+                    continue
+                if name == "say":
+                    send_move(0.0, 0.0)
+                    played = await loop.run_in_executor(None, lambda: speak_blocking(margs["text"]))
+                    missions.finish(new_mission, result={"played": bool(played), "where": "host speaker"})
+                    continue
+                if name == "listen":
+                    send_move(0.0, 0.0)
+                    try:
+                        heard = await loop.run_in_executor(None, lambda: listen_blocking(margs["max_s"]))
+                        missions.finish(new_mission, result={**heard, "where": "host microphone"})
+                    except Exception as exc:
+                        missions.finish(new_mission, error=f"listen failed: {type(exc).__name__}")
+                    continue
+                if name == "move":
+                    missions.finish(new_mission, error="move is not offered by the patrol process; use patrol/go_home")
+                    continue
+                if name == "patrol":
+                    voice_state["intent"], voice_state["until"] = "explore", now + margs["duration_s"]
+                    missions.finish(new_mission, result={"note": "exploring", "duration_s": margs["duration_s"]})
+                    continue
+                if name == "find_person":
+                    mission_state.update(receipt=new_mission, name=(margs["name"] or "").lower() or None,
+                                         deadline=now + margs["timeout_s"], approach=margs["approach"], found=None, since=now)
+            mission = missions.executing()
+            if mission is not None and mission_state.get("receipt") is mission:
+                wanted = mission_state["name"]
+                named = [t for t in tracks if wanted and ((t.get("identity") or {}).get("name") or "").lower() == wanted]
+                anybody = [t for t in tracks if t.get("track_id") is not None]
+                pool = named or ([] if wanted and now - mission_state["since"] < 25.0 else anybody)  # 25 s for the named one first
+                if pool:
+                    best = max(pool, key=lambda t: t["box"][3] - t["box"][1])
+                    if mission_state["found"] is None:
+                        mission_state["found"] = {"track_id": best.get("track_id"), "identity": best.get("identity"),
+                                                  "matched": bool(named), "posture": best.get("posture")}
+                        missions.progress(mission, found=mission_state["found"])
+                        status(f"t={now-start:5.1f}s mission find_person: found track {best.get('track_id')} "
+                               f"({'named ' + wanted if named else 'closest person'})")
+                    # "approached" must be reachable by the follow controller: it holds at box height 0.5 / LiDAR 0.6 m
+                    approached = (not mission_state["approach"]) or (front_now is not None and front_now <= 0.75) \
+                        or (best["box"][3] - best["box"][1]) / float(fh or 480) >= 0.47
+                    if approached:
+                        f = mission_state["found"]
+                        missions.finish(mission, result={"found": True, "track_id": f["track_id"], "identity": f["identity"],
+                                                         "matched_name": f["matched"], "posture": f["posture"], "approached": True,
+                                                         "searched_s": round(now - mission_state["since"], 1)})
+                        send_move(0.0, 0.0)
+                        policy.greeted[f["track_id"]] = now  # the errand does the talking: no "hello there" on top
+                        mission_hold_until[0] = now + 60.0  # and keep following them quietly while the errand speaks/listens
+                        mission_state.clear()
+                        mode = "cruise"
+                        await asyncio.sleep(tick)
+                        continue
+                    action, tid = "follow", best.get("track_id")  # walk up to them; the follow branch below does the driving
+                else:
+                    action, tid = "patrol", None  # keep searching (bandit + brain pull toward the last sighting)
+                if now > mission_state["deadline"]:
+                    missions.finish(mission, result={"found": False, "track_id": None, "identity": None, "matched_name": False,
+                                                     "posture": None, "approached": False,
+                                                     "searched_s": round(now - mission_state["since"], 1)})
+                    mission_state.clear()
+                    continue
+            if (mission is not None or now < mission_hold_until[0]) and action in ("greet", "checkin"):
+                action = "follow" if tid is not None else "patrol"  # no tricks or questions while on / just after a mission
+            if now < mission_hold_until[0] and action == "patrol" and not tracks:
+                send_move(0.0, 0.0)  # stay put by the person the errand is talking to instead of wandering off
+                await asyncio.sleep(tick)
+                continue
             if action in ("follow", "greet") and not bandit_state["rewarded"] and bandit.current is not None:
                 bandit.reward(1.0)  # this heading found someone
                 bandit_state["rewarded"] = True
@@ -895,7 +1018,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 continue
             if mode == "follow":
                 mode = "cruise"  # lost them for good: back to the wander planner
-            if idle_trick_s and mode.startswith(("cruise", "brain:")) and now - last_show >= idle_trick_s:
+            if idle_trick_s and mission is None and mode.startswith(("cruise", "brain:")) and now - last_show >= idle_trick_s:
                 trick_name, trick_api, trick_settle = GREET_TRICKS[1 + (len(report["greetings"]) + len(report["checkins"])) % 3]
                 status(f"t={now-start:5.1f}s nobody new for {idle_trick_s:.0f}s: {trick_name} for fun")
                 report.setdefault("idle_tricks", []).append({"t_s": round(now - start, 1), "trick": trick_name,

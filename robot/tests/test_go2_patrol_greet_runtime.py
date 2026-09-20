@@ -204,3 +204,51 @@ def test_close_centred_person_is_greeted_with_a_trick():
     assert report["reason"] == "duration_complete", report.get("error")
     assert len(report["greetings"]) == 1 and report["greetings"][0]["trick"] == "hello"
     assert any(o["api_id"] == 1016 for _, o in dog.requests)
+
+
+class RedShirtTracker(PersonTracker_):
+    """A far person named Jeanine appears after a few frames; the box grows as the dog approaches."""
+
+    def __init__(self, dog):
+        super().__init__()
+        self.dog = dog
+
+    def update(self, jpeg, now_ms):
+        self.updates += 1
+        if self.updates < 5:
+            return []
+        h = min(300, 110 + int(self.dog.x * 400))  # closer -> taller box
+        return [{"track_id": 5, "box": [300, 60, 340, 60 + h], "conf": 0.9, "posture": "upright", "lying_frames": 0,
+                 "kp_conf": [0.9] * 17, "first_seen_ms": now_ms - 1000,
+                 "identity": {"name": "Jeanine", "score": 0.8, "method": "shirt_colour"}}]
+
+
+def test_find_person_mission_walks_up_to_the_named_person_and_completes():
+    dog = FakeDog(wall_x=None)
+    tracker = RedShirtTracker(dog)
+    view = go2_patrol_greet.LiveView(port=0)
+
+    async def scenario():
+        task = asyncio.create_task(go2_patrol_greet.run_patrol_greet(
+            ip="10.0.0.99", aes_key=None, conn_factory=lambda ip, key: dog, tracker=tracker,
+            encoder=lambda frame: (b"", 640, 480), speak=lambda text: None, status=lambda text: None,
+            planner=PatrolPlanner(cruise_mps=0.25, turn_rps=0.5, backoff_s=0.03, min_turn_s=0.02, leash_m=50.0),
+            stall=StallDetector(window_s=0.05, min_progress_m=0.02), rate_hz=200.0, stale_s=0.2, lidar_stale_s=0.2,
+            boundary_m=100.0, voxel_min_interval_s=0.0, bandit=StraightBandit(), view=view, duration_s=1.5))
+        while getattr(view, "missions", None) is None:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)
+        code, receipt = view.missions.submit({"command_id": "m-find", "name": "find_person",
+                                              "args": {"name": "Jeanine", "timeout_s": 5, "approach": True}})
+        assert code == 202
+        code2, busy = view.missions.submit({"command_id": "m-say", "name": "say", "args": {"text": "hi"}})
+        assert code2 == 409 and busy["error"] == "busy"
+        report = await task
+        return report, view.missions.get("m-find")
+    report, receipt = asyncio.run(scenario())
+    assert report["reason"] == "duration_complete", report.get("error")
+    assert receipt["state"] == "completed", receipt
+    assert receipt["result"]["found"] and receipt["result"]["matched_name"] and receipt["result"]["approached"]
+    assert receipt["result"]["identity"]["name"] == "Jeanine"
+    assert dog.x > 0.2  # it walked toward her
+    assert report["greetings"] == []  # no party trick while on a mission

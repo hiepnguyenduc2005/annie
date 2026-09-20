@@ -11,7 +11,7 @@
   * { box-sizing:border-box; }
   html, body { margin:0; background:var(--cream); color:var(--ink); }
   body { font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 3%; border-bottom:1px solid var(--line); background:var(--white); }
+  header { position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 3%; border-bottom:1px solid var(--line); background:var(--white); }
   .brand { display:flex; align-items:center; gap:10px; font-size:26px; letter-spacing:-1.2px; font-weight:700; text-decoration:none; color:inherit; }
   .brand-sub { font-size:9px; letter-spacing:2px; font-weight:600; margin-left:8px; color:var(--muted); }
   .status { display:flex; align-items:center; gap:14px; font-size:12px; flex-wrap:wrap; }
@@ -59,10 +59,22 @@
   td.state { text-transform:uppercase; font-size:10px; letter-spacing:1px; }
   td.state.completed { color:var(--green); } td.state.executing { color:var(--ink); font-weight:700; } td.state.failed, td.state.cancelled { color:var(--alert); }
   .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:16px; }
+  .pill.sim { background:#f6e3e0; color:var(--alert); }
+  .chat-head { display:flex; justify-content:space-between; align-items:center; margin:2px 0 8px; }
+  label.tts { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); cursor:pointer; }
+  .chat { display:flex; flex-direction:column; gap:6px; max-height:230px; overflow:auto; margin:0 0 12px; border-top:1px solid var(--soft); padding-top:10px; }
+  .msg { display:flex; gap:8px; align-items:baseline; font-size:13px; }
+  .msg .who { font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); min-width:52px; flex:none; }
+  .msg.operator .who { color:var(--green); }
+  .msg.operator .mtext { font-weight:600; }
+  .msg.resident .mtext { font-style:italic; }
+  .msg .mtime { margin-left:auto; font-size:10px; color:var(--muted); flex:none; }
+  .badge { font-size:9px; letter-spacing:1px; text-transform:uppercase; background:var(--soft); color:var(--muted); padding:2px 6px; border-radius:10px; margin-left:6px; white-space:nowrap; }
   button { font:600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing:.5px; padding:11px 16px; border-radius:20px; border:1px solid var(--line); background:var(--white); color:var(--ink); cursor:pointer; }
   button:hover { border-color:var(--green); } button.primary { background:var(--green); border-color:var(--green); color:var(--white); }
   button.danger { border-color:var(--alert); color:var(--alert); } button.danger:hover { background:var(--alert); color:var(--white); }
   button.small { padding:6px 10px; font-size:10px; }
+  #say-status:empty { display:none; }
   form.say { display:flex; gap:8px; flex:1; min-width:240px; }
   input[type=text] { flex:1; font:14px -apple-system, sans-serif; padding:10px 14px; border-radius:20px; border:1px solid var(--line); background:var(--white); }
   .toast { font-size:12px; color:var(--muted); min-width:120px; }
@@ -86,9 +98,12 @@
   <div class="status">
     <span><span class="dot" id="dot"></span><span id="link">connecting</span></span>
     <span class="pill" id="mode">-</span>
+    <span class="pill" id="controlmode" hidden></span>
+    <span class="pill sim" id="srcpill" hidden>SIMULATION</span>
     <span class="pill" id="action" hidden></span>
     <span id="battery">battery -</span>
     <span id="clock">t 0 s</span>
+    <button class="danger" onclick="act('stop', null, this)">Stop</button>
   </div>
 </header>
 <main>
@@ -124,28 +139,38 @@
     </div>
   </section>
 
-  <section class="grid two">
-    <div class="card">
-      <div class="card-head"><div><p class="eyebrow">Pipeline</p><h2>Latency</h2></div><span class="sub" id="ctrl">- Hz control</span></div>
-      <div class="spark" id="spark"></div>
-    </div>
-    <div class="card">
-      <div class="card-head"><div><p class="eyebrow">Agent</p><h2>What Annie is thinking</h2></div><span class="sub" id="brainstate">brain off</span></div>
-      <div class="log" id="log"></div>
-      <table id="missions"><thead><tr><th>Mission</th><th>State</th><th>Duration</th><th>Details</th></tr></thead><tbody></tbody></table>
-    </div>
-  </section>
-
   <div class="controls">
-    <button class="primary" onclick="act('explore')">Explore</button>
-    <button onclick="act('scan')">Look around</button>
-    <button onclick="act('go_home')">Home base</button>
-    <button onclick="act('hello')">Wave</button>
-    <button onclick="act('dance')">Dance</button>
-    <button class="danger" onclick="act('stop')">Stop</button>
+    <button class="primary" onclick="act('patrol', {duration_s: 60}, this)">Explore</button>
+    <button onclick="act('scan')" title="legacy control-mode command, no mission receipt">Look around</button>
+    <button onclick="act('go_home', null, this)">Home base</button>
+    <button onclick="act('hello', null, this)">Wave</button>
+    <button onclick="act('dance', null, this)">Dance</button>
+    <button onclick="act('sit', null, this)">Sit</button>
+    <button onclick="act('stand', null, this)">Stand</button>
     <form class="say" onsubmit="return say(event)"><input type="text" id="saytext" placeholder="Tell Annie what to do… (e.g. go back and greet the person behind you)" maxlength="300" /><button type="submit">Send</button></form>
+    <span class="sub" id="say-status"></span>
     <span class="toast" id="toast"></span>
   </div>
+
+  <section class="card" style="margin-top:16px">
+    <div class="chat-head"><div><p class="eyebrow">Agent</p><h2>What Annie is thinking</h2></div><span class="sub" id="brainstate">brain off</span></div>
+    <div class="chat-head"><p class="eyebrow">Conversation</p><label class="tts"><input type="checkbox" id="tts" /> Read replies aloud</label></div>
+    <div class="chat" id="chat" aria-live="polite"></div>
+    <details>
+      <summary class="sub" style="cursor:pointer">Diagnostics · agent log, missions and latency</summary>
+      <div class="grid two" style="margin-top:12px">
+        <div class="card" style="border-radius:14px">
+          <div class="card-head"><div><p class="eyebrow">Pipeline</p><h2 style="font-size:16px">Latency</h2></div><span class="sub" id="ctrl">Safety checks: waiting</span></div>
+          <div class="spark" id="spark"></div>
+        </div>
+        <div>
+          <div class="log" id="log"></div>
+          <table id="missions"><thead><tr><th>Mission</th><th>State</th><th>Duration</th><th>Details</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </details>
+  </section>
+
   <footer><span>Software stop: cancels the mission and sends StopMove; it is not a hardware emergency stop.</span>
     <a href="/status.json" target="_blank">status.json</a><a href="/telemetry.json" target="_blank">telemetry.json</a><a href="/graph.json" target="_blank">graph.json</a></footer>
 </main>
@@ -156,18 +181,150 @@
   // Body token: prefer the URL fragment (#token=...), which never reaches the server or its logs; ?token= still works.
   var token = new URLSearchParams(location.hash.replace(/^#/, "")).get("token") || new URLSearchParams(location.search).get("token") || "";
   var headers = { "Content-Type": "application/json" }; if (token) headers["X-Body-Token"] = token;
+  // Operator messages shown in the conversation, kept in this browser only (localStorage).
+  var CHAT_KEY = "annie_cc_chat", seenDialogue = {}, myMsgs = [];
+  try { myMsgs = JSON.parse(localStorage.getItem(CHAT_KEY) || "[]"); } catch (e) { myMsgs = []; }
+  if (!Array.isArray(myMsgs)) myMsgs = [];
+  myMsgs = myMsgs.filter(function (m) { return m && typeof m.text === "string" && typeof m.at === "number"; }).slice(-60);
   function toast(msg, bad) { var t = $("toast"); t.textContent = msg; t.style.color = bad ? "var(--alert)" : "var(--muted)"; }
-  window.act = function (a) {
-    fetch("/command", { method: "POST", headers: headers, body: JSON.stringify({ action: a }) })
-      .then(function (r) { toast(r.ok ? a + " sent" : a + " refused (" + r.status + ")", !r.ok); }).catch(function () { toast("not reachable", true); });
+  function uuid() { return (crypto.randomUUID ? crypto.randomUUID() : "op-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10)); }
+  function describeReceipt(name, rec) {
+    if (rec.state === "completed") {
+      var res = rec.result || {}, bits = [];
+      if (res.steps != null) bits.push(res.steps + " step(s)");
+      if (res.note) bits.push(res.note);
+      if (res.reply) bits.push('"' + res.reply + '"');
+      return name + " completed" + (bits.length ? ": " + bits.join(" · ") : "");
+    }
+    if (rec.state === "failed") return name + " FAILED: " + (rec.error || "no detail");
+    return name + " " + rec.state;
+  }
+  function trackReceipt(btn, name, cid) {
+    pollReceipt(cid, function (rec) {
+      var done = rec.state === "unknown" ? name + ": outcome unknown — " + rec.error : describeReceipt(name, rec);
+      var bad = rec.state !== "completed";
+      toast(done, bad);
+      if (btn) { btn.disabled = false; btn.dataset.busy = ""; }
+    });
+  }
+  // Explicit actions go through the MissionBoard body-command contract (POST /command {command_id,name,args}),
+  // then correlate the receipt via GET /command/{id} — the same surface the family errand uses.
+  window.act = function (name, args, btn) {
+    // "scan" (Look around) has no body-command contract; it keeps the legacy control-mode {action} POST.
+    var legacy = name === "scan";
+    var body = legacy ? { action: name } : { command_id: uuid(), name: name, args: args || {} };
+    if (btn && name !== "stop") { btn.disabled = true; btn.dataset.busy = "1"; } // Stop stays clickable: never block an urgent repeat stop
+    fetchBounded("/command", { method: "POST", headers: headers, body: JSON.stringify(body) })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          if (legacy) {
+            if (btn) { btn.disabled = false; btn.dataset.busy = ""; }
+            toast(r.status === 202 ? name + " accepted (legacy, no receipt)" : name + " refused: " + ((j && j.error) || r.status), r.status !== 202);
+            return;
+          }
+          if (r.status === 202 && j.command_id) { toast(name + " accepted"); trackReceipt(btn, name, j.command_id); return; }
+          if (btn) { btn.disabled = false; btn.dataset.busy = ""; }
+          var why = (j && j.error) || "refused " + r.status;
+          toast(name + " refused: " + why, true);
+        });
+      })
+      .catch(function () {
+        if (legacy) { toast("outcome unknown: connection lost", true); return; }
+        toast(name + ": connection problem; checking receipt", true);
+        trackReceipt(btn, name, body.command_id);
+      });
   };
+  function setSayStatus(html) { $("say-status").innerHTML = html || ""; }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function fetchBounded(url, opts) { // command POSTs and receipt GETs get 10 s; other polling keeps default behaviour
+    opts = opts || {};
+    var c = new AbortController(), t = setTimeout(function () { c.abort(); }, 10000);
+    opts.signal = c.signal;
+    return fetch(url, opts).finally(function () { clearTimeout(t); });
+  }
+  // Terminal poll: server receipt, or "unknown" on 404/401/403 (receipt gone / bad token), 5xx, or ~120 s
+  // of network errors. The command may still run server-side; we stop claiming we know.
+  function pollReceipt(cid, onDone, t0) {
+    t0 = t0 || Date.now();
+    fetchBounded("/command/" + encodeURIComponent(cid), { headers: headers, method: "GET" }).then(function (r) {
+      if (r.status === 404 || r.status === 401 || r.status === 403) return { __permanent: true };
+      return r.ok ? r.json() : { __transient: true };
+    }).then(function (j) {
+      if (j && !j.__permanent && !j.__transient && (j.state === "completed" || j.state === "failed" || j.state === "cancelled")) return onDone(j);
+      if (j && j.__permanent) return onDone({ state: "unknown", error: "receipt unavailable (not found or not authorised); it may still run server-side" });
+      if (Date.now() - t0 > 120000) return onDone({ state: "unknown", error: "no receipt after 120 s; it may still run server-side" });
+      setTimeout(function () { pollReceipt(cid, onDone, t0); }, 700);
+    }).catch(function () {
+      if (Date.now() - t0 > 120000) return onDone({ state: "unknown", error: "connection lost; receipt unknown" });
+      setTimeout(function () { pollReceipt(cid, onDone, t0); }, 1500);
+    });
+  }
   window.say = function (e) {
-    e.preventDefault(); var text = $("saytext").value.trim(); if (!text) return false;
-    fetch("/command", { method: "POST", headers: headers, body: JSON.stringify({ name: "instruct", args: { text: text, author: "operator" } }) })
-      .then(function (r) { return r.json().then(function (j) { toast(r.status === 202 ? "planning…" : (j.error || ("refused " + r.status)), r.status !== 202); }); })
-      .catch(function () { toast("not reachable", true); });
-    $("saytext").value = ""; return false;
+    e.preventDefault(); var input = $("saytext"), text = input.value.trim(); if (!text) return false;
+    if (input.dataset.sending === "1") return false; // one POST at a time: no duplicate instruct missions
+    input.dataset.sending = "1";
+    var cid = uuid(), sentText = text; // client id: the receipt stays addressable and retries stay idempotent
+    setSayStatus("sending…");
+    fetchBounded("/command", { method: "POST", headers: headers, body: JSON.stringify({ command_id: cid, name: "instruct", args: { text: text, author: "operator" } }) })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          input.dataset.sending = "";
+          if (r.status !== 202) { setSayStatus('<span style="color:var(--alert)">refused ' + r.status + (j && j.error ? ": " + esc(j.error) : "") + " — your text is kept, send again</span>"); toast("not accepted (" + r.status + ")", true); return; }
+          if (input.value === sentText) input.value = ""; // keep a newer draft the operator started meanwhile
+          myMsgs.push({ text: sentText, at: Date.now(), cid: cid });
+          try { localStorage.setItem(CHAT_KEY, JSON.stringify(myMsgs.slice(-60))); } catch (e2) {}
+          setSayStatus("accepted · queued");
+          pollReceipt(cid, function (rec) {
+            if (rec.state === "completed") setSayStatus("instruction completed" + (rec.result && rec.result.steps != null ? " · " + rec.result.steps + " step(s)" : ""));
+            else if (rec.state === "failed") setSayStatus('<span style="color:var(--alert)">instruction failed: ' + esc(String(rec.error || "no detail")) + "</span>");
+            else if (rec.state === "unknown") setSayStatus('<span style="color:var(--alert)">outcome unknown: ' + esc(rec.error) + "</span>");
+            else setSayStatus("instruction " + rec.state);
+          });
+        });
+      })
+      .catch(function () {
+        // Timeout/network error: the POST may still have landed (same command_id is idempotent).
+        // Do not invite a duplicate send; poll the receipt and report the real outcome.
+        setSayStatus("connection problem — checking whether it was accepted…");
+        pollReceipt(cid, function (rec) {
+          input.dataset.sending = "";
+          if (rec.state === "completed") { setSayStatus("instruction completed" + (rec.result && rec.result.steps != null ? " · " + rec.result.steps + " step(s)" : "")); toast("instruction completed"); }
+          else if (rec.state === "failed") { setSayStatus('<span style="color:var(--alert)">instruction failed: ' + esc(String(rec.error || "no detail")) + "</span>"); toast("instruction failed", true); }
+          else if (rec.state === "cancelled") setSayStatus("instruction " + rec.state);
+          else setSayStatus('<span style="color:var(--alert)">outcome unknown: ' + esc(rec.error || "receipt unavailable") + "</span>");
+        });
+      });
+    return false;
   };
+
+  // ---------- conversation: server dialogue (deduped by id) + this browser's operator messages ----------
+  var chatOrder = [];
+  function rebuildChat(t) {
+    // Render the CURRENT dialogue window on every poll; seenDialogue only gates TTS replay.
+    // Identity is id+at_ms; no epoch reset: a restarted source simply re-lists lines with fresh timestamps.
+    var list = (t.dialogue || []).filter(function (d) { return d && d.id != null; });
+    list.forEach(function (d) {
+      var key = d.id + "@" + (d.at_ms || 0);
+      if (!seenDialogue[key]) {
+        seenDialogue[key] = true;
+        if (d.role === "annie" && d.source === "simulation" && d.mocked && $("tts").checked) {
+          try { var u = new SpeechSynthesisUtterance(d.text || ""); speechSynthesis.speak(u); } catch (e3) {}
+        }
+      }
+    });
+    chatOrder = myMsgs.map(function (m) { return { kind: "me", at: m.at, m: m }; })
+      .concat(list.map(function (d) { return { kind: "d", at: d.at_ms || 0, d: d }; }));
+    chatOrder.sort(function (a, b) { return a.at - b.at; });
+    chatOrder = chatOrder.slice(-80);
+    var sim = t.source === "simulation";
+    $("chat").innerHTML = chatOrder.map(function (it) {
+      if (it.kind === "me") return '<div class="msg operator"><span class="who">you</span><span class="mtext">' + esc(it.m.text) + '</span><span class="mtime">' + new Date(it.m.at).toLocaleTimeString() + "</span></div>";
+      var d = it.d, who = d.role === "resident" ? "resident" : "annie";
+      var mock = sim && d.mocked ? ' <span class="badge">scripted</span>' : "";
+      return '<div class="msg ' + who + '"><span class="who">' + who + '</span><span class="mtext">' + esc(d.text || "") + mock + '</span><span class="mtime">' + (d.at_ms ? new Date(d.at_ms).toLocaleTimeString() : "") + "</span></div>";
+    }).join("") || '<div class="msg"><span class="who">—</span><span class="sub">no conversation yet</span></div>';
+    $("chat").scrollTop = $("chat").scrollHeight;
+  }
 
   // ---------- camera + map streams ----------
   var cam = $("cam"); cam.onerror = function () { setTimeout(function () { cam.src = "/stream.mjpg?" + Date.now(); }, 800); };
@@ -440,11 +597,22 @@
     var ob = $("objects"); ob.hidden = !(t.objects && t.objects.length); ob.textContent = (t.objects || []).join(", ");
     var r = s.ranges || {}; $("r-front").innerHTML = fmtRange(r.front); $("r-left").innerHTML = fmtRange(r.left); $("r-right").innerHTML = fmtRange(r.right);
     $("home").innerHTML = (s.home_m || 0).toFixed(1) + "<small> m</small>"; $("greetings").textContent = s.greetings || 0; $("checkins").textContent = s.checkins || 0;
-    if (s.diag) { feedSparks(s.diag); $("ctrl").textContent = (s.diag.control_hz || 0).toFixed(1) + " Hz control"; }
+    if (s.diag) {
+      feedSparks(s.diag);
+      var checks = s.diag.safety_hz, gap = s.diag.safety_max_gap_ms;
+      $("ctrl").textContent = (checks == null ? "Safety checks: unavailable" : checks.toFixed(1) + " Hz safety checks")
+        + " · " + (s.diag.control_hz || 0).toFixed(1) + " Hz behaviour"
+        + (gap == null ? "" : " · " + gap.toFixed(0) + " ms max check gap");
+      $("ctrl").title = "Actual safety evaluations, outer behaviour updates, and worst recent check gap. Speech and tricks pause behaviour updates. These are software measurements, not hardware stop guarantees.";
+    }
     if (t.map && !mapMeta) { mapMeta = t.map; if (window.THREE) setFloor(mapMeta); }
     var fr = t.frontier || {}; $("goal").textContent = fr.goal ? fr.goal[0].toFixed(1) + ", " + fr.goal[1].toFixed(1) : (fr.available ? "none" : "off");
     $("places").textContent = t.places != null ? t.places : 0;
-    $("brainstate").textContent = t.brain && t.brain.enabled ? "local VLM every " + (t.brain.period_s || 0) + " s" : "brain off";
+    $("brainstate").textContent = t.brain && t.brain.enabled ? "local VLM every " + (t.brain.period_s || 0) + " s" : "rule-based planner";
+    var sp = $("srcpill"); sp.hidden = t.source !== "simulation"; sp.textContent = "SIMULATION";
+    var cm = $("controlmode");
+    if (t.control_mode) { cm.hidden = false; cm.textContent = t.control_mode === "manual" ? "MANUAL" : "AUTONOMOUS"; cm.className = "pill" + (t.control_mode === "manual" ? "" : " on"); } else { cm.hidden = true; }
+    rebuildChat(t);
     var rows = [];
     (t.brain && t.brain.decisions || []).forEach(function (d) { rows.push([d.t_s, "brain", d.action + (d.reason ? " — " + d.reason : "")]); });
     (t.voice && t.voice.commands || []).forEach(function (v) { rows.push([v.t_s, "voice", v.intent + (v.text ? ' "' + v.text + '"' : "")]); });

@@ -1,0 +1,292 @@
+{
+  "source": "iOS Simulator app -> actual loopback family API -> errand -> MuJoCo kinematic Go2",
+  "audio": "mock scripted reply",
+  "native_ui_actions": [
+    "Remind Charge your phone",
+    "Go explore",
+    "Pause",
+    "Hello Annie",
+    "Tell Grandma I am thinking of her"
+  ],
+  "final_native_run": {
+    "run_id": "816997b0-a066-4f6d-82ce-703ddc460d5f",
+    "author_id": "zach",
+    "text": "Tell Grandma I am thinking of her",
+    "status": "completed",
+    "created_at": 1789905387094,
+    "updated_at": 1789905388661,
+    "events": [
+      {
+        "event_id": "5f4a5e44-9238-476a-bdca-45e9b441b7d1",
+        "run_id": "816997b0-a066-4f6d-82ce-703ddc460d5f",
+        "kind": "navigating",
+        "payload": {
+          "detail": "Looking for Jeanine.",
+          "intent": "relay",
+          "target": "Jeanine"
+        },
+        "at": 1789905387119,
+        "summary": "Looking for Jeanine.",
+        "speaker": "system"
+      },
+      {
+        "event_id": "4e44aa7d-917c-45cc-ab83-385211f3e386",
+        "run_id": "816997b0-a066-4f6d-82ce-703ddc460d5f",
+        "kind": "arrived",
+        "payload": {
+          "detail": "Found Jeanine."
+        },
+        "at": 1789905387642,
+        "summary": "Found Jeanine.",
+        "speaker": "system"
+      },
+      {
+        "event_id": "1f550ccc-4079-436d-891d-d048a03cff13",
+        "run_id": "816997b0-a066-4f6d-82ce-703ddc460d5f",
+        "kind": "speaking",
+        "payload": {
+          "text": "Jeanine, it's Annie. Zach asked me to pass this along: \"I am thinking of her\""
+        },
+        "at": 1789905388149,
+        "summary": "Jeanine, it's Annie. Zach asked me to pass this along: \"I am thinking of her\"",
+        "speaker": "annie"
+      },
+      {
+        "event_id": "3fae93e7-7875-436e-bb18-234d068802b5",
+        "run_id": "816997b0-a066-4f6d-82ce-703ddc460d5f",
+        "kind": "listening",
+        "payload": {},
+        "at": 1789905388149,
+        "summary": "Listening for a reply\u2026",
+        "speaker": "system"
+      },
+      {
+        "event_id": "f0b730c2-fcdc-4ef1-bf27-8257fc7b865e",
+        "run_id": "816997b0-a066-4f6d-82ce-703ddc460d5f",
+        "kind": "heard",
+        "payload": {
+          "transcript": "okay thank you"
+        },
+        "at": 1789905388656,
+        "summary": "okay thank you",
+        "speaker": "resident"
+      },
+      {
+        "event_id": "3c1af9c4-10c4-4b57-9465-1da935df4894",
+        "run_id": "816997b0-a066-4f6d-82ce-703ddc460d5f",
+        "kind": "completed",
+        "payload": {
+          "detail": "Jeanine said: \"okay thank you\"",
+          "reply": "unclear",
+          "mood": "neutral"
+        },
+        "at": 1789905388656,
+        "summary": "Jeanine said: \"okay thank you\"",
+        "speaker": "system"
+      }
+    ],
+    "reminder_id": null,
+    "outcome": {
+      "type": "message_response",
+      "delivered": true,
+      "reply": "unclear",
+      "detail": "Jeanine said: \"okay thank you\""
+    }
+  },
+  "rehearsal": {
+    "cli": "robot/rehearse_sim.py",
+    "started_utc": "2026-09-20T11:54:39Z",
+    "source": "simulation",
+    "model": "off: no model/provider calls; errand planning is deterministic keyword matching",
+    "audio": "mock: dog /voice reports mocked simulation audio; expected reply 'okay thank you'",
+    "motion_claim": "none: telemetry samples are recorded evidence; acceptance asserts the delivery workflow, not locomotion",
+    "config": {
+      "app": "http://127.0.0.1:8120",
+      "errand": "http://127.0.0.1:8110",
+      "dog": "http://127.0.0.1:8111",
+      "deliveries": 5,
+      "author": "zach",
+      "text_base": "tell Grandma to charge your phone",
+      "mock_transcript": "okay thank you",
+      "run_timeout_s": 60.0,
+      "api_token_used": false
+    },
+    "gate": {
+      "passed": true,
+      "telemetry_source": "simulation",
+      "app_dog_status_source": "simulation",
+      "voice": {
+        "source": "simulation",
+        "mocked": true
+      },
+      "failure_reasons": []
+    },
+    "deliveries": [
+      {
+        "index": 0,
+        "text": "tell Grandma to charge your phone [rehearsal 1]",
+        "run_id": "0996e70c-9da7-4c04-b8c6-fcdaee1a3c7d",
+        "status": "completed",
+        "events": [
+          "navigating",
+          "arrived",
+          "speaking",
+          "listening",
+          "heard",
+          "completed"
+        ],
+        "heard_transcripts": [
+          "okay thank you"
+        ],
+        "elapsed_s": 9.801,
+        "failure_reasons": []
+      },
+      {
+        "index": 1,
+        "text": "tell Grandma to charge your phone [rehearsal 2]",
+        "run_id": "250fd32f-c203-496d-a826-4c83334b5c0d",
+        "status": "completed",
+        "events": [
+          "navigating",
+          "arrived",
+          "speaking",
+          "listening",
+          "heard",
+          "completed"
+        ],
+        "heard_transcripts": [
+          "okay thank you"
+        ],
+        "elapsed_s": 1.795,
+        "failure_reasons": []
+      },
+      {
+        "index": 2,
+        "text": "tell Grandma to charge your phone [rehearsal 3]",
+        "run_id": "8295bab6-c59e-434b-8fa9-491d7a384d7a",
+        "status": "completed",
+        "events": [
+          "navigating",
+          "arrived",
+          "speaking",
+          "listening",
+          "heard",
+          "completed"
+        ],
+        "heard_transcripts": [
+          "okay thank you"
+        ],
+        "elapsed_s": 1.542,
+        "failure_reasons": []
+      },
+      {
+        "index": 3,
+        "text": "tell Grandma to charge your phone [rehearsal 4]",
+        "run_id": "382e38f3-2ec7-4d04-a196-eff527a05891",
+        "status": "completed",
+        "events": [
+          "navigating",
+          "arrived",
+          "speaking",
+          "listening",
+          "heard",
+          "completed"
+        ],
+        "heard_transcripts": [
+          "okay thank you"
+        ],
+        "elapsed_s": 1.793,
+        "failure_reasons": []
+      },
+      {
+        "index": 4,
+        "text": "tell Grandma to charge your phone [rehearsal 5]",
+        "run_id": "df92268a-61b4-439a-86a7-60cd7f40c27a",
+        "status": "completed",
+        "events": [
+          "navigating",
+          "arrived",
+          "speaking",
+          "listening",
+          "heard",
+          "completed"
+        ],
+        "heard_transcripts": [
+          "okay thank you"
+        ],
+        "elapsed_s": 1.789,
+        "failure_reasons": []
+      }
+    ],
+    "pause_drill": {
+      "duplicate_run_id_matches": true,
+      "queued_run_id": "fc544267-8ece-40d4-8e00-7dc66faa8ffe",
+      "cancelled_runs": [
+        "93a0577f-4554-4a81-afe3-2e8fa80db4e7",
+        "fc544267-8ece-40d4-8e00-7dc66faa8ffe"
+      ],
+      "stop_confirmed": true,
+      "paused": true,
+      "observed_replay": false,
+      "statuses_after_pause": {
+        "93a0577f-4554-4a81-afe3-2e8fa80db4e7": "cancelled",
+        "fc544267-8ece-40d4-8e00-7dc66faa8ffe": "cancelled"
+      },
+      "fresh_run_id": "9dc04e4f-b8bb-4cea-b41a-aeb01d22ebef",
+      "elapsed_s": 0.157,
+      "failure_reasons": []
+    },
+    "telemetry": {
+      "note": "direct sampled evidence; displacement below is inferred, not measured locomotion",
+      "direct_samples": {
+        "before": {
+          "sampled": true,
+          "pose": {
+            "x": -2.6,
+            "y": -1.25,
+            "yaw": 0.6108652381980155
+          },
+          "t_s": 13.049577874946408,
+          "track_count": 2,
+          "fps": 9.666666666666666,
+          "spacetime_counts": {
+            "poses_total": 64,
+            "frames_total": 21,
+            "people_total": 45,
+            "poses": 64,
+            "frames": 21,
+            "people": 45,
+            "points": 8400
+          }
+        },
+        "after": {
+          "sampled": true,
+          "pose": {
+            "x": -2.066718219426513,
+            "y": 0.10408900396547816,
+            "yaw": 1.150721871787649
+          },
+          "t_s": 36.85902708291542,
+          "track_count": 1,
+          "fps": 9.333333333333334,
+          "spacetime_counts": {
+            "poses_total": 167,
+            "frames_total": 61,
+            "people_total": 96,
+            "poses": 167,
+            "frames": 61,
+            "people": 96,
+            "points": 24400
+          }
+        }
+      },
+      "inferred_movement": {
+        "method": "pose difference between start/end samples; inferred, not a locomotion measurement",
+        "pose_displacement_m": 1.4553
+      }
+    },
+    "failure_reasons": [],
+    "exit_code": 0,
+    "elapsed_total_s": 23.957
+  }
+}

@@ -192,14 +192,20 @@ def test_follow_walks_toward_a_person_and_records_follow_mode():
     assert report["greetings"] == []  # too far/small to greet
 
 
-def test_close_centred_person_is_greeted_with_a_trick():
+def test_close_centred_person_is_greeted_with_a_trick(monkeypatch):
+    # Fake firmware completes immediately; compress only its fixed settle delays.
+    # Keep telemetry/control ticks real so safety checks still observe live data.
+    original_sleep = asyncio.sleep
+    async def quick_settle(delay):
+        await original_sleep(0.01 if delay >= 0.5 else delay)
+    monkeypatch.setattr(asyncio, "sleep", quick_settle)
     class Close(PersonTracker_):
         def update(self, jpeg, now_ms):
             self.updates += 1
             return [{"track_id": 4, "box": [280, 60, 360, 330], "conf": 0.9, "posture": "upright", "lying_frames": 0,
                      "kp_conf": [0.9] * 17, "first_seen_ms": now_ms - 1000}]
     dog = FakeDog(wall_x=None)
-    go2_patrol_greet.GREET_TRICKS[0] = ("hello", 1016, 0.0)
+    monkeypatch.setattr(go2_patrol_greet, "GREET_TRICKS", [("hello", 1016, 0.0)] + list(go2_patrol_greet.GREET_TRICKS[1:]))
     report = run(dog, duration_s=0.5, tracker=Close())
     assert report["reason"] == "duration_complete", report.get("error")
     assert len(report["greetings"]) == 1 and report["greetings"][0]["trick"] == "hello"
@@ -224,6 +230,10 @@ class RedShirtTracker(PersonTracker_):
 
 
 def test_find_person_mission_walks_up_to_the_named_person_and_completes():
+    class SuppliedIdentity:
+        # The fake tracker supplies synthetic identity evidence; its zero image has no red shirt.
+        def apply(self, img, tracks):
+            return tracks
     dog = FakeDog(wall_x=None)
     tracker = RedShirtTracker(dog)
     view = go2_patrol_greet.LiveView(port=0)
@@ -234,7 +244,7 @@ def test_find_person_mission_walks_up_to_the_named_person_and_completes():
             encoder=lambda frame: (b"", 640, 480), speak=lambda text: None, status=lambda text: None,
             planner=PatrolPlanner(cruise_mps=0.25, turn_rps=0.5, backoff_s=0.03, min_turn_s=0.02, leash_m=50.0),
             stall=StallDetector(window_s=0.05, min_progress_m=0.02), rate_hz=200.0, stale_s=0.2, lidar_stale_s=0.2,
-            boundary_m=100.0, voxel_min_interval_s=0.0, bandit=StraightBandit(), frontier_planner=None, view=view,
+            boundary_m=100.0, voxel_min_interval_s=0.0, bandit=StraightBandit(), frontier_planner=None, view=view, identifier=SuppliedIdentity(),
             duration_s=1.5))
         while getattr(view, "missions", None) is None:
             await asyncio.sleep(0.01)

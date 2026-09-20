@@ -1,0 +1,41 @@
+{
+  "date": "2026-09-20",
+  "simulation": {
+    "source": "simulation",
+    "audio": "mock",
+    "entrypoint": "family HTTP API; native app observed via live refresh",
+    "duplicate_reused_run_id": true,
+    "pause": {
+      "before": "running",
+      "after": "cancelled",
+      "stop_confirmed": true,
+      "latency_ms": 123.2
+    },
+    "fresh_explicit_request": {
+      "status": "completed",
+      "elapsed_s": 24.909,
+      "events": [
+        "navigating",
+        "arrived",
+        "speaking",
+        "listening",
+        "heard",
+        "completed"
+      ],
+      "outcome": {
+        "type": "message_response",
+        "delivered": true,
+        "reply": "unclear",
+        "detail": "Jeanine said: \"okay thank you\""
+      }
+    }
+  },
+  "physical_pause": {
+    "source": "hardware",
+    "latency_ms": 129.7,
+    "stop_confirmed": true,
+    "paused_after": true,
+    "claim": "Software acknowledgment; not a physical stopping-distance measurement."
+  },
+  "ui_limit": "API-driven native view verified; direct button interaction and physical iPhone launch still require unlocked devices."
+}

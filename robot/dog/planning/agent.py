@@ -162,9 +162,89 @@ def _first_name(text: str):
     return m.group(1) if m else None
 
 
+
+def _conversation_reply(text: str, sit: dict) -> str | None:
+    """Recognize direct conversation without inferring a movement request."""
+    low = re.sub(r"[.!?,]+", "", text.lower()).strip()
+    low = re.sub(r"^annie\s+|\s+annie$", "", low).strip()
+    if low in {"hello", "hi", "hey", "hello there"}:
+        return "Hello! I'm here. What would you like to talk about?"
+    if low in {"how are you", "how are you doing", "are you okay", "are you ok"}:
+        return "I'm here and ready to help. How are you?"
+    if low in {"what do you see", "what can you see", "who do you see", "who can you see"}:
+        people = sit.get("people_in_view") or []
+        if not people:
+            return "I don't have anyone in my current camera view."
+        names = [str(p.get("name") or "someone I haven't identified") for p in people[:4]]
+        return ("In my current camera view, I see " + ", ".join(names) + ".")[:300]
+    if low in {"are you paused", "what are you doing", "what are you doing now", "what is your status"}:
+        mode = sit.get("mode")
+        if not mode or mode == "-":
+            return "I don't have a current activity status to report."
+        return f"My current activity is {str(mode).replace('_', ' ')}."[:300]
+    return None
+
+
+def _direct_speech_plan(text: str) -> dict | None:
+    """Keep resident-directed speech distinct from literal speaker instructions."""
+    aliases = "|".join(_NAMES)
+    prefix = r"(?:please\s+)?(?:go\s+)?"
+    greeting = re.fullmatch(prefix + rf"say\s+(hi|hello)\s+to\s+(?:my\s+)?({aliases})(?:\s+for me)?[.!?]*", text, re.I)
+    relay = re.fullmatch(prefix + rf"(?:tell|say to)\s+(?:my\s+)?({aliases})\s+(?:to\s+|that\s+)?(.+)", text, re.I)
+    if greeting or relay:
+        target = _NAMES[(greeting.group(2) if greeting else relay.group(1)).lower()]
+        message = f"Hello {target}! How are you?" if greeting else f"Hi {target}, {relay.group(2).strip().rstrip('.')}."
+        return {"reply": f"Going to speak with {target}.", "source": "rules", "steps": [
+            {"name": "find_person", "args": {"name": target}},
+            {"name": "say", "args": {"text": message[:300]}},
+            {"name": "listen", "args": {"max_s": 8}}]}
+    literal = re.fullmatch(r"(?:please\s+)?say\s+(.+)", text, re.I)
+    if literal and not re.match(r"(?:hi|hello)\s+to\s+|to\s+", literal.group(1), re.I):
+        message = literal.group(1).strip()[:300]
+        return {"reply": "Saying it.", "source": "rules", "steps": [{"name": "say", "args": {"text": message}}]}
+    return None
+
+
+def _negated_action_plan(text: str) -> dict | None:
+    # A negated instruction is not permission to execute the positive keyword.
+    # Compound instructions stay rejected too: partial execution changes intent.
+    if re.search(r"\b(?:don['’]?t|do\s+not|never|not\s+to)\s+(?:(?:please|ever)\s+)?"
+                 r"(?:stop|halt|freeze|dance|walk|go|come|head|move|turn|look|find|greet|wave|"
+                 r"sit|stand|get\s+up|patrol|explore|wander|check|say|tell|remind|stretch)\b", text, re.I):
+        return {"reply": "I won't carry out that action. Please give me a positive instruction if you want me to do something else.",
+                "steps": [], "source": "rules"}
+    return None
+
+
+_STEP_COUNT_REPLY = "I can move by distance, but I cannot count footsteps. Try “walk forward 1 m”."
+_STEP_UNIT = re.compile(r"\b(?:foot\s?steps?|steps?|paces?|strides?)\b", re.I)
+_STEP_COUNT_MOVE = re.compile(
+    r"\b(?:walk|go|move|step|take|come|head)\b|\b(?:forward|ahead|back|backwards?)\b", re.I)
+
+
+def _step_count_plan(text: str) -> dict | None:
+    # The body walks by metres only, and no steps-to-metres conversion is
+    # honest. Reject the request before any model sees it; never partly run it.
+    if _STEP_UNIT.search(text) and _STEP_COUNT_MOVE.search(text):
+        return {"reply": _STEP_COUNT_REPLY, "steps": [], "source": "rules"}
+    return None
+
+
 def rule_plan(text: str, sit: dict | None = None) -> dict:
     """Keyword fallback: a handful of instructions that must work without any model."""
     t = text.strip()
+    conversation = _conversation_reply(t, sit or {})
+    if conversation is not None:
+        return {"reply": conversation, "steps": [{"name": "say", "args": {"text": conversation}}], "source": "rules"}
+    direct = _direct_speech_plan(t)
+    if direct is not None:
+        return direct
+    negated = _negated_action_plan(t)
+    if negated is not None:
+        return negated
+    step_reject = _step_count_plan(t)
+    if step_reject is not None:
+        return step_reject
     low = t.lower()
     name = _first_name(t)
     steps, reply = [], ""
@@ -300,8 +380,15 @@ def plan_instruction(text: str, sit: dict, *, inference=None, validate_command=N
     text = (text or "").strip()[:300]
     if not text:
         return {"reply": "Say what you want Annie to do.", "steps": [], "source": "none", "rejected": []}
-    out, latency = None, None
-    if inference is not None:
+    # Bounded intents cannot acquire movement or lose a recipient through a model.
+    conversation = _conversation_reply(text, sit)
+    out = rule_plan(text, sit) if conversation is not None else _direct_speech_plan(text)
+    if out is None:
+        out = _negated_action_plan(text)
+    if out is None:
+        out = _step_count_plan(text)
+    latency = None
+    if inference is not None and out is None:
         try:
             resp = inference.chat([{"role": "system", "content": SYSTEM_PROMPT},
                                    {"role": "user", "content": f"Situation:\n{describe(sit)}\n\nInstruction: {text}\nJSON only."}],

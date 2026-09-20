@@ -11,6 +11,7 @@ starts and finishes. Validation is the body's (`go2_body.validate_command`).
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -18,6 +19,10 @@ from collections import OrderedDict
 TERMINAL = ("completed", "failed", "cancelled")
 MAX_RECEIPTS = 200
 MAX_WAITING = 8  # overlapping missions queue up to this many; beyond that the body answers 409 busy
+_IMMEDIATE_STOP = re.compile(
+    r"(?:annie[\s,]+)?(?:please\s+)?(?:stop|pause)(?:\s+now)?(?:\s+please)?[.!?]*",
+    re.IGNORECASE,
+)
 
 
 class MissionBoard:
@@ -28,6 +33,8 @@ class MissionBoard:
         self.current: dict | None = None
         self.parent: dict | None = None   # an "instruct" receipt whose planned steps run as child receipts
         self.queue: list[dict] = []
+        self.pending_stops: list[dict] = []
+        self.stop_requested = False
         self.waiting: list[dict] = []     # missions accepted while another runs; started in order (state "queued")
 
     def submit(self, payload) -> tuple[int, dict]:
@@ -37,6 +44,10 @@ class MissionBoard:
             command_id, name, args = validate_command(payload)
         except ValueError as exc:
             return 400, {"error": str(exc)}
+        # Validate the original instruction first, then bypass planning and the waiting queue
+        # only for an unambiguous whole-message stop. Negation and compound requests stay instructions.
+        if name == "instruct" and _IMMEDIATE_STOP.fullmatch(args["text"]):
+            name, args = "stop", {}
         with self.lock:
             if command_id in self.receipts:
                 return 200, dict(self.receipts[command_id])
@@ -51,12 +62,11 @@ class MissionBoard:
                 for w in self.waiting:
                     w["state"], w["error"], w["finished_at_ms"] = "cancelled", "stopped by operator", int(self.clock() * 1000)
                 self.current, self.parent, self.queue, self.waiting = None, None, [], []
-                receipt["state"], receipt["result"] = "completed", {"stop_code": None, "note": "cancelled the mission; the patrol loop sends StopMove"}
-                receipt["finished_at_ms"] = int(self.clock() * 1000)
-                receipt["stop_requested"] = True
+                receipt.update(stop_requested=True, stop_code=None, processed_at_ms=None, ack_ms=None)
                 self._remember(receipt)
+                self.pending_stops.append(receipt)
                 self.stop_requested = True
-                return 200, dict(receipt)
+                return 202, dict(receipt)
             if (self.current is not None and self.current["state"] in ("accepted", "executing")) or self.parent is not None:
                 if len(self.waiting) >= MAX_WAITING:
                     return 409, {"error": "busy", "current": dict(self.current or self.parent), "waiting": len(self.waiting)}
@@ -70,8 +80,6 @@ class MissionBoard:
             self._remember(receipt)
             self.current = receipt
             return 202, dict(receipt)
-
-    stop_requested = False
 
     def _new(self, command_id, name, args):
         return {"command_id": command_id, "name": name, "args": args, "state": "accepted",
@@ -97,6 +105,8 @@ class MissionBoard:
         """The accepted mission to start now (marks it executing), else None. After an instruct's plan was
         chained, its steps come out here one at a time as child receipts."""
         with self.lock:
+            if self.stop_requested:
+                return None
             cur = self.current
             if cur is not None and cur["state"] == "accepted":
                 cur["state"], cur["started_at_ms"] = "executing", int(self.clock() * 1000)
@@ -169,7 +179,26 @@ class MissionBoard:
             parent["finished_at_ms"] = int(self.clock() * 1000)
         self.parent, self.queue = None, []
 
-    def consume_stop(self) -> bool:
+    def take_stops(self) -> list[dict]:
+        """Snapshot only requests covered by the next physical StopMove request."""
         with self.lock:
-            flag, self.stop_requested = self.stop_requested, False
-            return flag
+            pending, self.pending_stops = self.pending_stops, []
+            self.stop_requested = False
+            for receipt in pending:
+                receipt["state"] = "executing"
+                receipt["started_at_ms"] = int(self.clock() * 1000)
+            return pending
+
+    def finish_stops(self, pending, *, code, ack_ms, error=None):
+        """Record software acknowledgment; never claim the robot physically stopped."""
+        with self.lock:
+            processed = int(self.clock() * 1000)
+            for receipt in pending:
+                if receipt["state"] in TERMINAL:
+                    continue
+                failure = error or (None if type(code) is int and code == 0 else "StopMove acknowledgment missing" if code is None else f"StopMove rejected: {code}")
+                result = {"stop_code": code, "processed_at_ms": processed, "ack_ms": ack_ms,
+                          "note": "Software StopMove acknowledgment only; not proof the robot physically stopped."}
+                receipt.update(result)
+                receipt.update(state="failed" if failure else "completed", result=result,
+                               error=failure, finished_at_ms=processed)

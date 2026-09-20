@@ -125,23 +125,12 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-# Singular third person only: "they/them" too often means the pills, not the person.
-_PRONOUNS = [(r"\bshe's\b", "you're"), (r"\bhe's\b", "you're"), (r"\bher\b", "your"), (r"\bhers\b", "yours"),
-             (r"\bshe\b", "you"), (r"\bhe\b", "you"), (r"\bhis\b", "your"), (r"\bhim\b", "you")]
-
-
-def address_to_you(message: str) -> str:
-    """'tell Grandma to plug in her phone' arrives as 'plug in her phone'; said to her it is 'your phone'."""
-    out = message
-    for pat, rep in _PRONOUNS:
-        out = re.sub(pat, lambda m, rep=rep: rep.capitalize() if m.group(0)[0].isupper() else rep, out, flags=re.I)
-    return out
-
-
 def phrase_message(author_name: str, text: str, target: str = RESIDENT) -> str:
     """The exact relay line Annie says. Deterministic; the quote is cut so the whole line fits one `say`."""
     prefix = f"{target}, it's Annie. {author_name.strip()} asked me to pass this along: \""
-    quote = address_to_you(" ".join(text.split()))
+    # These are attributed, quoted words. Pronoun substitution can change whom
+    # the sender meant (and turns object "her" into the ungrammatical "your").
+    quote = " ".join(text.split())
     room = SAY_MAX_CHARS - len(prefix) - 1
     if len(quote) > room:
         quote = quote[:room - 1].rstrip() + "…"

@@ -254,6 +254,20 @@ working robot connection.
   priority StopMove on exit, but its completion and stop-observation issues
   above remain unresolved. Its 45 fake-only tests do not qualify the MCF path
   or prove stopping on hardware. Legacy CLI launches are currently inhibited.
+- `robot/go2_tricks.py`: firmware sport-mode tricks (stand, sit, hello,
+  stretch, dance, flips) by api id, with the 40% floor and a 60% floor for the
+  acrobatic tier. Hello and stretch acknowledged (code 0) on the dog at 50%.
+- `robot/go2_patrol_greet.py`: patrol and greet. Motion from
+  `robot/go2_smart_patrol.py` (LiDAR voxel-map sector ranges + odometry stall
+  detector -> cruise / blocked / backoff / homing), greeting each new upright
+  person with the firmware Hello and host speech, and a check-in question for
+  a lying person. First live run greeted 7 people in 100 s; the LiDAR ranges
+  and stall backoff have only been verified against the simulated dog so far.
+  `--firmware-avoid` additionally switches on the robot's own obstacle-avoid
+  service; `--no-lidar` leaves stall detection as the only collision source.
+- `robot/go2_follow.py`: follow the nearest tracked person by visual servo on
+  the bounding box (turn to centre, walk to a target height, stop when too
+  close). Written and unit-tested; not yet run on the dog.
 - `robot/go2_perception.py`: read-only perception loop. It streams the camera,
   runs the tracked keypoint posture detector on every new frame at 5 Hz, sends
   the latest frame to the local brain `/infer` once per second (one in flight,

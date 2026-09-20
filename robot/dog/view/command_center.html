@@ -33,6 +33,9 @@
   .frame .legend { position:absolute; left:10px; bottom:8px; display:flex; gap:12px; font-size:10px; color:#e8e2dc; background:rgba(22,18,14,.7); padding:4px 10px; border-radius:10px; }
   .frame .legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px; }
   .frame .legend i.ramp { background:linear-gradient(90deg,#3b5bdb,#37b24d,#f5c400,#e03131); width:26px; }
+  .frame .legend i.fadebar { background:linear-gradient(90deg,#ffffff,rgba(255,255,255,.05)); width:26px; }
+  .slider { display:flex; align-items:center; gap:8px; font-size:10px; color:#e8e2dc; background:rgba(22,18,14,.7); padding:4px 10px; border-radius:16px; }
+  .slider input { width:110px; accent-color:#7ad67a; }
   .grid.two { grid-template-columns:minmax(0, 1fr) minmax(0, 1.4fr); margin-top:16px; }
   .frame .corner { position:absolute; left:10px; top:10px; display:flex; gap:6px; }
   .frame .corner-r { position:absolute; right:10px; top:10px; display:flex; gap:6px; }
@@ -98,9 +101,10 @@
     <div class="card">
       <div class="card-head"><div><p class="eyebrow">Space · time</p><h2>What Annie remembers</h2></div><span class="sub"><a href="/spacetime" target="_blank" style="color:var(--green)">scrub time ↗</a></span></div>
       <div class="frame dark" id="space"><canvas id="c3d"></canvas>
-        <div class="corner"><button class="small" id="top">top view</button><button class="small" id="fit">follow</button><button class="small" id="fade">history: 5 min</button></div>
+        <div class="corner"><button class="small" id="top">top view</button><button class="small" id="fit">follow</button>
+          <label class="slider"><span id="fadelabel">history 5 min</span><input type="range" id="fade" min="0" max="100" value="50" /></label></div>
         <span class="hint">drag to orbit · right-drag to pan · wheel to zoom</span>
-        <div class="legend"><span><i style="background:#c9a8a0"></i>walked</span><span><i class="ramp"></i>obstacles, low→high</span><span><i style="background:#7ad67a"></i>path</span><span><i style="background:#5ac8f0"></i>people, fading with age</span></div></div>
+        <div class="legend"><span><i style="background:#c9a8a0"></i>walked</span><span><i class="ramp"></i>obstacles by height</span><span><i class="fadebar"></i>now → old (fades out)</span><span><i style="background:#7ad67a"></i>path</span><span><i style="background:#5ac8f0"></i>people</span></div></div>
       <div class="kv">
         <div><div class="k">voxels</div><div class="v" id="voxels">0</div></div>
         <div><div class="k">trail</div><div class="v" id="trail">0<small> m</small></div></div>
@@ -158,6 +162,8 @@
   // ---------- camera + map streams ----------
   var cam = $("cam"); cam.onerror = function () { setTimeout(function () { cam.src = "/stream.mjpg?" + Date.now(); }, 800); };
   setInterval(function () { cam.src = "/stream.mjpg?" + Date.now(); }, 90000); // re-arm before the browser gives up on the multipart stream
+  function closeStream() { cam.removeAttribute("src"); } // an open multipart stream can wedge the renderer on navigation
+  window.addEventListener("pagehide", closeStream); window.addEventListener("beforeunload", closeStream);
 
   // ---------- sparklines ----------
   var SERIES = [["received_fps", "camera fps", ""], ["processed_fps", "perception fps", ""], ["track_ms", "track", "ms"], ["convert_ms", "convert", "ms"],
@@ -203,8 +209,8 @@
   // marker and label at the last position. Robot: box + heading arrow, green path.
   var canvas = $("c3d"), renderer, scene, camera, points = null, trailLine = null, robot, heading, markers = [], floor = null, floorTex = null;
   var orbit = { target: new THREE.Vector3(0, 0, 0.3), r: 7, theta: -Math.PI / 2 - 0.6, phi: 0.95 }, follow = true;
-  var trail = [], trailLen = 0, lastPose = null, historyS = 300, historyOptions = [60, 300, 900, 3600];
-  var FLOOR = new THREE.Color(0x6c7ab2);
+  var trail = [], trailLen = 0, lastPose = null, historyS = 300;
+  var BG = new THREE.Color(0x0e1216); // things fade into the background as they age: obvious "when did I last see this"
   function init3d() {
     renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     scene = new THREE.Scene(); scene.background = new THREE.Color(0x0e1216);
@@ -251,21 +257,25 @@
   canvas.addEventListener("wheel", function (e) { e.preventDefault(); orbit.r *= Math.exp(e.deltaY * 0.0012); }, { passive: false });
   $("top").onclick = function () { orbit.phi = 0.03; orbit.theta = -Math.PI / 2; };
   $("fit").onclick = function () { follow = true; $("fit").textContent = "following"; if (lastPose) orbit.target.set(lastPose[0], lastPose[1], 0.3); orbit.r = 7; orbit.phi = 0.95; };
-  $("fade").onclick = function () { historyS = historyOptions[(historyOptions.indexOf(historyS) + 1) % historyOptions.length]; $("fade").textContent = "history: " + (historyS >= 3600 ? "1 h" : (historyS / 60) + " min"); pollGraph(); };
+  function sliderToSeconds(v) { return Math.round(30 * Math.pow(120, v / 100)); } // 30 s .. 1 h, log scale
+  function fmtHistory(sec) { return sec < 90 ? sec + " s" : sec < 3600 ? Math.round(sec / 60) + " min" : "1 h"; }
+  historyS = sliderToSeconds(+$("fade").value);
+  $("fade").oninput = function () { historyS = sliderToSeconds(+this.value); $("fadelabel").textContent = "history " + fmtHistory(historyS); };
+  $("fade").onchange = function () { pollGraph(); };
   window.addEventListener("resize", resize);
   function heightColor(z, zmin, zmax) { // low: blue, mid: green/yellow, high: red (the costmap look)
     var u = Math.min(1, Math.max(0, (z - zmin) / Math.max(0.2, zmax - zmin))), c = new THREE.Color();
     c.setHSL((1 - u) * 0.66, 0.85, 0.5); return c;
   }
-  function ageFade(color, ageS) { // gradient fade-out: fresh = full colour, at `historyS` it has sunk into the floor colour
-    var u = Math.min(1, Math.max(0, ageS / historyS)); return color.clone().lerp(FLOOR, 0.15 + 0.75 * u);
+  function ageFade(color, ageS) { // gradient fade-out: fresh = full colour, at `historyS` it has all but vanished
+    var u = Math.min(1, Math.max(0, ageS / historyS)); return color.clone().lerp(BG, 0.92 * Math.pow(u, 0.7));
   }
   function setFloor(meta) { // the occupancy map JPEG becomes the floor: one plane, re-textured every second
     if (!meta || !meta.size_m) return;
     var img = new Image(); img.onload = function () {
       var tex = new THREE.Texture(img); tex.needsUpdate = true; tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter;
       if (!floor) {
-        floor = new THREE.Mesh(new THREE.PlaneGeometry(meta.size_m, meta.size_m), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.92 }));
+        floor = new THREE.Mesh(new THREE.PlaneGeometry(meta.size_m, meta.size_m), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.8 }));
         floor.position.set(meta.origin[0], meta.origin[1], 0.0); scene.add(floor);
       } else { if (floorTex) floorTex.dispose(); floor.material.map = tex; floor.material.needsUpdate = true; }
       floorTex = tex;
@@ -278,18 +288,21 @@
     var pos = new Float32Array(pts.length * 3);
     pts.forEach(function (p, i) { pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2]; });
     var g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    points = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.05, color: 0xffffff, transparent: true, opacity: 0.7 })); scene.add(points);
+    points = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.04, color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false })); scene.add(points);
   }
   var blocks = null, blockCell = 0.2;
-  function setBlocks(vox, now) { // remembered geometry from the knowledge graph as cubes: height colour, age fade
+  function setBlocks(vox, now) { // remembered geometry from the knowledge graph as small dots: height colour, fading with age
     if (blocks) { scene.remove(blocks); blocks.geometry.dispose(); blocks = null; }
-    if (!vox || !vox.length) return;
+    vox = (vox || []).filter(function (v) { return v[5] == null || now - v[5] <= historyS; });
+    if (!vox.length) return;
     var zmin = Infinity, zmax = -Infinity; vox.forEach(function (v) { zmin = Math.min(zmin, v[2]); zmax = Math.max(zmax, v[2]); });
-    var geo = new THREE.BoxGeometry(blockCell * 0.9, blockCell * 0.9, blockCell * 0.9);
-    blocks = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial(), vox.length);
-    var m = new THREE.Matrix4();
-    vox.forEach(function (v, i) { m.makeTranslation(v[0], v[1], v[2]); blocks.setMatrixAt(i, m); blocks.setColorAt(i, ageFade(heightColor(v[2], zmin, zmax), v[5] != null ? now - v[5] : 0)); });
-    blocks.instanceMatrix.needsUpdate = true; if (blocks.instanceColor) blocks.instanceColor.needsUpdate = true;
+    var pos = new Float32Array(vox.length * 3), col = new Float32Array(vox.length * 3);
+    vox.forEach(function (v, i) {
+      pos[i * 3] = v[0]; pos[i * 3 + 1] = v[1]; pos[i * 3 + 2] = v[2];
+      var c = ageFade(heightColor(v[2], zmin, zmax), v[5] != null ? now - v[5] : 0); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    });
+    var g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    blocks = new THREE.Points(g, new THREE.PointsMaterial({ size: blockCell * 0.55, vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
     scene.add(blocks);
   }
   function setTrail() {
@@ -305,12 +318,12 @@
     ctx.fillStyle = alert ? "#a33a2e" : "rgba(255,255,255,.92)"; ctx.strokeStyle = alert ? "#a33a2e" : "#455a64"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.roundRect ? ctx.roundRect(2, 2, w - 4, 40, 20) : ctx.rect(2, 2, w - 4, 40); ctx.fill(); ctx.stroke();
     ctx.font = "600 26px -apple-system, Helvetica, sans-serif"; ctx.fillStyle = alert ? "#fff" : "#000"; ctx.textBaseline = "middle"; ctx.fillText(text, 14, 23);
-    var s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false })); s.scale.set(w / 150, 44 / 150, 1); return s;
+    var s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false })); s.scale.set(w / 190, 44 / 190, 1); return s;
   }
   var PERSON = new THREE.Color(0x5ac8f0), OBJECT = new THREE.Color(0xf5c400), DOWN = new THREE.Color(0xe03131);
   function setEntities(ents, now) { // graph entities: a fading trail per person/object plus a small marker + label at the last sighting
     markers.forEach(function (m) { scene.remove(m); if (m.geometry) m.geometry.dispose(); }); markers = [];
-    var shown = 0, labelled = 0, MAX_LABELS = 6;
+    var shown = 0, labelled = 0, MAX_LABELS = 4;
     var list = (ents || []).filter(function (e) { return e.last_seen != null && now - e.last_seen <= historyS; })
       .sort(function (a, b) { return (b.identity ? 1 : 0) - (a.identity ? 1 : 0) || b.last_seen - a.last_seen; });
     list.forEach(function (e) {
@@ -321,10 +334,10 @@
         track.forEach(function (s, i) { pos[i * 3] = s[1]; pos[i * 3 + 1] = s[2]; pos[i * 3 + 2] = 0.12; var c = ageFade(base, now - s[0]); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; });
         var g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.BufferAttribute(col, 3));
         var line = new THREE.Line(g, new THREE.LineBasicMaterial({ vertexColors: true })); scene.add(line); markers.push(line);
-        var dots = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.09, vertexColors: true })); scene.add(dots); markers.push(dots);
+        var dots = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.06, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false })); scene.add(dots); markers.push(dots);
       }
-      var h = person ? (down ? 0.3 : 0.9) : 0.3, r = person ? 0.16 : 0.14, age = now - e.last_seen;
-      var mk = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 12), new THREE.MeshLambertMaterial({ color: ageFade(base, age), transparent: true, opacity: 0.85 }));
+      var h = person ? (down ? 0.25 : 0.7) : 0.25, r = person ? 0.09 : 0.08, age = now - e.last_seen, u = Math.min(1, age / historyS);
+      var mk = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 10), new THREE.MeshLambertMaterial({ color: base, transparent: true, opacity: 0.9 - 0.8 * u }));
       mk.rotation.x = Math.PI / 2; mk.position.set(e.x, e.y, h / 2); scene.add(mk); markers.push(mk);
       shown++;
       if (labelled >= MAX_LABELS && !e.identity && !down) return; // tracker ids churn: label the named, the fallen and the freshest few

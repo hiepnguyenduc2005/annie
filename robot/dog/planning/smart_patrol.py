@@ -25,6 +25,8 @@ from collections import deque
 
 INF = float("inf")
 MIN_WALK_MPS = 0.2  # below this the Go2 firmware does not actually walk
+MIN_TURN_RPS = 0.8  # below this a turn in place does not move the legs either (seen live 2026-09-20: 0.5 rad/s at a wall for a minute)
+TOUCH_M = 0.22      # front closer than this: reverse a little before turning, the nose is on the obstacle
 
 
 def quaternion_yaw(q: dict) -> float:
@@ -339,7 +341,7 @@ class PatrolPlanner:
         self.cruise_mps, self.turn_rps = cruise_mps, turn_rps
         self.stop_m, self.clear_m, self.slow_m, self.side_m = stop_m, clear_m, slow_m, side_m
         self.leash_m, self.sweep_period_s = leash_m, sweep_period_s
-        self.backoff_s, self.backoff_mps, self.min_turn_s = backoff_s, backoff_mps, min_turn_s
+        self.backoff_s, self.backoff_mps, self.min_turn_s = backoff_s, max(backoff_mps, MIN_WALK_MPS), min_turn_s
         self.k_heading = k_heading
         self.target_heading = None  # world yaw the cruise steers toward (bandit / brain); None = free sweep
         self.mode = "cruise"
@@ -382,13 +384,16 @@ class PatrolPlanner:
             self.turn_sign = self.turn_sign  # keep the side picked at the collision
             held = 0.0
         if self.mode != "blocked" and front < self.stop_m:
+            if front < TOUCH_M and self.mode != "backoff":  # nose on the wall: reverse first, then turn
+                self._enter("backoff", now_s, ranges)
+                return -self.backoff_mps, 0.0, "backoff"
             self._enter("blocked", now_s, ranges)
             held = 0.0
         if self.mode == "blocked":
             if front >= self.clear_m and held >= self.min_turn_s:
                 self._enter("cruise", now_s)
             else:
-                return 0.0, self.turn_sign * self.turn_rps, "blocked"
+                return 0.0, self.turn_sign * max(self.turn_rps, MIN_TURN_RPS), "blocked"
 
         if self.mode != "homing" and dist_home > self.leash_m:
             self._enter("homing", now_s)
@@ -406,7 +411,7 @@ class PatrolPlanner:
             err = wrap_angle(self.target_heading - yaw)
             wz = max(-self.turn_rps, min(self.turn_rps, self.k_heading * err))
             if abs(err) > math.pi / 3:  # far off: turn in place first (creeping is below the walking deadband)
-                return 0.0, math.copysign(self.turn_rps, err), "cruise"
+                return 0.0, math.copysign(max(self.turn_rps, MIN_TURN_RPS), err), "cruise"
         else:
             wz = 0.35 * self.turn_rps * math.sin(2.0 * math.pi * (now_s - self.t0) / self.sweep_period_s)
         if left < self.side_m:

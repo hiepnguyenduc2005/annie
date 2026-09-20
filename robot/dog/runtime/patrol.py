@@ -696,7 +696,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         with contextlib.suppress(Exception):
             detector = objects_mod.ObjectDetector()
     perception = Perception(tracker, convert=convert, annotate=annotate if view.port else None, diag=diag,
-                            min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier, objects=detector)
+                            min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier, objects=detector, objects_every=8)
     view.commands = voice_state  # POST /command on the live view sets the same bounded override as a voice command
     view.recorder = recorder
     missions = MissionBoard()
@@ -1322,12 +1322,12 @@ def main(argv=None):
     parser.add_argument("--no-lidar", action="store_true", help="skip the voxel-map sector ranges (stall detection only)")
     parser.add_argument("--firmware-avoid", action="store_true", help="also switch on the firmware obstacle-avoid service")
     parser.add_argument("--stop-on-checkin", action="store_true", help="end the run after the first lying-person check-in")
-    parser.add_argument("--idle-trick", type=float, default=90.0, help="seconds without a new person before a trick; 0 disables")
+    parser.add_argument("--idle-trick", type=float, default=0.0, help="seconds without a new person before a trick; 0 (default) = keep exploring")
     parser.add_argument("--view-port", type=int, default=8011, help="live camera/boxes page; 0 disables")
     parser.add_argument("--view-host", default="127.0.0.1", help="bind address; beyond loopback requires ANNIE_BODY_TOKEN "
                         "and ANNIE_VIEW_HOSTS (comma list of this machine's addresses the page may be opened on)")
     parser.add_argument("--no-motion", action="store_true", help="perception-only: never move or perform tricks")
-    parser.add_argument("--imgsz", type=int, default=352, help="tracker inference size (multiple of 32)")
+    parser.add_argument("--imgsz", type=int, default=320, help="tracker inference size (multiple of 32); 320 keeps up with the 14 fps stream on this Mac")
     parser.add_argument("--diag-every", type=float, default=5.0, help="seconds between diagnostic lines")
     parser.add_argument("--brain", action="store_true", help="let the local VLM propose patrol moves (guardrails stay)")
     parser.add_argument("--brain-period", type=float, default=4.0)

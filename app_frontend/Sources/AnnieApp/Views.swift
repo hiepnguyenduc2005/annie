@@ -2,8 +2,8 @@
 //  Views.swift
 //  AnnieApp
 //
-//  The four screens: Reminders (with today's routine), Ask Annie, the
-//  activity feed, and the profile card.
+//  Reminders (with today's routine), Ask Annie, the activity feed, and the
+//  profile card. Sending messages to Annie lives in FamilyViews.swift.
 //
 
 import SwiftUI
@@ -120,9 +120,9 @@ struct AskView: View {
     @State private var question = ""
 
     private let suggestions = [
-        "Where are my glasses?",
-        "Did I take my medication?",
-        "When is our walk?",
+        "Where are her glasses?",
+        "Did she take her medication?",
+        "When is her walk?",
         "Did anyone visit today?",
     ]
 
@@ -143,7 +143,7 @@ struct AskView: View {
                 .padding(16)
                 .background(Palette.mist.opacity(0.30), in: RoundedRectangle(cornerRadius: 12))
             } else {
-                Text("Ask me anything \u{2014} I'll answer from what I've seen today.")
+                Text("Ask Annie anything about Jeanine \u{2014} she'll answer from what she's seen today.")
                     .foregroundStyle(.secondary)
                     .frame(maxHeight: .infinity)
             }
@@ -214,6 +214,7 @@ struct ActivityView: View {
 
 struct ProfileView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var profiles: ProfileState
 
     private var meds: [Reminder] { state.reminders.filter { $0.title.lowercased().contains("medication") } }
     private var walk: Reminder? { state.reminders.first { $0.title.lowercased().contains("walk") } }
@@ -222,24 +223,27 @@ struct ProfileView: View {
         ScrollView {
         VStack(spacing: 20) {
             HStack(spacing: 16) {
-                Text("\u{1F415}")
-                    .font(.system(size: 44))
+                AnnieMark(height: 40)
+                    .foregroundStyle(Palette.slate)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Eleanor & Annie")
+                    Text(profiles.profile.map { "Hi, \($0.member.displayName)" } ?? "Hi")
                         .font(.title2.bold())
-                    Text("Home companion \u{00b7} synthetic demo data")
+                    Text("Keeping an eye on Jeanine, together with Annie")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
             }
 
+            Text("Jeanine, today")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 16) {
                 StatCard(value: "\(meds.filter(\.done).count) of \(meds.count)", label: "medications taken")
                 StatCard(value: walk.map { $0.done ? "done" : "due \(fmtClock($0.time))" } ?? "\u{2013}", label: "walk status")
                 StatCard(value: "\(state.memory.count)", label: "things observed")
             }
 
-            ProfilesSectionView()
+            AccountSectionView()
 
             ServerSettingsView()
 
@@ -252,37 +256,33 @@ struct ProfileView: View {
     }
 }
 
-/// The profiles registered on this device, and which was created first.
-struct ProfilesSectionView: View {
+/// Who this phone is signed in as, with a way to sign out and hand the
+/// phone to a different family member.
+struct AccountSectionView: View {
     @EnvironmentObject private var profiles: ProfileState
-    @State private var confirmRemove = false
+    @State private var confirmSignOut = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Profiles")
+            Text("Account")
                 .font(.headline)
-            ForEach(profiles.profiles) { profile in
+            if let profile = profiles.profile {
                 HStack(spacing: 12) {
-                    Image(systemName: profile.kind == .dogUser ? "pawprint.fill" : "person.crop.circle")
-                        .font(.title3)
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.title2)
                         .foregroundStyle(Palette.slate)
-                        .frame(width: 28)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(profile.name)
-                        Text("\(profile.kind.label) \u{00b7} created \(profile.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                        Text(profile.member.displayName)
+                        Text("Signed in \u{00b7} \(profile.createdAt.formatted(date: .abbreviated, time: .omitted))")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                 }
             }
-            if let first = profiles.profiles.createdFirst {
-                Text("Created first: \(first.kind.label). Stored on this device only.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Button("Remove profiles", role: .destructive) { confirmRemove = true }
+            Button("Sign out", role: .destructive) { confirmSignOut = true }
                 .font(.callout)
-                .confirmationDialog("Remove the profiles on this device?", isPresented: $confirmRemove) {
-                    Button("Remove profiles", role: .destructive) { profiles.reset() }
+                .confirmationDialog("Sign out of Annie on this phone?", isPresented: $confirmSignOut) {
+                    Button("Sign out", role: .destructive) { profiles.signOut() }
                 }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -302,20 +302,8 @@ struct ServerSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Who's using this phone")
-                .font(.headline)
-            Picker("Sender", selection: $state.authorID) {
-                Text("Zach").tag("zach")
-                Text("Ellis").tag("ellis")
-                Text("Jeanine").tag("jeanine")
-            }
-            .pickerStyle(.segmented)
-            Text("The household is fixed, so this is a picker rather than a sign-in.")
-                .font(.caption).foregroundStyle(.secondary)
-
             Text("Server")
                 .font(.headline)
-                .padding(.top, 8)
             HStack {
                 TextField("Mac address, e.g. 192.168.1.20:8000", text: $text)
                     .textFieldStyle(.roundedBorder)

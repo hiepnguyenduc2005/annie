@@ -76,7 +76,7 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
 ## DEC-008: Profile registration UI first; MongoDB storage and creation rules deferred
 
 - Date: 2026-09-19.
-- Status: Adopted following explicit user direction; revisable.
+- Status: Adopted following explicit user direction; the app-user/dog-user split itself is superseded by [DEC-011](#dec-011-family-only-app-resident-view-removed) (no more dog-user profile), but the on-device-storage-first approach still stands.
 - Context: The user wants app-user and dog-user profiles tracked, including which was created first, with an app user's registration also creating the dog user's profile, stored in MongoDB. The backend owner may have specific needs, and no MongoDB or driver exists in the Swift mock backend.
 - Decision: Build only the SwiftUI registration screens now. An app user registers and creates both profiles, linked; a dog user can register alone. Profiles are stored on the device (`ProfileStore`), with each profile's creation time and links recorded so "created first" is derivable. Do not add MongoDB, a profile API, or backend changes yet.
 - Alternatives: A separate Python profile service, or profiles inside `app_backend/`, with a local MongoDB; deferred until the backend owner weighs in.
@@ -86,7 +86,7 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
 ## DEC-009: One app with two audiences, served by one backend
 
 - Date: 2026-09-19.
-- Status: Adopted for the HackMIT demo; revisable.
+- Status: Superseded by [DEC-011](#dec-011-family-only-app-resident-view-removed); Jeanine is not a user of this app.
 - Context: The demo needs a family-facing surface where Zach writes to Annie
   and watches the errand, but `app_frontend` was entirely resident-facing and
   pointed at the standalone Swift mock server, which does not implement the
@@ -115,6 +115,49 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
 - Context: The user requested a sponsor-ready environment based on the working stack, then explicitly selected everything local, including Elastic.
 - Decision: Reuse local Ollama vision, Whisper/macOS speech, SQLite, and Graphiti. Support self-hosted Elasticsearch with its own API key and CA certificate; keep Graphiti selected until local Elastic is provisioned and verified. Cloud voice, advisory agents, and messaging are not dependencies of this profile.
 - Consequences: Prior cloud story results do not establish all-local acceptance. Elastic replaces the bridge memory provider, not the app journal. The user expects MongoDB to work; a fresh pull still contains no MongoDB driver or connection setting, so verify the team's integration before asserting its status. See [the environment guide](LOCAL_ENV.md).
+
+## DEC-011: Family-only app; resident view removed
+
+- Date: 2026-09-20.
+- Status: Adopted following explicit user direction; revisable.
+- Context: The user decided Jeanine should only interact with Annie in
+  person, to keep that relationship humanized, not through a phone app. The
+  SwiftUI app (DEC-009) had a "Grandma view" (Reminders, Ask Annie, Activity,
+  Profile) and a "Family view" (Messages, Activity, Profile) behind a top-level
+  audience picker. Registration (DEC-008) also let a device register as
+  Annie's own "dog user" profile alongside or instead of an app user, which
+  has no purpose once the app has only one audience.
+- Decision: Remove the audience picker and the `Audience`/resident code path
+  entirely (`AppState`, `AnnieApp.swift`). One `TabView` now shows all of
+  Reminders, Ask Annie, Activity, Message Annie, and Profile to every family
+  member, since `app_backend`'s reminders/memory/ask endpoints were always
+  audience-agnostic (DEC-009) — only the client-side presentation
+  distinguished them. Replace the app-user/dog-user registration chooser with
+  a plain sign-in: pick which family member owns this phone from the fixed
+  household `app_backend`'s `HOUSEHOLD` already recognizes (`zach`, `ellis`);
+  that choice becomes the message `author_id`, replacing the old segmented
+  "who's using this phone" picker in Profile. The dog-user profile kind is
+  deleted, not deprecated — nothing else referenced it.
+- Alternatives: Keep the dog-user profile as a placeholder for a future
+  robot-mounted or in-person device; rejected because nothing in this app
+  runs on such a device, and an unused option was part of what made the
+  Profile tab look "weird and useless" per the user's own description.
+  Free-text name entry at sign-in instead of picking from the fixed
+  household; rejected because `app_backend`'s `MessageIn.author_id` is a
+  `Literal['jeanine', 'zach', 'ellis']` — an arbitrary name would be accepted
+  by sign-in and then rejected by every message send. Extending that backend
+  enum to arbitrary family accounts was judged out of scope for a UI cleanup
+  request and is not implemented here.
+- Consequences: REQ-012 no longer describes the app (updated in SPEC.md);
+  TASK-008 is narrowed to the single remaining profile kind. Sign-in is still
+  on-device only (`ProfileStore`, now keyed `annieProfile`, not
+  `annieProfiles`), so a reinstall or a different phone needs sign-in again;
+  cross-device pairing remains open, same as DEC-008 left it. Adding a third
+  family member still requires a matching `app_backend` change, since the
+  household stays hardcoded on both ends. Ask Annie's copy and demo answers
+  now speak about Jeanine in the third person ("Did she take her
+  medication?") instead of the first person ("Did I take my medication?"),
+  matching who is actually asking.
 
 ## Future entries
 

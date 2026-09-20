@@ -36,10 +36,10 @@ as work progresses and record a reason for blocked work.
   - Progress 2026-09-19 22:52: `robot/go2_patrol_greet.py` patrolled and greeted 7 people in 100 s (firmware Hello + host speech, per-person cooldown; report `output/hardware/2026-09-19-patrol-greet-1.json`) until the hotspot link dropped and the stale-telemetry stop fired. `robot/go2_smart_patrol.py` now supplies the motion: LiDAR voxel-map sector ranges plus an odometry stall detector drive cruise/blocked/backoff/homing modes, verified against a simulated dog (`robot/tests/test_go2_patrol_greet_runtime.py`). Physical verification of the LiDAR ranges and stall backoff is pending the next link; the link-loss stop remains software-only.
   - Done when: a nearby operator can reliably stop the robot and one deliberately slow, bounded physical route completes with measured pose and execution evidence.
 
-- [ ] TASK-008: Persist profiles server-side (MongoDB was proposed) so the app and dog profiles, their kinds, and which was created first survive across devices.
-  - Requirement or context: REQ-012, DEC-008. The SwiftUI registration screens already exist and store profiles on the device.
-  - Done when: registration writes to the shared backend; the create-first rules are decided and tested; the app reads profiles back after reinstall.
-  - Dependency or blocker: the backend owner's requirements for profile storage and API shape, and which service owns it. No MongoDB is installed locally; the swift mock backend has no MongoDB driver.
+- [ ] TASK-008: Persist sign-in server-side (MongoDB was proposed) so a family member's phone survives reinstall, and support family members beyond the fixed `zach`/`ellis` household.
+  - Requirement or context: REQ-012, DEC-008, DEC-011. The app-user/dog-user split is gone (DEC-011); sign-in now just picks a family member from `app_backend`'s hardcoded `HOUSEHOLD`, stored on the device (`ProfileStore`).
+  - Done when: sign-in writes to the shared backend and survives reinstall; adding a family member is a config change, not a code change on both the app and `app_backend`.
+  - Dependency or blocker: the backend owner's requirements for account storage and API shape, and which service owns it. No MongoDB is installed locally; the swift mock backend has no MongoDB driver.
 
 ## Done
 

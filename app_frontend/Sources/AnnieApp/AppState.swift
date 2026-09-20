@@ -10,17 +10,6 @@
 import AVFoundation
 import SwiftUI
 
-/// Which half of the household the app is showing. One build, two audiences:
-/// Jeanine at home, and family checking in from away.
-enum Audience: String, CaseIterable, Identifiable {
-    case resident
-    case family
-
-    var id: String { rawValue }
-    var label: String { self == .resident ? "Grandma" : "Family" }
-    var icon: String { self == .resident ? "house.fill" : "person.2.fill" }
-}
-
 @MainActor
 final class AppState: ObservableObject {
     @Published var live = false
@@ -29,17 +18,15 @@ final class AppState: ObservableObject {
     @Published var answer: String?
     @Published var asking = false
 
-    @Published var audience: Audience = .family
-
-    // Family view
+    // Messages to Annie
     @Published var thread: [ThreadMessage] = []
     @Published var runs: [String: FamilyRun] = [:]
     @Published var sending = false
     @Published var sendError: String?
 
-    /// Who this phone belongs to. The household is fixed, so this is a picker,
-    /// not a login.
-    @Published var authorID = "zach"
+    /// Who this phone is signed in as. Set once at launch from `ProfileState`
+    /// and sent as `author_id` on every message.
+    @Published var authorID = FamilyMember.zach.rawValue
 
     @Published private(set) var serverURL = AppConfiguration.apiBaseURL
 
@@ -233,13 +220,13 @@ final class AppState: ObservableObject {
 
     static let demoMemory: [MemoryFact] = [
         MemoryFact(id: 1, subject: "user", relation: "took", object: "morning_medication", room: "kitchen",
-                   timestamp: "2026-09-19T08:02:00", text: "Saw you take your morning medication in the kitchen."),
+                   timestamp: "2026-09-19T08:02:00", text: "Saw Jeanine take her morning medication in the kitchen."),
         MemoryFact(id: 2, subject: "glasses", relation: "located_at", object: "kitchen_table", room: "kitchen",
                    timestamp: "2026-09-19T09:15:00", text: "Glasses last seen on the kitchen table."),
         MemoryFact(id: 3, subject: "user", relation: "walked", object: "block", room: "outside",
-                   timestamp: "2026-09-19T09:34:00", text: "Walked with you around the block."),
+                   timestamp: "2026-09-19T09:34:00", text: "Walked Jeanine around the block."),
         MemoryFact(id: 4, subject: "dog", relation: "followed", object: "user", room: "living_room",
-                   timestamp: "2026-09-19T11:40:00", text: "Followed you to the living room."),
+                   timestamp: "2026-09-19T11:40:00", text: "Followed Jeanine to the living room."),
         MemoryFact(id: 5, subject: "door", relation: "opened_by", object: "maya", room: "entryway",
                    timestamp: "2026-09-19T13:05:00", text: "Front door opened \u{2014} Maya's visit logged."),
         MemoryFact(id: 6, subject: "glasses", relation: "located_at", object: "reading_chair", room: "living_room",
@@ -253,11 +240,11 @@ final class AppState: ObservableObject {
         }
         if q.contains("medication") || q.contains("pill") {
             let meds = reminders.filter { $0.title.lowercased().contains("medication") }
-            return "You've taken \(meds.filter(\.done).count) of \(meds.count) medication reminders today."
+            return "Jeanine has taken \(meds.filter(\.done).count) of \(meds.count) medication reminders today."
         }
         if q.contains("walk") {
             if let walk = reminders.first(where: { $0.title.lowercased().contains("walk") && !$0.done }) {
-                return "Your next walk is at \(fmtClock(walk.time))."
+                return "Her next walk is at \(fmtClock(walk.time))."
             }
             return "Today's walk is already done \u{2014} nicely done!"
         }

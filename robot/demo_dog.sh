@@ -12,6 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 DOG_IP="${DOG_IP:-172.20.10.10}"
 DURATION="${DURATION:-3600}"
+APP_PORT="${APP_PORT:-8000}"
 LOGS=.data/hardware/demo-logs; mkdir -p "$LOGS"
 
 set -a; source .env; set +a
@@ -20,24 +21,24 @@ export UNITREE_AES_128_KEY="${UNITREE_AES_128_KEY:-$(python3 -c "import json;pri
 MAC_HOTSPOT_IP="$(ifconfig | awk '/inet 172\.20\.10\./{print $2; exit}')"
 [[ -n "$MAC_HOTSPOT_IP" ]] || { echo "no 172.20.10.x address on this Mac: plug the iPhone in (USB tether) and open Personal Hotspot"; exit 2; }
 ping -c 1 -W 1 "$DOG_IP" >/dev/null 2>&1 || { echo "dog not answering at $DOG_IP: power it on / re-provision the hotspot join"; exit 2; }
-for p in 8000 8010 8011; do lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null 2>&1 && { echo "port $p is already in use; stop that process first"; exit 2; }; done
+for p in $APP_PORT 8010 8011; do lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null 2>&1 && { echo "port $p is already in use; stop that process first"; exit 2; }; done
 
 export ANNIE_ALLOWED_HOSTS="localhost,127.0.0.1,[::1],$MAC_HOTSPOT_IP"
 export ROBOT_BACKEND_URL="http://127.0.0.1:8010" ANNIE_FAMILY_MOCK_ROBOT=false
-export ANNIE_BODY_URL="http://127.0.0.1:8011" ANNIE_APP_URL="http://127.0.0.1:8000"
+export ANNIE_BODY_URL="http://127.0.0.1:8011" ANNIE_APP_URL="http://127.0.0.1:$APP_PORT"
 
 pids=()
 cleanup() { echo; echo "stopping..."; for p in "${pids[@]}"; do kill -INT "$p" 2>/dev/null || true; done; sleep 4; for p in "${pids[@]}"; do kill -9 "$p" 2>/dev/null || true; done; }
 trap cleanup EXIT INT TERM
 
-.venv/bin/uvicorn app_backend.app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers > "$LOGS/app.log" 2>&1 & pids+=($!)
+.venv/bin/uvicorn app_backend.app.main:app --host 0.0.0.0 --port $APP_PORT --no-proxy-headers > "$LOGS/app.log" 2>&1 & pids+=($!)
 .venv/bin/python robot/go2_errand.py --host 127.0.0.1 --port 8010 > "$LOGS/errand.log" 2>&1 & pids+=($!)
 .cache/dimos/.venv/bin/python robot/go2_patrol_greet.py --ip "$DOG_IP" --duration "$DURATION" --brain --voice --speed 0.4 \
   --output "$LOGS/patrol-$(date +%Y%m%d-%H%M).json" > "$LOGS/patrol.log" 2>&1 & pids+=($!)
 
 sleep 6
-echo "phone app     -> http://$MAC_HOTSPOT_IP:8000  (POST /api/messages; needs the phone on the same hotspot)"
+echo "phone app     -> http://$MAC_HOTSPOT_IP:$APP_PORT  (POST /api/messages; needs the phone on the same hotspot)"
 echo "live view     -> http://127.0.0.1:8011/   4D: http://127.0.0.1:8011/spacetime"
-echo "try it:         curl -s -X POST http://127.0.0.1:8000/api/messages -H 'Content-Type: application/json' -d '{\"author_id\":\"zach\",\"text\":\"go wave at Grandma\"}'"
+echo "try it:         curl -s -X POST http://127.0.0.1:$APP_PORT/api/messages -H 'Content-Type: application/json' -d '{\"author_id\":\"zach\",\"text\":\"go wave at Grandma\"}'"
 echo "logs          -> $LOGS/{app,errand,patrol}.log     (Ctrl-C stops everything and sends StopMove)"
 tail -n 0 -f "$LOGS/patrol.log" | grep --line-buffered -E "go2-patrol-greet: (connected|t=.*(person|mission|COLLISION|voice|brain:)|[a-z_:A-Z]+ greetings=)"

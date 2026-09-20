@@ -64,7 +64,8 @@ are in [body_commands.md](../contract/body_commands.md).
   the physical iPhone. Launch and visual click-through were blocked by the
   phone and Mac being locked. Read-only simulator capture remained available:
   API-driven requests visibly updated the native screen; direct button clicking
-  and physical iPhone launch remain unverified in this pass.
+  and physical iPhone launch remained unverified in that earlier pass; the later physical
+  requests below establish app-to-robot delivery.
 - Twelve standalone Swift checks exercise the production decoding/status
   models: pending execution, reminder ID, cancelled runs, unknown status,
   camera-only mode, simulator source, and unconfirmed stop.
@@ -94,6 +95,26 @@ The native screen during that API-driven run:
 | ![Executing reminder](demo/phone-progress.png) | ![Cancelled check-in](demo/phone-paused.png) | ![Delivered reminder and reply](demo/phone-delivered.png) |
 
 ## Remaining production gaps
+
+The physical results below used the pre-v2 family API and installed phone build.
+They do not qualify the replacement app_backend v2 or its new phone build.
+
+The user-authorized demo mode is now autonomous: `--demo-everyone-grandma --autonomous-demo
+--voice --idle-trick 45 --speed 0.2 --boundary 5 --target ''`. Physical evidence so far:
+stand completed with code 0 and the user confirmed the dog upright; a short autonomous patrol
+segment measured 0.19 m, then the autonomous pose measured ~1.5 m from origin; the
+interactive-restart stop returned code 0 with a 38.4 ms firmware acknowledgment, which is not a
+measured stop. Real iPhone requests completed through the family API -> errand -> dog chain
+(:8021 -> :8022 -> :8011); captured replies were ambient conversation and are recorded unclear,
+with transcripts kept out of tracked files. Latest fake-body suites: 11 social/control pass,
+two further runtime regressions pass, 26 voice-listener/host-voice mocked tests pass, a runtime
+regression prevents dialogue from requesting movement, and 41 planner tests pass with the
+flip/rollover guard. Pending reload: the
+converse -> rule_plan removal and the flip guard are on disk and take effect at the next
+restart; the voice-echo accidental-stop root cause remains open until verified. Model inference
+is the local Ollama planner (`annie-qwen3-vl:2b`); Deepgram/ElevenLabs are the configured cloud
+voice, with mic/speaker on the Mac host rather than the robot, so "no cloud provider" holds for
+the model only. No full patrol qualification, no all-green claim, no production signoff.
 
 The simulation team reported 20/20 message scenarios but 16/20 fall scenarios
 after the final motion guard. Failures include repeated check-ins after

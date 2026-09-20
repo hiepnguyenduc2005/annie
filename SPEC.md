@@ -225,6 +225,56 @@ still enforced. Internal robot callback authentication is unchanged.
 Companion connection failures show the configured server URL and a bounded
 network, HTTP-status, or response-format error without exposing credentials.
 
+## Physical demo casting for Jeanine (`--demo-everyone-grandma` / `--require-grandma-selection`)
+
+Two mutually exclusive demo casting modes stage the resident for the physical demo. Both are
+explicitly user-authorized staging tools, never identity features: neither recognizes who anyone
+is, neither enrolls a face, and without a flag the runtime is unchanged. Without
+`--autonomous-demo`, everyone-as-Grandma and clothing selection both start the dog held in
+manual control.
+
+**`--demo-everyone-grandma` (current demo mode, user-authorized 2026-09-20).** The operator
+confirms everyone on stage is playing Grandma; every filtered visible person's track is then
+labeled `Jeanine` (`method: demo_role`, `demo: true`) with no face or clothing assignment. The
+controller targets the nearest visible person (largest bounding box), the command center shows a
+demo banner and the active inference provider/model, and the planner situation states that every
+visible person is Grandma. There is no selection step to lose, so no selection hold applies.
+Combined with `--autonomous-demo`, this is the current user-authorized demo: idle patrol,
+greeting, and occasional gestures run on their own, and the dog starts free to move rather than
+held. `--autonomous-demo` is rejected unless everyone-as-Grandma is selected and both
+manual-control and paused startup are off. Everyone-as-Grandma without `--autonomous-demo`
+keeps the earlier held/manual behavior, as do clothing selection and manual or paused startups.
+
+**Holds and guardrails in autonomous demo.** Between an errand's approach, speak, and listen
+steps the dog holds still: forward movement is zeroed while the errand owns the person, and a
+follow that stays blocked (centered or too close) toward an already-greeted person for 8 s ends
+the follow and resumes patrol instead of hovering. Boundary, stale-LiDAR, obstacle, and Pause
+guards still apply; Pause always holds regardless of mode.
+
+Voice playback must not trigger its own commands or replies. An open conversation permits
+unaddressed dialogue and precise stop requests; other spoken movement commands require the wake
+word. Conversation replies never enter motion planning. Unsupported flips and rollovers return
+a clear explanation with no substitute search or movement.
+
+**`--require-grandma-selection` (alternative, per-person casting).** The operator picks the live
+camera track wearing a beige jacket and blue jeans and presses "Use as Grandma" on the
+tracker-assigned `Guest N` card. `POST /people/assign` (same `X-Body-Token` authentication as
+other body commands, body `{"guest": "Guest N"}`) requires the robot to be connected and fully
+paused; it accepts only a currently visible `Guest N` with a fresh observation (within 2 s) and
+complete upper- and lower-clothing samples, replaces any previous selection, and renames only that
+session's clothing track to Jeanine. No face embedding is read or stored, the guest's clothing
+vector and counter are removed rather than promoted, and the assignment lives only in the running
+process (a restart requires selection again). The selected track is matched afterward by fresh
+clothing similarity; if it becomes stale, lost, or ambiguous, the selection is voided, movement is
+held and new movement missions fail visibly until the operator selects a guest again.
+
+In the current authorized run, the text planner runs on the local Ollama model
+`annie-qwen3-vl:2b` (`ANNIE_LLM_PROVIDER=local`, `ANNIE_LLM_MODEL=annie-qwen3-vl:2b`); telemetry
+reports the active provider and model. No OpenAI key is configured, so no sponsor API is claimed.
+Cloud voice is configured and used: Deepgram listens and ElevenLabs speaks. The microphone and
+speaker live on the Mac host, not on the robot, so "no cloud provider" claims are limited to the
+model planner and must not be generalized to voice.
+
 ## App backend v2 replacement
 
 The replacement contract is documented in `app_backend/README.md`. MongoDB owns

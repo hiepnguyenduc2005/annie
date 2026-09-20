@@ -6,6 +6,44 @@ as work progresses and record a reason for blocked work.
 
 ## Now
 
+- [ ] TASK-019: Qualify the user-authorized autonomous demo end to end on hardware (SPEC "Demo casting"; DEC-016).
+  Current mode: `--demo-everyone-grandma --autonomous-demo --voice --idle-trick 45 --speed 0.2
+  --boundary 5 --target ''` (user override): every visible person is labeled Jeanine
+  (`demo_role`, no identity recognition); `--autonomous-demo` requires everyone mode and is
+  rejected with manual-control or paused startup; everyone mode alone (and clothing selection)
+  keeps the held/manual start. Model inference is ON via the local Ollama text planner
+  `annie-qwen3-vl:2b`; Deepgram/ElevenLabs cloud voice is configured, with mic/speaker on the
+  Mac host, not the robot (so "no cloud provider" means the model only).
+  - Physical evidence: stand completed with code 0 and the user confirmed the dog upright; a
+    short autonomous patrol measured 0.19 m, then the autonomous pose measured ~1.5 m from
+    origin; no full patrol/navigation qualification yet. Physical wave and Mac speech were
+    confirmed earlier by the user. Interactive-restart stop ran with code 0 and a 38.4 ms
+    firmware ack; an acknowledgment is not a measured stop. Runtime is currently held/manual
+    between commands (restored for the upright check); the operator's active Go/explore requests
+    still work in that state.
+  - These physical runs use the pre-v2 family API and installed phone build; they do not
+    qualify the replacement app_backend v2.
+  - Verified family delivery: real iPhone requests reached the robot through app API :8021 →
+    errand :8022 → dog :8011. The reminder run completed (found/speaking/listening/heard/
+    completed); the captured speech was ambient conversation, so the reply is recorded unclear,
+    not an intended Grandma response. The check-in run likewise heard ambient speech
+    ("unclear"). Transcripts stay out of tracked files.
+  - Verified in code/tests (fake bodies): latest social/control suites 11 pass; the two new
+    runtime regression tests passed separately; agent planning/conversation checks were 88 pass
+    previously. Voice listener and host-voice checks passed 26 mocked tests; a separate runtime check confirms
+    unaddressed dialogue cannot enqueue movement. The
+    unsupported flip/rollover guard passed 41 planner tests. Keep still between errand
+    approach/say/listen and the 8 s blocked-follow guard are implemented and documented
+    (SPEC, DEC-016).
+  - Pending qualification (on disk, not yet in the running process): the converse → rule_plan
+    removal and the unsupported-flip guard in the planner take effect at the next restart; the
+    running session predates them. Root-cause work on the voice-echo accidental stop from the
+    background listener remains open until verified.
+  - Not done: no full autonomous patrol qualification, no all-green claim, no production
+    signoff. Source evidence stays in ignored `.data/hardware/` logs (autonomous-demo and
+    interactive-demo sessions); private info, secrets, and machine URLs are not copied into
+    tracked files.
+
 - [ ] Verify live robot_backend integration with the implemented v2 contract in `app_backend/README.md`: numeric household IDs, shared reminders, daily conversations, history, WebSockets, and three robot callback flows. Enable dispatch/scheduling only after fake and real integration checks. Backend, robot voice message/reminder adapter, and Swift frontend adapters are implemented; legacy backend is archived under ignored `tmp/`. Physical phone and robot end-to-end verification remains open.
 
 - [ ] Verify the v2 companion app on physical phones: account selection, shared reminders across Zach/Ellis (latest note retained, completion resets daily and stays false before scheduled time), today-only chat with keyboard dismissal and preserved drafts, history, live updates, and reconnect. Use the build-configured URL.

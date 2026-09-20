@@ -163,7 +163,13 @@ def _fast_tracker(conf=0.30, imgsz=352):
     frames (measured 3.5 s/frame live vs 36 ms on CPU at 416 px, 2026-09-19).
     """
     from robot.simulation.person_tracker import PersonTracker
-    return PersonTracker(conf=conf, device="cpu", imgsz=imgsz)
+    face_index = None
+    with contextlib.suppress(Exception):  # enrolled, consenting people only; absent index -> no face matching
+        from robot.simulation.face_id import DEFAULT_FACES_DIR, INDEX_FILENAME, FaceIndex
+        index_path = Path(DEFAULT_FACES_DIR) / INDEX_FILENAME
+        if index_path.exists():
+            face_index = FaceIndex().load(index_path)
+    return PersonTracker(conf=conf, device="cpu", imgsz=imgsz, face_index=face_index)
 
 
 VIEW_HTML = r"""<!doctype html><meta charset="utf-8"><title>Annie live</title>

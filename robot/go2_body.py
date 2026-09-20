@@ -372,14 +372,15 @@ class Body:
         state = {"cmd_vx": 0.0, "found": None, "approached": False, "hold_ticks": 0}
 
         def pick(people):
-            upright = [p for p in people if p.get("track_id") is not None and p.get("posture") != "lying"]
+            # A lying person still counts: "check on Grandma" must find her on the floor, not report her missing.
+            candidates = [p for p in people if p.get("track_id") is not None]
             if wanted:
-                named = [p for p in upright if ((p.get("identity") or {}).get("name") or "").lower() == wanted]
+                named = [p for p in candidates if ((p.get("identity") or {}).get("name") or "").lower() == wanted]
                 if named:
                     return named[0], True
-            if not upright:
+            if not candidates:
                 return None, False
-            biggest = max(upright, key=lambda p: p["box"][3] - p["box"][1])
+            biggest = max(candidates, key=lambda p: p["box"][3] - p["box"][1])
             height = (biggest["box"][3] - biggest["box"][1]) / float(self.latest["h"] or 480)
             return (biggest, False) if height >= 0.2 else (None, False)
 
@@ -393,7 +394,7 @@ class Body:
                     state["cmd_vx"] = vx
                     return vx, wz, False, None
                 state["found"] = {"track_id": person["track_id"], "identity": person.get("identity"), "matched": matched,
-                                  "found_at_s": round(t, 1)}
+                                  "posture": person.get("posture"), "found_at_s": round(t, 1)}
                 receipt["progress"] = {"found": state["found"]}
                 if not args["approach"]:
                     return 0.0, 0.0, True, state["found"]
@@ -422,6 +423,7 @@ class Body:
         found = await self._drive(args["timeout_s"], step, receipt)
         return {"found": found is not None, "track_id": (found or {}).get("track_id"),
                 "identity": (found or {}).get("identity"), "matched_name": bool((found or {}).get("matched")),
+                "posture": (found or {}).get("posture"),
                 "approached": state["approached"], "searched_s": receipt.get("progress", {}).get("elapsed_s")}
 
     async def _cmd_say(self, args, receipt):

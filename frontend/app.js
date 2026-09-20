@@ -292,7 +292,7 @@ const runLabels = {
   failed: "Annie could not finish",
   unreachable: "Could not reach Annie",
 };
-const speakerNames = { annie: "Annie", resident: "Grandma" };
+const speakerNames = { annie: "Annie", resident: "Jeanine" };
 function renderFamily() {
   const target = $("family-thread");
   target.replaceChildren();

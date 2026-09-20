@@ -1,116 +1,147 @@
 # Annie
 
-Annie connects an elderly resident at home with family through a robot dog.
-The first workflow is a possible-incident check-in, two-way communication,
-and scene memory with cited evidence.
+Annie connects an elderly resident living alone with their family, through a
+robot dog. A relative sends a message from their phone; the dog finds the
+resident, delivers it, listens to the reply, and answers questions from what it
+has actually observed around the house. Separately, a possible-incident
+check-in escalates to the family when reassurance does not arrive.
 
-## Architecture
+## The two halves
 
-The simulator/demo workspace is isolated under [robot/](robot/README.md).
-The top-level `app_frontend/` Swift app and `app_backend/` / `robot_backend/`
-team service scaffolds remain independent.
+Annie is two independent services that talk over the LAN, so the resident's
+home and the family's phone can be in different places.
 
 ```text
-Family app <-> App API + SQLite <-> Robot service <-> DimOS / Go2 / local vision
-                    |                    |
-             Optional advisory      Voice and approved
-                agent team          notification adapters
+  Family (phone / browser)                 Resident's home
+  ┌────────────────────────┐               ┌──────────────────────────────┐
+  │ app_frontend  (SwiftUI)│               │ robot_backend    (GX10)      │
+  │ frontend      (web)    │               │ robot/           (Go2 + sim) │
+  └───────────┬────────────┘               └───────────────┬──────────────┘
+              │ REST + WebSocket                           │
+        ┌─────┴──────────┐   POST /dispatch  ──────────────┘
+        │  app_backend   │ ◄── POST /internal/events ───────
+        │  + MongoDB     │
+        └────────────────┘
 ```
 
-- `robot/app_backend/`: working local API, event policy for the demo, memory, commands,
-  and optional Subconscious advisory team.
-- `robot/robot_backend/`: independent robot-side service, bounded image/audio inference,
-  and hardware-adapter scaffolding.
-- `robot/frontend/`: phone-friendly web interface served at `/app/`.
-- `shared/` and `robot/contract/`: protocol references and exported typed schemas.
-- `robot/simulation/`: SDK exploration, scenario specification, and physics checks.
+| Path | What it is | State |
+| --- | --- | --- |
+| `app_backend/` | Family-facing API: messages, runs, reminders, observation memory, incident policy | **Working**, 86 tests |
+| `app_frontend/` | SwiftUI app for iPhone and Mac | **Working** on device and simulator |
+| `frontend/` | Phone-friendly web app served at `/app/` | **Working** |
+| `robot_backend/` | The GX10-side service `app_backend` dispatches to | **Scaffold** — see below |
+| `robot/` | Simulator, physical Go2 control, perception, planner | **Working**, see [robot/README.md](robot/README.md) |
+| `shared/`, `contract/` | Protocol references and exported typed schemas | — |
 
-The simulator sends actual robot-camera images to a configured vision model,
-publishes measured poses, and executes waypoint/turn/stop commands. Local YOLO
-inhibits movement when it detects a person. Speech uses local synthesis and
-browser playback receipts; local Whisper and explicit MiMo transcription accept
-synthetic WAVs. The family web app receives camera-driven incident events.
-Full DimOS, physical Go2/GX10, Linq delivery, and Elastic remain unconnected.
-See [measured demo evidence](docs/LIVE_DEMO.md) and [acceptance targets](docs/ACCEPTANCE.md).
+## What is real, and what is staged
 
-## Run the local software demo
+Being precise about this matters more than the feature list.
 
-From the repository root:
+**Real:** the async message path (a message is accepted in ~30 ms and the
+robot's errand is reported afterwards, so the app never blocks on the dog);
+run events streaming to phone and browser over WebSocket; MongoDB persistence
+of the household schema; the incident state machine; the simulator driving an
+actual Go2 model with a trained walking policy, camera-driven perception, and
+execution receipts.
+
+**Staged or unconnected:** `robot_backend` does not yet implement the two calls
+in [contract/family_messages.md](contract/family_messages.md), so a real dog
+does not move on a message yet — `app_backend/scripts/fake_robot.py` stands in
+for it and is a working reference for that side. Observation memory is seeded
+with synthetic data. Full DimOS, Linq delivery, and Elastic remain unconnected.
+
+`fall_confirmed` means **escalation confirmed**, never a medically verified
+fall. Queued, acknowledged, and executed are distinct states throughout.
+
+## Run the family app
 
 ```sh
 uv venv .venv --python 3.12
-uv pip install --python .venv/bin/python -r robot/app_backend/requirements.lock
-.venv/bin/uvicorn robot.app_backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
+uv pip install --python .venv/bin/python -r app_backend/requirements.lock
+.venv/bin/uvicorn app_backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
-Open [the local app](http://127.0.0.1:8000/app/). The backend starts empty; use
-**Start simulated home** to load clearly labeled synthetic observations.
-The app service health endpoint is `/health`; authenticated OpenAPI is
-`/openapi.json`. See [app backend details](robot/app_backend/README.md).
+Open [the web app](http://127.0.0.1:8000/app/). `GET /api/storage` reports
+whether records are persisting to MongoDB or the in-process fallback, so
+"is it saving?" is never a guess.
 
-For root `.env` settings append `--env-file .env`. Use [.env.example](.env.example)
-as a reference without replacing existing keys. Phone/LAN access requires an
-API token and the intended host in `ANNIE_ALLOWED_HOSTS`.
-[Local environment setup](docs/LOCAL_ENV.md) configures Ollama, Graphiti,
-local speech, and optional self-hosted Elasticsearch. The checked-in app journal
-uses SQLite; the team's expected MongoDB profile integration needs verification.
-[Subconscious setup](docs/SUBCONSCIOUS.md) documents the opt-in text advisory team;
-no paid calls or notifications run automatically.
+To watch the whole message path with no robot and no GX10, run the stand-in in
+a second terminal and point the backend at it:
 
-The separate [robot backend](robot/robot_backend/README.md) runs on port 8001 during
-local development. Its hardware packages remain scaffolds. A separate [brain service](robot/contract/brain.md) accepts rendered JPEGs through a configurable local/cloud vision endpoint.
+```sh
+.venv/bin/python app_backend/scripts/fake_robot.py --auto-reply
+```
 
-## Run the live robot simulator
+It prints every payload `app_backend` sends and posts the callbacks back.
+`ANNIE_FAMILY_MOCK_ROBOT=true` is a second option that skips HTTP entirely.
+See [app_backend/README.md](app_backend/README.md) for every route and
+environment variable, and [contract/family_messages.md](contract/family_messages.md)
+for the robot-side interface.
 
-The separate [MuJoCo viewer](robot/simulation/README.md) runs at
-[localhost:8766](http://127.0.0.1:8766/) with the actual Go2 model, live rendering,
-play/pause, reset, single-step, camera views, and optional joint-pose holding.
-The scene factory supplies repeatable furnished homes, with bulk generation and measured playback timing. With `--locomotion`, a matched Go1 model and trained DimOS policy walk through the environment using an authored collision map and waypoint planner. This is a Go1 simulation surrogate, not a validated Go2 hardware controller. The [HTTP bridge](robot/simulation/README.md) forwards app commands, publishes actual simulated poses, and records execution receipts. [SDK findings](docs/SIMULATION_FINDINGS.md) record actual
-launch results and remaining integration work.
+The iPhone app is in [app_frontend/](app_frontend/README.swift). On a phone it
+needs the Mac's LAN address, an `ANNIE_API_TOKEN`, and that address in
+`ANNIE_ALLOWED_HOSTS`; the simulator needs none of these because it shares the
+Mac's network.
 
-## Contract and data boundary
+## Run the robot and simulator
 
-The team explicitly expanded the initial status-only proposal on 2026-09-19.
-The app-facing contract may carry status, map positions, captions, events,
-released evidence crops, transcripts needed for check-ins, and two-way commands.
-Consumers still validate exact schemas; this is not permission for arbitrary
-unbounded payloads or secrets. The legacy `RobotSignal` remains a status-only
-reference; the richer v0.1 models are in [robot/contract/](robot/contract/README.md).
+The simulator workspace is isolated under [robot/](robot/README.md) and runs
+independently of the family app. The [MuJoCo viewer](robot/simulation/README.md)
+serves [localhost:8766](http://127.0.0.1:8766/) with the actual Go2 model, live
+rendering, and camera views. The scene factory supplies repeatable furnished
+homes. With `--locomotion`, a matched Go1 model and trained DimOS policy walk
+the environment using an authored collision map and waypoint planner — a Go1
+simulation surrogate, not a validated Go2 hardware controller. The
+[HTTP bridge](robot/simulation/README.md) forwards app commands, publishes
+simulated poses, and records execution receipts.
 
-Full resident frames remain on the trusted local robot/compute network. Cloud
-voice, memory, notifications, or advisory requests have explicit configuration
-and data-egress paths. Crops/captions can contain PII. This is **local-first**,
-not fully air-gapped, and the current demo uses synthetic data only.
+Local YOLO inhibits movement when it detects a person. Speech uses local
+synthesis with browser playback receipts; local Whisper and explicit MiMo
+transcription accept synthetic WAVs. See
+[measured demo evidence](docs/LIVE_DEMO.md), [acceptance targets](docs/ACCEPTANCE.md),
+and [SDK findings](docs/SIMULATION_FINDINGS.md).
+
+## Data boundary
+
+Full resident frames stay on the trusted local robot/compute network; only
+explicitly released derivatives leave it. `app_backend` performs **no**
+inference and holds no model-provider credentials — all of it happens on the
+robot side, on-device. Crops, captions, and transcripts can still contain
+personal information, so this is **local-first, not air-gapped**. Cloud voice,
+memory, notification, and advisory paths each require explicit configuration.
+The current demo uses synthetic data only.
+
+## Verification
+
+```sh
+# Family app: 86 tests, no database or network required
+PYTHONPATH=app_backend .venv/bin/python -m pytest app_backend/tests -q
+.venv/bin/python contract/export_schemas.py --check
+node --check frontend/app.js
+
+# Robot and simulator
+.venv/bin/python -m pytest robot/app_backend/tests robot/robot_backend/tests -q
+```
+
+The family-app tests run against an in-memory store and mocked transport; two
+additional tests exercise a real MongoDB and skip when none is listening.
+Dependencies are pinned in `app_backend/requirements.lock`. Simulator and
+physics tests have separate prerequisites and do not establish VLM or hardware
+performance.
 
 ## Documentation
 
 | File | Purpose |
 | --- | --- |
-| [SPEC.md](SPEC.md) | Current product scope and acceptance criteria. |
-| [robot/contract/README.md](robot/contract/README.md) | API, channel, event, and privacy semantics. |
-| [robot/simulation/SPEC.md](robot/simulation/SPEC.md) | Full SDK/simulation proposal and scenario matrix. |
-| [docs/TODO.md](docs/TODO.md) | Current work and integration gates. |
-| [docs/BRAINSTORM.md](docs/BRAINSTORM.md) | Ideas and alternatives. |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Choices and rationale. |
-| [docs/hackmit-2026/NOTES.md](docs/hackmit-2026/NOTES.md) | All supplied team planning notes and sources. |
-| [docs/hackmit-2026/SPONSORS.md](docs/hackmit-2026/SPONSORS.md) | Sponsor resources, links, codes, and uncertainties. |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Development workflow and skills. |
-| [AGENTS.md](AGENTS.md) | Shared agent instructions; `CLAUDE.md` is a relative symlink. |
-
-## Verification
-
-```sh
-.venv/bin/python -m pytest robot/app_backend/tests -q
-.venv/bin/python robot/contract/export_schemas.py --check
-node --check robot/frontend/app.js
-```
-
-Tests use mocked services and synthetic data. Dependencies are pinned in
-`robot/app_backend/requirements.lock`; review updates deliberately. SDK/physics tests
-have separate prerequisites and do not establish VLM or hardware performance.
-
-Keep ideas in the brainstorm, chosen behavior in the spec, work in TODO, and
-rationale in decisions. Push coherent verified milestones frequently.
+| [SPEC.md](SPEC.md) | Product scope and acceptance criteria |
+| [contract/family_messages.md](contract/family_messages.md) | app_backend ↔ robot_backend interface, with a robot-side handoff |
+| [app_backend/README.md](app_backend/README.md) | Every route, environment variable, and the household schema |
+| [robot/contract/README.md](robot/contract/README.md) | Channel, event, and privacy semantics |
+| [robot/simulation/SPEC.md](robot/simulation/SPEC.md) | SDK/simulation proposal and scenario matrix |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Choices and rationale |
+| [docs/TODO.md](docs/TODO.md) | Current work and integration gates |
+| [docs/LIVE_DEMO.md](docs/LIVE_DEMO.md) | Measured demo evidence |
+| [AGENTS.md](AGENTS.md) | Shared contributor instructions (`CLAUDE.md` symlinks here) |
 
 ## Prior art
 
@@ -121,7 +152,8 @@ rationale in decisions. Push coherent verified milestones frequently.
 - [Go2 Pro eldercare via WebRTC](https://link.springer.com/chapter/10.1007/978-3-032-29254-4_11): related work on offloading perception to an edge node for home assistance.
 - [DimOS](https://github.com/dimensionalOS/dimos): Annie reuses its matched Go1 walking policy in direct MuJoCo; full SDK integration has a separate acceptance gate.
 
-Annie's target combines ReMEmbR-style observation memory, edge-hosted perception,
-and a family-facing app. The current implementation runs locally with a Go1
-simulation surrogate; GX10 deployment is a target. [Prior-art details](docs/PRIOR_ART.md)
-distinguish reused components, implemented design ideas, and research references.
+Annie combines ReMEmbR-style observation memory, edge-hosted perception, and a
+family-facing app. The current implementation runs locally with a Go1
+simulation surrogate; GX10 deployment is the target.
+[Prior-art details](docs/PRIOR_ART.md) distinguish reused components,
+implemented design ideas, and research references.

@@ -289,7 +289,7 @@ private struct RunEventRow: View {
                 .foregroundStyle(event.isAnnie ? Palette.slate : Palette.steel)
                 .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(event.isAnnie ? "Annie" : "Grandma")
+                    Text(event.isAnnie ? "Annie" : "Jeanine")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(event.summary)

@@ -152,9 +152,7 @@ class FamilyService:
         self.runs[run_id] = run
         self.emit('message', message)
         self.emit('run_status', {'run_id': run_id, 'status': run['status']})
-        task = asyncio.create_task(self._dispatch(run_id, author_id, text))
-        self.background_tasks.add(task)
-        task.add_done_callback(self.background_tasks.discard)
+        self._spawn(self._dispatch(run_id, author_id, text))
         return message, run
 
     def _spawn(self, coroutine):
@@ -184,48 +182,56 @@ class FamilyService:
             'item': reminder['item'],
         }))
 
-    async def _post_to_robot(self, path, payload):
-        """One attempt plus one retry, then give up quietly: the record is
-        already stored, and the family app must not fail because the dog is
-        unreachable."""
-        if self.mock or not self.robot_backend_url:
-            return False
+    async def _deliver(self, path, payload):
+        """One attempt plus one retry against robot_backend.
+
+        Returns (delivered, last_error). The retry policy lives here alone so
+        it cannot drift between the run dispatch and the record dispatches.
+        """
         url = f'{self.robot_backend_url}{path}'
+        last_error = 'unknown dispatch error'
         for attempt in range(2):
             try:
                 response = await self.dispatch_fn(url, payload, self.dispatch_timeout)
                 if 200 <= response.status_code < 300:
-                    return True
-            except httpx.HTTPError:
-                pass
+                    return True, None
+                last_error = f'robot_backend returned {response.status_code}'
+            except httpx.HTTPError as exc:
+                last_error = f'{type(exc).__name__}: {exc}' if str(exc) else type(exc).__name__
             if attempt == 0:
                 await asyncio.sleep(0.5)
-        self.emit('robot_unreachable', {'path': path, 'payload_id': payload.get('message_id') or payload.get('reminder_id')})
-        return False
+        return False, last_error
+
+    async def _post_to_robot(self, path, payload):
+        """Send a stored record onward. A failure is announced but not raised:
+        the record is already saved, and the family app must not fail because
+        the dog is unreachable."""
+        if self.mock or not self.robot_backend_url:
+            return False
+        delivered, _ = await self._deliver(path, payload)
+        if not delivered:
+            self.emit('robot_unreachable', {
+                'path': path,
+                'payload_id': payload.get('message_id') or payload.get('reminder_id')})
+        return delivered
 
     async def _dispatch(self, run_id, author_id, text):
+        """Send a family message's errand to the robot and record the outcome
+        on its run."""
         if self.mock:
             await self._run_mock_sequence(run_id, text, HOUSEHOLD[author_id]['name'])
             return
         if not self.robot_backend_url:
             self._mark_unreachable(run_id, 'ROBOT_BACKEND_URL is not configured')
             return
-        payload = {'run_id': run_id, 'author_id': author_id, 'author_name': HOUSEHOLD[author_id]['name'],
-                   'text': text, 'dispatched_at': self.clock()}
-        url = f'{self.robot_backend_url}/dispatch'
-        last_error = 'unknown dispatch error'
-        for attempt in range(2):  # one attempt plus one retry
-            try:
-                response = await self.dispatch_fn(url, payload, self.dispatch_timeout)
-                if 200 <= response.status_code < 300:
-                    self._update_status(run_id, 'running')
-                    return
-                last_error = f'robot_backend returned {response.status_code}'
-            except httpx.HTTPError as exc:
-                last_error = f'{type(exc).__name__}: {exc}' if str(exc) else type(exc).__name__
-            if attempt == 0:
-                await asyncio.sleep(0.5)
-        self._mark_unreachable(run_id, last_error)
+        delivered, error = await self._deliver('/dispatch', {
+            'run_id': run_id, 'author_id': author_id,
+            'author_name': HOUSEHOLD[author_id]['name'],
+            'text': text, 'dispatched_at': self.clock()})
+        if delivered:
+            self._update_status(run_id, 'running')
+        else:
+            self._mark_unreachable(run_id, error)
 
     def _mark_unreachable(self, run_id, error):
         run = self.runs.get(run_id)

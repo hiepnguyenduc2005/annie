@@ -36,8 +36,9 @@ Request:
  "author_name": "Zach", "text": "How are you feeling today?", "dispatched_at": 1789800000123}
 ```
 
-Any 2xx response is treated as "robot_backend accepted the run"; the run moves
-to `running`. The response body is currently ignored. `robot_backend` should
+Any 2xx response means only "robot_backend accepted the run". The run stays
+`dispatched`, or becomes `queued` when the response body reports `state=queued`.
+Only a progress callback changes it to `running`. `robot_backend` should
 run its navigate/speak/listen/recall/speak sequence asynchronously after
 returning, and report progress through the endpoint below — app_backend does
 not poll or hold a connection open waiting for it.
@@ -60,7 +61,7 @@ Request:
 ```
 
 `kind` is one of `navigating`, `arrived`, `speaking`, `listening`, `heard`,
-`recalling`, `recalled`, `completed`, `failed`. app_backend adds two derived
+`recalling`, `recalled`, `completed`, `failed`, `cancelled`. app_backend adds two derived
 fields to the stored event before returning it to clients — `summary` (a
 display line) and `speaker` (`annie`, `resident` or `system`). Those are
 app_backend's own output: **do not send them**, and expect clients to render
@@ -73,12 +74,44 @@ Successful ingestion returns 202 with the stored event.
 
 ## Run lifecycle
 
-`dispatched` (accepted by app_backend, dispatch in flight) → `running`
-(robot_backend acknowledged the dispatch, or any progress event arrived) →
-`completed` | `failed` (from an explicit terminal event) | `unreachable`
-(dispatch never got through to robot_backend). `unreachable`, `completed`, and
-`failed` are all terminal — no further event is accepted once a run reaches
-one of them.
+`dispatched` (accepted by app_backend) → optional `queued` (waiting in the
+robot errand FIFO) → `running` (progress callback received) → `completed` or
+`failed`. `unreachable` means dispatch failed; `cancelled` means the operator
+cancelled the task. Every terminal state rejects later events.
+
+An identical `author_id`, `text`, and `reminder_id` while a run is active
+returns its existing `run_id` with `deduplicated: true`; it does not enqueue a
+second errand. The optional integer `reminder_id` associates the Remind button
+with its progress and completion. Missing execution events fail the run after
+`ANNIE_RUN_EVENT_DEADLINE_S` of inactivity (120 seconds by default), with an
+explicit error; silence never becomes delivery.
+
+## Pause from the family app
+
+`POST /api/family/pause {}` requires the family bearer token. It cancels all
+unfinished app runs and calls authenticated `POST {ROBOT_BACKEND_URL}/pause`.
+The errand service cancels the active task, clears queued tasks, and requests
+a software stop. It blocks new dispatch while cancellation is settling. A new
+explicit message starts fresh; cancelled tasks never replay automatically.
+
+Both pause endpoints return:
+
+```json
+{"paused": true, "cancelled_runs": ["5488e7cb-8d54-4c59-8e02-9b739d694a81"], "stop_confirmed": false}
+```
+
+`paused` reports task cancellation. `stop_confirmed` requires a successful
+body stop receipt, rather than HTTP queue acceptance. A timeout, disconnected
+body, or missing acknowledgment leaves it false. Even a firmware acknowledgment
+is not a measurement that the physical dog has stopped or a hardware emergency
+stop. Repeated pause calls are safe and do not revive cancelled tasks.
+
+The body's `POST /stop {command_id}` returns a correlated accepted receipt;
+poll `GET /command/{command_id}` for `state`, actual `stop_code`, and
+`processed_at_ms`. Only code zero confirms the software acknowledgment.
+`GET /api/dog/status` also exposes optional `motion_enabled`, `paused`, and
+`source`. A connected camera with `motion_enabled=false` cannot perform an
+in-person reminder; the native app explains this before queuing one.
 
 ## Implementing the robot side (handoff)
 

@@ -24,6 +24,7 @@ struct RemindersView: View {
         VStack(spacing: 0) {
             List {
                 ForEach(state.reminders) { reminder in
+                    VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
                         Button {
                             Task { await state.toggle(reminder) }
@@ -47,12 +48,12 @@ struct RemindersView: View {
                             // The reminder goes through the same path as a family message: Annie finds her,
                             // says it, listens for the reply; the run shows under Ask Annie.
                             Button {
-                                Task { await state.send("tell Grandma to \(reminder.title.prefix(1).lowercased() + reminder.title.dropFirst())") }
+                                Task { await state.remind(reminder) }
                             } label: {
                                 // One line, always: the title wraps instead of the button.
                                 HStack(spacing: 5) {
                                     Image(systemName: "pawprint.fill")
-                                    Text("Remind")
+                                    Text(state.reminderInFlight == reminder.id ? "Sending…" : "Remind")
                                 }
                                 .font(.caption.weight(.semibold))
                                 .lineLimit(1)
@@ -63,14 +64,44 @@ struct RemindersView: View {
                             .controlSize(.small)
                             .fixedSize(horizontal: true, vertical: false)
                             .accessibilityLabel("Remind her: \(reminder.title)")
+                            .disabled(state.sending || state.pausing || state.reminderRun(for: reminder).map { !$0.finished } == true)
                         }
                     }
                     .padding(.vertical, 2)
+                    if let run = state.reminderRun(for: reminder) {
+                        HStack(alignment: .top, spacing: 8) {
+                            if !run.finished { ProgressView().controlSize(.small) }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(run.statusLabel).font(.caption.weight(.semibold))
+                                if let event = run.events.last {
+                                    Text(event.summary).font(.caption)
+                                }
+                            }
+                            Spacer()
+                            if !run.finished {
+                                Button("Pause") { Task { await state.pauseTasks() } }
+                                    .buttonStyle(.bordered)
+                                    .disabled(state.pausing)
+                            }
+                        }
+                        .foregroundStyle(["failed", "unreachable", "unknown"].contains(run.status) ? Palette.alert : Palette.slate)
+                        .padding(.bottom, 5)
+                    }
+                    }
                 }
             }
             .listStyle(.inset)
 
             Divider()
+
+            if let note = state.reminderNote ?? state.commandNote {
+                Text(note.text)
+                    .font(.footnote)
+                    .foregroundStyle(note.isError ? Palette.alert : Palette.slate)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            }
 
             HStack {
                 Button {

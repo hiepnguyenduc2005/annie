@@ -24,7 +24,8 @@ def test_dog_routes_degrade_when_the_dog_process_is_down(monkeypatch):
     monkeypatch.setenv('ANNIE_DOG_VIEW_URL', 'http://127.0.0.1:9')  # nothing listens on port 9
     with TestClient(create_app(':memory:', mode='live', token='')) as c:
         s = c.get('/api/dog/status')
-        assert s.status_code == 200 and s.json() == {'available': False, 'connected': False}
+        assert s.status_code == 200 and s.json() == {'available': False, 'connected': False,
+                                                     'motion_enabled': None, 'paused': None}
         assert c.post('/api/dog/command', json={'action': 'explore'}).status_code == 503
         assert c.post('/api/dog/command', json={'action': 'fly'}).status_code == 422
         v = c.get('/api/settings/voice')

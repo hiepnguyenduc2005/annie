@@ -103,6 +103,7 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
             mock=os.getenv('ANNIE_FAMILY_MOCK_ROBOT', 'false').lower() == 'true',
             recall_provider=recall_provider,
             on_outcome=lambda run: app.state.apply_outcome(run),
+            event_deadline_s=float(os.getenv('ANNIE_RUN_EVENT_DEADLINE_S', '120')),
         )
         app.state.schema = schema_store or SchemaStore()
         await app.state.schema.connect()
@@ -111,6 +112,7 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
             while True:
                 await asyncio.sleep(.25)
                 app.state.service.tick()
+                app.state.family.tick()  # inactivity deadline: live runs never hang forever
         task = asyncio.create_task(ticker())
         try:
             yield
@@ -268,10 +270,27 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
 
     @router.post('/api/messages', status_code=202)
     async def post_message(body: MessageIn):
+        if app.state.family.pausing:
+            raise HTTPException(409, 'Pause is still being confirmed; send a new request afterwards')
         # Must never block on robot_backend: the dispatch runs as a background
         # task started inside post_message, so this returns immediately.
-        _message, run = app.state.family.post_message(body.author_id, body.text, reminder_id=body.reminder_id)
-        return {'run_id': run['run_id'], 'status': run['status']}
+        # An exact repeat of a still-active message returns the existing run instead
+        # of piling a duplicate errand onto the dog's queue.
+        _message, run, created = app.state.family.post_message(body.author_id, body.text,
+                                                               reminder_id=body.reminder_id)
+        receipt = {'run_id': run['run_id'], 'status': run['status']}
+        if not created:
+            receipt['deduplicated'] = True
+        return receipt
+
+    @router.post('/api/family/pause')
+    async def family_pause():
+        """Pause everything family-triggered: live runs become cancelled (terminal), their
+        in-process tasks stop, and the errand service is told to cancel its active errand,
+        clear its queue and issue the software body stop. stop_confirmed=false means that
+        stop was not acknowledged — treat the dog's motion state as unknown. Resume by
+        sending a new explicit message; nothing replays automatically."""
+        return await app.state.family.pause()
 
     @router.get('/api/runs/{run_id}')
     async def get_run(run_id: UUID):
@@ -336,10 +355,11 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
                         'checkins': st.get('checkins'), 'missions': (t.get('missions') or [])[:6], 'voice': t.get('voice') or {},
                         'objects': t.get('objects') or [], 'sentences': (t.get('graph_sentences') or [])[:4], 't_s': st.get('t_s'),
                         'source': t.get('source') or 'hardware', 'conversations': (t.get('conversations') or [])[-8:],
-                        'concerns': (t.get('concerns') or [])[-4:], 'instructions': (t.get('instructions') or [])[-6:]}
+                        'concerns': (t.get('concerns') or [])[-4:], 'instructions': (t.get('instructions') or [])[-6:],
+                        'motion_enabled': t.get('motion_enabled'), 'paused': t.get('paused')}
         except Exception:
             pass
-        return {'available': False, 'connected': False}
+        return {'available': False, 'connected': False, 'motion_enabled': None, 'paused': None}
 
     @router.post('/api/dog/command')
     async def dog_command(body: DogCommandIn):

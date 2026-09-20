@@ -178,7 +178,7 @@ struct AskAnnieView: View {
                     ForEach(tasks, id: \.self) { task in
                         Button(task) { run(task) }
                             .buttonStyle(TaskChipStyle())
-                            .disabled(state.sending)
+                            .disabled(state.sending || state.pausing)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -224,7 +224,7 @@ struct AskAnnieView: View {
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespaces).isEmpty && !state.sending
+        !draft.trimmingCharacters(in: .whitespaces).isEmpty && !state.sending && !state.pausing
     }
 
     private func toggleDictation() {
@@ -239,7 +239,12 @@ struct AskAnnieView: View {
         draft = ""
         draftBeforeDictation = ""
         composing = false
-        Task { await state.submit(text) }
+        Task {
+            await state.submit(text)
+            if state.sendError != nil && draft.isEmpty {
+                draft = text
+            }
+        }
     }
 
     private func run(_ task: String) {
@@ -433,6 +438,7 @@ private struct MessageThreadItem: View {
                 ForEach(run.events) { event in
                     RunEventRow(event: event)
                 }
+                if !run.finished { PauseErrandButton() }
             } else {
                 // Sent, but the run hasn't been read back yet.
                 HStack(spacing: 6) {
@@ -443,6 +449,19 @@ private struct MessageThreadItem: View {
                 }
             }
         }
+    }
+}
+
+private struct PauseErrandButton: View {
+    @EnvironmentObject private var state: AppState
+    var body: some View {
+        Button {
+            Task { await state.pauseTasks() }
+        } label: {
+            Label(state.pausing ? "Pausing…" : "Pause check-in", systemImage: "pause.circle")
+        }
+        .buttonStyle(.bordered)
+        .disabled(state.pausing)
     }
 }
 
@@ -656,7 +675,7 @@ private struct RunStatusChip: View {
     private var color: Color {
         switch run.status {
         case "completed": return Palette.slate
-        case "unreachable", "failed": return Palette.alert
+        case "unreachable", "failed", "unknown": return Palette.alert
         default: return Palette.steel
         }
     }
@@ -664,6 +683,7 @@ private struct RunStatusChip: View {
     private var symbol: String? {
         switch run.status {
         case "completed": return "checkmark"
+        case "cancelled", "paused": return "pause.fill"
         case "unreachable", "failed": return "exclamationmark.triangle.fill"
         default: return nil
         }

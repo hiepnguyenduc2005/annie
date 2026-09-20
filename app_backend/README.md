@@ -125,6 +125,17 @@ progress, not record. The durable half of the same message lives in the
 this dispatch call and `POST /internal/events` implement is documented in
 [contract/family_messages.md](../contract/family_messages.md).
 
+The native Remind button sends its `reminder_id` and displays progress inline.
+An active identical request reuses its run ID. Accepted or queued requests do
+not count as execution; progress comes from the robot's callbacks. An inactive
+run fails visibly after the configured event deadline.
+
+`POST /api/family/pause {}` cancels unfinished runs and clears the errand
+service's active and queued work. Its receipt separates task cancellation from
+the body's software-stop acknowledgment. A new explicit request starts fresh;
+there is no automatic replay of cancelled reminders. The route uses the normal
+family authentication, and the errand `/pause` uses `X-Internal-Secret`.
+
 Environment variables:
 
 - `ROBOT_BACKEND_URL`: the GX10's LAN address, e.g. `http://192.168.1.42:8001`.
@@ -133,6 +144,9 @@ Environment variables:
 - `ANNIE_ROBOT_DISPATCH_TIMEOUT_S`: per-attempt timeout, default 3s. Dispatch
   makes exactly one attempt plus one retry; if both fail, the run is marked
   `unreachable` and `POST /api/messages` has already returned regardless.
+- `ANNIE_RUN_EVENT_DEADLINE_S`: inactivity deadline, default 120s, bounded to
+  30–900s. If execution events stop arriving, the run fails with a visible
+  error. This does not establish whether a disconnected physical robot stopped.
 - `ANNIE_INTERNAL_SECRET`: shared secret `robot_backend` must send as
   `X-Internal-Secret` on `POST /internal/events`. Required — an unconfigured
   secret rejects every request, it never falls open.

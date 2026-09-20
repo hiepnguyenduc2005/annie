@@ -72,6 +72,10 @@ final class AppState: ObservableObject {
     @Published var runs: [String: FamilyRun] = [:]
     @Published var sending = false
     @Published var sendError: String?
+    @Published private(set) var reminderRunIDs: [Int: String] = [:]
+    @Published private(set) var reminderInFlight: Int?
+    @Published var reminderNote: CommandNote?
+    @Published private(set) var pausing = false
 
     // Instructions that went straight to the dog, and Annie's own exchanges
     // with whoever she met at home. Both live on the Ask Annie timeline.
@@ -300,23 +304,80 @@ final class AppState: ObservableObject {
     }
 
     /// The family-errand path itself. Callers hold `sending`.
-    private func deliverMessage(_ trimmed: String, insteadOfDog: Bool) async {
+    @discardableResult
+    private func deliverMessage(_ trimmed: String, insteadOfDog: Bool, reminderID: Int? = nil) async -> String? {
         sendError = nil
         guard live else {
             sendError = "Not connected to Annie. Set the server under Profile, Settings, Advanced."
-            return
+            return nil
+        }
+        await refreshDog()
+        guard let dog, dog.available, dog.connected else {
+            sendError = "Your phone reached the server, but Annie is offline. The request wasn't queued."
+            return nil
+        }
+        guard dog.motion_enabled != false else {
+            sendError = "Annie is connected in camera-only mode. Enable movement on the robot service before sending an in-person request."
+            return nil
         }
         do {
-            let ack = try await api.sendMessage(authorID: authorID, text: trimmed)
+            let ack = try await api.sendMessage(authorID: authorID, text: trimmed, reminderID: reminderID)
             if insteadOfDog { fallbackRunIDs.insert(ack.run_id) }
             thread = (try? await api.thread()) ?? thread
             await refreshRuns()
             watchUnfinishedRuns()
+            return ack.run_id
         } catch {
             sendError = humanMessage(for: error)
             // Only a request that never arrived means the backend is gone. A
             // "busy" or "not understood" answer is the backend working.
             if isTransportFailure(error) { live = false }
+            return nil
+        }
+    }
+
+    func reminderRun(for reminder: Reminder) -> FamilyRun? {
+        if let id = reminderRunIDs[reminder.id], let run = runs[id] { return run }
+        return runs.values.filter { $0.reminder_id == reminder.id }.max { $0.created_at < $1.created_at }
+    }
+
+    func remind(_ reminder: Reminder) async {
+        guard !sending, !pausing else { return }
+        if let run = reminderRun(for: reminder), !run.finished { return }
+        sending = true
+        reminderInFlight = reminder.id
+        reminderNote = nil
+        defer { sending = false; reminderInFlight = nil }
+        let text = "tell Grandma to \(reminder.title.prefix(1).lowercased() + reminder.title.dropFirst())"
+        if let runID = await deliverMessage(text, insteadOfDog: false, reminderID: reminder.id) {
+            reminderRunIDs[reminder.id] = runID
+            reminderNote = .init(text: "Request received. Progress appears below the reminder and in Ask Annie.", isError: false)
+        } else {
+            reminderNote = .init(text: sendError ?? "The reminder wasn't sent.", isError: true)
+        }
+    }
+
+    /// Pause cancels unfinished errands; a new explicit request starts fresh.
+    /// A network acknowledgment alone never proves that the physical dog stopped.
+    func pauseTasks() async {
+        guard !pausing else { return }
+        reminderNote = nil
+        guard live else {
+            commandNote = .init(text: "Can't reach the server to pause Annie. Check her directly.", isError: true)
+            return
+        }
+        pausing = true
+        defer { pausing = false }
+        do {
+            let receipt = try await api.pauseFamily()
+            commandNote = .init(text: receipt.stop_confirmed
+                ? "Paused. Unfinished tasks were cancelled. Send a new request when ready."
+                : "Tasks cancelled, but Annie's stop wasn't confirmed. Check her directly.",
+                isError: !receipt.stop_confirmed)
+            await refreshRuns()
+            await refreshDog()
+        } catch {
+            commandNote = .init(text: "Pause wasn't confirmed. " + humanMessage(for: error), isError: true)
         }
     }
 
@@ -499,6 +560,7 @@ final class AppState: ObservableObject {
 
     /// A Controls button. Stop is never blocked behind another command.
     func command(_ action: DogAction) async {
+        if action == .stop { await pauseTasks(); return }
         guard live else {
             commandNote = CommandNote(text: "Not connected to Annie. Set the server under Profile, Settings, Advanced.", isError: true)
             return

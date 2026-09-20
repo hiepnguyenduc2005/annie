@@ -88,7 +88,7 @@ struct ContentView: View {
                     // word on where the answer is coming from, no jargon.
                     SimulatorPill()
                 } else {
-                    Text(state.live ? "Live" : "Offline \u{00b7} demo data")
+                    Text(state.live ? (state.dog?.connected == true ? "Dog connected" : "Dog offline") : "Server offline")
                         .font(.caption.weight(.semibold))
                         .lineLimit(1)
                         .fixedSize()

@@ -115,8 +115,8 @@ struct AnnieAPI {
     // Sending returns as soon as the backend has the message; the robot's
     // 60-90 second errand is reported afterwards through the run.
 
-    func sendMessage(authorID: String, text: String) async throws -> DispatchAck {
-        let body = NewMessage(author_id: authorID, text: text)
+    func sendMessage(authorID: String, text: String, reminderID: Int? = nil) async throws -> DispatchAck {
+        let body = NewMessage(author_id: authorID, text: text, reminder_id: reminderID)
         return try JSONDecoder().decode(DispatchAck.self, from: try await sendJSON("api/messages", method: "POST", body: body))
     }
 
@@ -126,6 +126,11 @@ struct AnnieAPI {
 
     func run(id: String) async throws -> FamilyRun {
         try JSONDecoder().decode(FamilyRun.self, from: try await send("api/runs/\(id)", method: "GET"))
+    }
+
+    func pauseFamily() async throws -> FamilyPauseReceipt {
+        try JSONDecoder().decode(FamilyPauseReceipt.self,
+            from: try await sendJSON("api/family/pause", method: "POST", body: [String: Bool](), timeout: 10))
     }
 
     // MARK: The dog: live status and direct controls

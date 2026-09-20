@@ -60,10 +60,16 @@ def test_unknown_author_rejected():
         assert client.post('/api/messages', json={'author_id': 'nobody', 'text': 'hi'}).status_code == 422
 
 
-def test_dispatch_success_marks_run_running():
+def test_dispatch_202_stays_dispatched_until_first_real_callback():
+    # An HTTP 202 only means the errand service accepted the run; 'running' is reserved
+    # for actual progress reported through /internal/events.
     family = FamilyService(robot_backend_url='http://robot.example:8001', dispatch_fn=ok_dispatch)
-    with make_client(family) as client:
+    with make_client(family, internal_secret='s3cret') as client:
         run_id = client.post('/api/messages', json={'author_id': 'zach', 'text': 'hi'}).json()['run_id']
+        time.sleep(0.1)  # let the dispatch background task finish
+        assert client.get(f'/api/runs/{run_id}').json()['status'] == 'dispatched'
+        client.post('/internal/events', headers={'X-Internal-Secret': 's3cret'},
+                    json={'run_id': run_id, 'kind': 'navigating', 'payload': {}, 'at': 1})
         run = wait_for(lambda: (r := client.get(f'/api/runs/{run_id}').json())['status'] == 'running' and r)
         assert run['status'] == 'running'
 

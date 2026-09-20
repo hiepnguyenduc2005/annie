@@ -44,7 +44,19 @@ private struct VoiceSettingsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Eyebrow(text: "Voice")
+            HStack {
+                Eyebrow(text: "Voice · ElevenLabs + Deepgram")
+                Spacer()
+                Button { Task { await state.loadVoiceSettings() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .accessibilityLabel("Refresh voice connection")
+            }
+
+            LabeledContent("ElevenLabs · speaker", value: providerStatus(configured: voice?.elevenlabs, selected: voice?.speak_via == "elevenlabs"))
+                .font(.footnote)
+            LabeledContent("Deepgram · microphone", value: providerStatus(configured: voice?.deepgram, selected: voice?.hear_via == "deepgram"))
+                .font(.footnote)
 
             Toggle(isOn: cloudBinding) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -136,6 +148,12 @@ private struct VoiceSettingsCard: View {
         case "off": return "nothing (off)"
         default: return raw
         }
+    }
+
+    private func providerStatus(configured: Bool?, selected: Bool) -> String {
+        guard voice?.available == true else { return "Connection unavailable" }
+        if selected { return "Selected" }
+        return configured == true ? "Configured · inactive" : "Key needed"
     }
 }
 

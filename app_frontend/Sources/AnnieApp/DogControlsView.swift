@@ -27,7 +27,7 @@ struct DogControlsCard: View {
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
-    private var dogOnline: Bool { state.dog?.available == true }
+    private var dogOnline: Bool { state.dog?.available == true && state.dog?.connected == true && state.dog?.motion_enabled != false }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -37,11 +37,11 @@ struct DogControlsCard: View {
                     SimulatorPill()
                 }
                 Spacer()
-                if compact {
+                if state.live {
                     Button {
-                        Task { await state.command(.stop) }
+                        Task { await state.pauseTasks() }
                     } label: {
-                        Label("Stop", systemImage: DogAction.stop.symbol)
+                        Label(state.pausing ? "Pausing…" : "Pause", systemImage: "pause.fill")
                             .font(.subheadline.weight(.semibold))
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
@@ -49,6 +49,7 @@ struct DogControlsCard: View {
                             .foregroundStyle(.white)
                     }
                     .buttonStyle(.plain)
+                    .disabled(state.pausing)
                 }
                 if let toggle {
                     Button(action: toggle) {
@@ -82,6 +83,8 @@ struct DogControlsCard: View {
                     }
                 }
 
+            }
+
                 if let note = state.commandNote {
                     Text(note.text)
                         .font(.footnote)
@@ -89,7 +92,6 @@ struct DogControlsCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .transition(.opacity)
                 }
-            }
         }
         .annieCard(padding: 14)
         .animation(.easeInOut(duration: 0.2), value: compact)
@@ -167,13 +169,16 @@ private struct DogStatusLine: View {
         guard dog.available else {
             return "Annie's dog isn't answering. The buttons wake up again as soon as she is back."
         }
+        if dog.motion_enabled == false {
+            return "The camera is connected, but movement is disabled on the robot service. Reminders that need Annie to approach cannot run."
+        }
         var parts: [String] = []
         switch dog.people ?? 0 {
         case 0: parts.append("No one in view")
         case 1: parts.append("1 person in view")
         case let n: parts.append("\(n) people in view")
         }
-        if let mission = dog.missions.first(where: \.isActive) {
+        if let mission = dog.missions.first(where: { $0.state == "executing" }) {
             let name = mission.name.replacingOccurrences(of: "_", with: " ")
             parts.append("Working on: " + (mission.detail.map { "\(name), \($0)" } ?? name))
         }

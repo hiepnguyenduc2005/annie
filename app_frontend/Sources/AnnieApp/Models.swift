@@ -59,6 +59,13 @@ struct ThreadMessage: Codable, Identifiable, Equatable {
 struct NewMessage: Codable {
     let author_id: String
     let text: String
+    var reminder_id: Int? = nil
+}
+
+struct FamilyPauseReceipt: Decodable {
+    let paused: Bool
+    let cancelled_runs: [String]
+    let stop_confirmed: Bool
 }
 
 struct DispatchAck: Codable {
@@ -87,19 +94,31 @@ struct FamilyRun: Codable, Identifiable, Equatable {
     let status: String
     let created_at: Int
     let events: [RunEvent]
+    var reminder_id: Int? = nil
 
     var id: String { run_id }
 
     /// True once the robot can send nothing further for this run.
-    var finished: Bool { ["completed", "failed", "unreachable"].contains(status) }
+    var finished: Bool { ["completed", "failed", "unreachable", "cancelled", "paused", "unknown"].contains(status) }
 
     var statusLabel: String {
         switch status {
-        case "dispatched": return "Sending to Annie\u{2026}"
-        case "running": return "Annie is on it"
+        case "dispatched", "accepted", "queued": return "Queued · waiting for Annie"
+        case "running":
+            switch events.last?.kind {
+            case "navigating": return "Looking for Jeanine"
+            case "arrived": return "Found Jeanine"
+            case "speaking": return "Speaking to Jeanine"
+            case "listening": return "Listening for her reply"
+            case "heard": return "Reply received"
+            case "recalling", "recalled": return "Checking memory"
+            default: return "Waiting for execution confirmation"
+            }
         case "completed": return "Delivered"
         case "failed": return "Annie couldn't finish"
         case "unreachable": return "Couldn't reach Annie"
+        case "cancelled", "paused": return "Paused · task cancelled"
+        case "unknown": return "Status unavailable · check Annie"
         default: return status
         }
     }
@@ -220,6 +239,8 @@ struct DogStatus: Decodable, Equatable {
     let missions: [DogMission]
     let sentences: [String]   // what Annie remembers, already in plain words
     let source: String?       // "hardware" or "simulation"
+    var motion_enabled: Bool? = nil
+    var paused: Bool? = nil
     let t_s: Double?          // the dog process' clock now, to date `conversations`
     let conversations: [DogConversation]
 
@@ -227,7 +248,7 @@ struct DogStatus: Decodable, Equatable {
 
     private enum Keys: String, CodingKey {
         case available, connected, mode, action, battery, people, greetings, checkins, missions, sentences
-        case source, t_s, conversations
+        case source, t_s, conversations, motion_enabled, paused
     }
 
     init(available: Bool, connected: Bool, mode: String? = nil, action: String? = nil, battery: Double? = nil,
@@ -252,6 +273,8 @@ struct DogStatus: Decodable, Equatable {
         missions = (try? c.decode([DogMission].self, forKey: .missions)) ?? []
         sentences = (try? c.decode([String].self, forKey: .sentences)) ?? []
         source = try? c.decode(String.self, forKey: .source)
+        motion_enabled = try? c.decode(Bool.self, forKey: .motion_enabled)
+        paused = try? c.decode(Bool.self, forKey: .paused)
         t_s = try? c.decode(Double.self, forKey: .t_s)
         conversations = (try? c.decode(LossyArray<DogConversation>.self, forKey: .conversations))?.elements ?? []
     }
@@ -264,6 +287,8 @@ struct DogStatus: Decodable, Equatable {
     /// "voice_stop", planner states such as "blocked", and "brain:<action>"
     /// when the situated agent is steering; the prefix is dropped.
     var modeLabel: String {
+        if motion_enabled == false { return "Camera only · movement disabled" }
+        if paused == true { return "Paused · ready for a new request" }
         let raw = (mode ?? "").lowercased()
         let key = raw.split(separator: ":").last.map(String.init) ?? raw
         switch key {
@@ -271,7 +296,7 @@ struct DogStatus: Decodable, Equatable {
         case "cruise", "explore", "exploring", "wander": return "Exploring"
         case "follow": return "Following someone"
         case "approach": return "Walking up to someone"
-        case "blocked": return "Finding a way round"
+        case "blocked": return "Stopped by an obstacle"
         case "backoff", "back_off": return "Backing away"
         case "turn", "turn_left", "turn_right": return "Turning"
         case "scan": return "Looking around"

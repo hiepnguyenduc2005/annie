@@ -191,8 +191,42 @@ still uses the simulator's motion gates. These are simulator workflows only.
   dog (`--sim`, `robot/dog/sim/`) when the hardware is off.
 - **Perception.** Objects come from the open-vocabulary detector (YOLO-World, folded labels such as
   `door`) when its baked checkpoint exists, warmed off the control thread; the LiDAR guard looks at
-  0.10-0.75 m, stops at 0.6 m, creeps on a stale map, and a detected object filling the view counts as
+  0.10-0.75 m, stops at 0.6 m, holds forward movement when the enabled LiDAR is stale, and a detected object filling the view counts as
   an obstacle. `look_for(thing)` scans with the camera and asks the vision model where the thing is.
 - **MCP.** `robot/dog/mcp_server.py` exposes the dog (status, instruct, command, say, listen, find_person,
   look_for, where_is, people, voice settings, memory) to any MCP client; elder-care skills are
   compositions of the primitives (`robot/dog/planning/care_skills.py`).
+
+## Demo readiness with the physical dog off
+
+The iPhone app is the product surface. A separate loopback stack must run the same
+family API, errand relay, mission board, and rendered simulated dog without using
+the physical robot, microphone, speaker, cloud providers, or real household data.
+Simulation and mocked audio remain explicit in telemetry, receipts, and the app.
+The demo launch refuses occupied ports, reports readiness, and cleans up only its
+own processes. See [the simulator runbook](docs/SIM_DOG.md).
+
+The final acceptance pass includes both Python environments, family and robot API
+suites, contract exports, JavaScript checks, the iPhone build, live HTTP mission
+receipts, and seeded randomized message/fall stories. Record failures and exact
+simulation assumptions; a passing software run does not qualify physical motion.
+
+Nested mission execution must keep honoring stop, stale telemetry, battery and
+boundary limits. Motion timeouts and unsupported instructions fail visibly.
+Named-person delivery must not silently fall back to a stranger. Re-acquiring a
+lying person under a new tracker ID must not create repeated check-ins for the
+same episode.
+
+`--start-paused` (also `--manual-on-demand`) starts the camera and app connection
+without standing or patrolling. Explicit movement commands arm the guarded
+runtime; speech and listening can remain stationary. Stop cancels queued work
+and holds until a new command. `--no-motion` rejects movement and approach
+requests immediately instead of leaving them running until timeout. Telemetry
+reports `motion_enabled`, `paused`, and session `source` so the app can present
+the actual capability.
+
+The requested Go2 Air door-push behavior remains a separate unverified capability.
+It needs bounded contact control, an abort/recovery procedure, and supervised
+physical validation. Camera recognition of an ajar door alone does not authorize
+disabling the collision guard. Bipedal/firmware-unavailable actions are not
+reported as executed.

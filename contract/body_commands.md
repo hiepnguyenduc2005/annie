@@ -23,7 +23,7 @@ observations, not `/frame.jpg`.
 | GET | `/frame.jpg` | latest camera frame as JPEG (≤640 px wide); 404 before the first frame |
 | POST | `/command` | `{"command_id"?: str, "name": str, "args": {...}}` → **202** receipt; the same `command_id` again → **200** current receipt (idempotent); another command while one is executing → **409** `{"error": "busy", "current": receipt}`; bad name/args → **400** `{"error": reason}` |
 | GET | `/command/{command_id}` | the receipt; 404 for an unknown id (the body keeps the last 200) |
-| POST | `/stop` | cancel the executing command (its state becomes `cancelled`) and send a priority StopMove → `{"stop_code", "ack_ms", "note"}` |
+| POST | `/stop` | cancel executing/queued work and request priority StopMove. Standalone body: synchronous `{"stop_code", "ack_ms", "note"}`. Patrol runtime: optional `{"command_id": str}`, **202** correlated pending receipt (idempotent repeat **200**); poll `/command/{command_id}` for acknowledgment. |
 
 Receipt: `{"command_id", "name", "args", "state", "accepted_at_ms", "started_at_ms"?,
 "finished_at_ms"?, "progress"?, "result": {...}|null, "error": str|null, "stop_code"?}`.
@@ -35,12 +35,26 @@ Receipt: `{"command_id", "name", "args", "state", "accepted_at_ms", "started_at_
 | `name` | `args` | `result` | Notes |
 | --- | --- | --- | --- |
 | `stand`, `sit`, `hello`, `stretch`, `heart`, `dance` | none | `{"codes": {...}, "note"}` | Firmware sport-mode ids. Tricks other than stand/sit send StandUp + BalanceStand first. Codes are acknowledgments; `"no_ack"` means the request was sent but the firmware did not answer within 8 s (long behaviours). |
-| `stop` | none | `{"stop_code", "ack_ms"}` | Always accepted, even while busy; runs synchronously and returns 200. |
+| `stop` | none | `{"stop_code", "ack_ms"}` | Always accepted, even while busy; standalone body runs synchronously and returns 200. Patrol confirmation is asynchronous (below). |
 | `move` | `vx` m/s in [-0.2, 0.4], `wz` rad/s in [-0.8, 0.8], `duration_s` in [0.1, 10] | `{"vx","wz","duration_s"}` | Streams Move at 10 Hz, then zero velocity + StopMove. |
 | `patrol` | `duration_s` in [1, 300] | `{"collisions", "modes", "distance_from_origin_m"}` | Smart patrol: LiDAR sector ranges + odometry stall → cruise/blocked/backoff/homing (`robot/go2_smart_patrol.py`). |
 | `find_person` | `name` str or null, `timeout_s` in [1, 120] (default 60), `approach` bool (default true) | `{"found", "track_id", "identity", "matched_name", "approached", "searched_s"}` | Wanders (with collision handling) until an upright person is tracked; prefers a face match for `name` when enrolled, otherwise the closest person (`matched_name: false`). With `approach`, walks toward them until the box is close. |
 | `say` | `text` 1–300 chars | `{"played", "where": "host speaker"}` | Blocks until playback ends. The dog has no verified speaker; audio plays on the body host. |
 | `listen` | `max_s` in [1, 15] (default 8) | `{"transcript", "heard", "speech_ms", "where": "host microphone"}` | Host mic → Silero VAD → local Whisper. A transcript is recognised text, not understanding. |
+
+The patrol runtime uses its asynchronous mission board for `stop`: acceptance
+does not mean StopMove was acknowledged. Its pending receipt has `stop_code: null`
+and `processed_at_ms: null`; after processing, `stop_code`, `ack_ms`, and
+`processed_at_ms` appear both at the top level and in `result`. Only an actual
+integer code `0` completes it. Rejection, timeout, or missing acknowledgment
+fails the receipt. Pending stop IDs remain correlated across later commands.
+Stop holds patrol execution until a new explicit command; it does not confirm
+physical stillness or provide a hardware emergency stop.
+
+The patrol runtime also requires an identity match for a named `find_person`
+request and fails on timeout instead of falling back to an unknown person.
+The standalone body behavior in the vocabulary table remains compatible with
+its existing clients.
 
 ## Refusals (receipt `state: failed`, human-readable `error`)
 

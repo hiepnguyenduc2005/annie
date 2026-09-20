@@ -143,8 +143,9 @@ class Body:
 
     def __init__(self, *, ip, aes_key, conn_factory=None, tracker=None, encoder=_encode, speaker=_speak_blocking,
                  listener=_listen_blocking, min_soc=MIN_OPERATING_SOC_PERCENT, stale_s=1.5, rate_hz=10.0,
-                 status=_log, clock=time.time):
+                 status=_log, clock=time.time, identifier=None):
         self.ip, self.aes_key = ip, aes_key
+        self.identifier = identifier  # optional go2_target_id.TargetIdentifier (demo: red shirt = Grandma)
         self.conn_factory = conn_factory or _default_conn_factory
         self._tracker = tracker
         self.encoder, self.speaker, self.listener = encoder, speaker, listener
@@ -285,6 +286,11 @@ class Body:
         jpeg, w, h = self.encoder(self.latest["frame"])
         self.latest["jpeg"], self.latest["w"], self.latest["h"] = jpeg, w, h
         self.people = self.tracker.update(jpeg, now_ms=int(self.clock() * 1000))
+        if self.identifier is not None and self.people:
+            with contextlib.suppress(Exception):
+                import cv2
+                import numpy as np
+                self.identifier.apply(cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR), self.people)
 
     async def _drive(self, duration_s, velocity_fn, receipt):
         """Stream Move at the tick rate until velocity_fn returns done or the duration elapses."""
@@ -396,8 +402,19 @@ class Body:
                 state["hold_ticks"] += 1
                 return 0.0, 0.0, state["hold_ticks"] > 30, state["found"]  # lost for ~3 s: stop where we are
             state["hold_ticks"] = 0
-            vx, wz, reason = follow_command(track["box"], self.latest["w"] or 640, self.latest["h"] or 480, max_vx=0.3)
-            if reason == "too_close" or (reason == "centered" and abs(vx) < 0.03):
+            fw, fh = self.latest["w"] or 640, self.latest["h"] or 480
+            vx, wz, reason = follow_command(track["box"], fw, fh, target_height_frac=0.5, too_close_frac=0.9,
+                                            max_vx=0.5, max_wz=1.0, k_yaw=2.2, k_dist=1.8)
+            cx = (track["box"][0] + track["box"][2]) / 2.0 / float(fw)
+            front = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
+            if abs(cx - 0.5) <= 0.18 and front is not None:  # LiDAR depth: fast while far, stop at ~0.6 m
+                if front < 0.6:
+                    vx, reason = 0.0, "lidar_close"
+                elif reason != "too_close":
+                    vx = min(0.5, max(0.2, 0.4 * (front - 0.6)))
+            if 0.0 < vx < 0.2:
+                vx = 0.2  # walking deadband
+            if reason in ("too_close", "lidar_close") or (reason == "centered" and abs(vx) < 0.03):
                 state["approached"] = True
                 return 0.0, 0.0, True, state["found"]
             state["cmd_vx"] = vx
@@ -568,8 +585,8 @@ def serve(body: Body, host: str, port: int, token: str | None):
     return server
 
 
-async def run_service(*, ip, aes_key, host, port, token, ready=None):
-    body = Body(ip=ip, aes_key=aes_key)
+async def run_service(*, ip, aes_key, host, port, token, ready=None, identifier=None):
+    body = Body(ip=ip, aes_key=aes_key, identifier=identifier)
     server = serve(body, host, port, token)
     _log(f"listening on http://{host}:{port} (token {'set' if token else 'not set'})")
     if ready is not None:
@@ -595,6 +612,8 @@ def main(argv=None):
     parser.add_argument("--ip", type=_private_ipv4, default="192.168.12.1")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8001)
+    parser.add_argument("--target", default=os.environ.get("ANNIE_TARGET", "Grandma:red"),
+                        help="NAME:COLOUR recognised by shirt colour for find_person; empty disables")
     args = parser.parse_args(argv)
     token = os.environ.get("ANNIE_BODY_TOKEN") or None
     if args.host not in ("127.0.0.1", "localhost", "::1") and not token:
@@ -604,8 +623,12 @@ def main(argv=None):
     os.environ["NO_PROXY"] = "*"
     logging.disable(logging.CRITICAL)
     try:
+        identifier = None
+        if args.target:
+            from go2_target_id import TargetIdentifier
+            identifier = TargetIdentifier(*args.target.split(":", 1))
         asyncio.run(run_service(ip=args.ip, aes_key=os.environ.get("UNITREE_AES_128_KEY"), host=args.host,
-                                port=args.port, token=token))
+                                port=args.port, token=token, identifier=identifier))
     except KeyboardInterrupt:
         _log("interrupted")
         return 130

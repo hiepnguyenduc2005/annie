@@ -157,11 +157,13 @@ class AudioDevices:
                                 stderr=subprocess.DEVNULL, timeout=timeout_s).returncode
             if rc != 0:
                 return False
-            import soundfile as sf
-            import sounddevice as sd
-            audio, rate = sf.read(wav, dtype="int16")
-            sd.play(audio, rate, device=idx, blocking=True)
-            Path(wav).unlink(missing_ok=True)
+            try:
+                import soundfile as sf
+                import sounddevice as sd
+                audio, rate = sf.read(wav, dtype="int16")
+                sd.play(audio, rate, device=idx, blocking=True)
+            finally:
+                Path(wav).unlink(missing_ok=True)
             return True
         except Exception:
             return False

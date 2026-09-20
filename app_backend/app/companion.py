@@ -89,12 +89,47 @@ class CompanionService:
     def phone_fact(self):
         return next((f for f in self.memory if f['id'] == PHONE_FACT_ID), None)
 
+    # ---- live facts from the dog process (its space-time graph), merged ahead of the seeded ones ----
+    live_facts: list = []
+
+    def merge_live(self, telemetry: dict, now=None) -> int:
+        """Turn the dog process' /telemetry.json into memory facts: what it remembers (graph sentences), who it
+        greeted, check-ins, instructions. Replaces the previous live batch; ids are negative so they never
+        collide with the seeded/added facts. Returns how many facts came in."""
+        now = now or datetime.now()
+        facts = []
+        base = 10_000
+        for i, sentence in enumerate(list((telemetry or {}).get('graph_sentences') or [])[:8]):
+            facts.append({'id': -(base + i), 'subject': 'annie', 'relation': 'remembers', 'object': 'scene', 'room': 'home',
+                          'timestamp': _iso(now), 'text': sentence[0].upper() + sentence[1:] + ('.' if not sentence.endswith('.') else '')})
+        state = (telemetry or {}).get('state') or {}
+        t_now = float(state.get('t_s') or 0.0)
+        for j, g in enumerate(list((telemetry or {}).get('greetings') or [])[-6:]):
+            ago = max(0.0, t_now - float(g.get('t_s') or 0.0))
+            who = g.get('name') or 'someone'
+            facts.append({'id': -(base + 100 + j), 'subject': 'annie', 'relation': 'greeted', 'object': who, 'room': 'home',
+                          'timestamp': _iso(now - timedelta(seconds=ago)), 'text': f"Said hello to {who}: \"{g.get('text') or ''}\""})
+        for j, c in enumerate(list((telemetry or {}).get('checkins') or [])[-4:]):
+            ago = max(0.0, t_now - float(c.get('t_s') or 0.0))
+            facts.append({'id': -(base + 200 + j), 'subject': 'annie', 'relation': 'checked_on', 'object': 'person', 'room': 'home',
+                          'timestamp': _iso(now - timedelta(seconds=ago)), 'text': 'Someone was lying down; asked if they were alright.'})
+        for j, ins in enumerate(list((telemetry or {}).get('instructions') or [])[-4:]):
+            ago = max(0.0, t_now - float(ins.get('t_s') or 0.0))
+            facts.append({'id': -(base + 300 + j), 'subject': 'family', 'relation': 'asked', 'object': 'annie', 'room': 'home',
+                          'timestamp': _iso(now - timedelta(seconds=ago)),
+                          'text': f"Asked: \"{ins.get('text') or ''}\" -> {ins.get('reply') or ins.get('source') or 'done'}"})
+        self.live_facts = sorted(facts, key=lambda f: f['timestamp'])
+        return len(facts)
+
+    def all_memory(self):
+        return self.memory + self.live_facts
+
     def ask(self, question):
-        # Lexical recall over recorded observations only; no model call, and no
+        # Lexical recall over recorded observations (live ones from the dog first); no model call, and no
         # answer invented when nothing matches.
         words = set(re.findall(r'\w+', question.lower())) - STOP_WORDS
         best, best_score = None, 0
-        for fact in reversed(self.memory):
+        for fact in reversed(self.all_memory()):
             haystack = set(re.findall(r'\w+', (fact['text'] + ' ' + fact['subject'] + ' ' + fact['object']).lower()))
             score = len(words & haystack)
             if score > best_score:

@@ -87,24 +87,43 @@ class CloudVoice:
         self.local_speak, self.local_transcribe = local_speak, local_transcribe
         self.player, self.tts, self.stt = player, tts, stt
         self.stats = {"tts_cloud": 0, "tts_local": 0, "stt_cloud": 0, "stt_local": 0, "tts_ms": None, "stt_ms": None}
+        self.cloud = os.environ.get("ANNIE_VOICE_CLOUD", "1") != "0"  # default: ElevenLabs + Deepgram when keys exist
+
+    def configure(self, *, cloud=None, eleven_key=None, deepgram_key=None, eleven_voice=None) -> dict:
+        """Runtime settings from the family app: toggle cloud voice, replace keys (kept in memory only, never
+        logged). Empty-string keys clear them. Returns `status()`."""
+        if cloud is not None:
+            self.cloud = bool(cloud)
+        if eleven_key is not None:
+            self.eleven_key = eleven_key.strip() or None
+        if deepgram_key is not None:
+            self.deepgram_key = deepgram_key.strip() or None
+        if eleven_voice:
+            self.eleven_voice = eleven_voice.strip()
+        return self.status()
+
+    def status(self) -> dict:
+        en = self.enabled() if callable(self.enabled) else self.enabled
+        return {"cloud": self.cloud, **en, "speak_via": "elevenlabs" if self.cloud and self.eleven_key else "local",
+                "hear_via": "deepgram" if self.cloud and self.deepgram_key else "local", "stats": dict(self.stats)}
 
     @property
     def enabled(self):
         return {"elevenlabs": bool(self.eleven_key), "deepgram": bool(self.deepgram_key)}
 
     def speak(self, text: str) -> bool:
-        if self.eleven_key:
+        if self.cloud and self.eleven_key:
             t0 = time.perf_counter()
             audio = self.tts(text, api_key=self.eleven_key, voice_id=self.eleven_voice)
             self.stats["tts_ms"] = round((time.perf_counter() - t0) * 1000)
-            if audio and self.player(audio):
+            if audio and self.player(audio):  # player: the selected speaker (robot.dog.voice.devices) or afplay
                 self.stats["tts_cloud"] += 1
                 return True
         self.stats["tts_local"] += 1
         return bool(self.local_speak(text)) if self.local_speak else False
 
     def transcribe(self, wav_bytes: bytes) -> str | None:
-        if self.deepgram_key:
+        if self.cloud and self.deepgram_key:
             t0 = time.perf_counter()
             text = self.stt(wav_bytes, api_key=self.deepgram_key)
             self.stats["stt_ms"] = round((time.perf_counter() - t0) * 1000)

@@ -42,6 +42,20 @@ struct RemindersView: View {
                             .strikethrough(reminder.done)
                             .foregroundStyle(reminder.done ? .secondary : .primary)
                         Spacer()
+                        if !reminder.done {
+                            // The reminder goes through the same path as a family message: Annie finds her,
+                            // says it, listens for the reply; the run shows under Ask Annie.
+                            Button {
+                                Task { await state.send("tell Grandma to \(reminder.title.prefix(1).lowercased() + reminder.title.dropFirst())") }
+                            } label: {
+                                Label("Remind her", systemImage: "pawprint.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .labelStyle(.titleAndIcon)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Palette.slate)
+                            .controlSize(.small)
+                        }
                     }
                     .padding(.vertical, 2)
                 }

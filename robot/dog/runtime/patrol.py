@@ -177,9 +177,11 @@ def _whisper_transcribe(wav_bytes: bytes) -> str | None:
 
 
 def _cloud_voice():
-    """ElevenLabs speaks / Deepgram hears when their keys are in the environment; local fallback otherwise."""
+    """ElevenLabs speaks / Deepgram hears when their keys are in the environment; local fallback otherwise.
+    Output goes through the selected speaker (AirPods, Mac speakers, the phone app...)."""
+    from robot.dog.voice import devices as devices_mod
     from robot.dog.voice.cloud import CloudVoice
-    return CloudVoice(local_speak=_say_blocking, local_transcribe=_whisper_transcribe)
+    return CloudVoice(local_speak=_say_blocking, local_transcribe=_whisper_transcribe, player=devices_mod.shared().play)
 
 
 VOICE = None  # created lazily so tests never touch the environment
@@ -275,7 +277,8 @@ def telemetry_snapshot(view) -> dict:
            "reason": report.get("reason"), "elapsed_s": report.get("elapsed_s"),
            "brain": {"enabled": bool((report.get("brain") or {}).get("enabled")), "period_s": getattr(view, "brain_period_s", None),
                      "decisions": list((report.get("brain") or {}).get("decisions") or [])[-8:]},
-           "voice": {"commands": list((report.get("voice") or {}).get("commands") or [])[-6:]},
+           "voice": {"commands": list((report.get("voice") or {}).get("commands") or [])[-6:],
+                     **({k: v for k, v in VOICE.status().items() if k != "stats"} if VOICE is not None else {})},
            "greetings": [{"t_s": g.get("t_s"), "text": g.get("text"), "name": (g.get("identity") or {}).get("name") if isinstance(g.get("identity"), dict) else None}
                          for g in list(report.get("greetings") or [])[-6:]],
            "checkins": [{"t_s": c.get("t_s")} for c in list(report.get("checkins") or [])[-4:]],
@@ -370,6 +373,13 @@ class LiveView:
                     receipt = board.get(self.path[len("/command/"):].split("?")[0]) if board else None
                     return self._send(200, json.dumps(receipt).encode(), "application/json") if receipt \
                         else self._send(404, b'{"error":"unknown command_id"}', "application/json")
+                if self.path.startswith("/voice"):
+                    v = VOICE
+                    st = v.status() if v is not None else {"cloud": False, "elevenlabs": False, "deepgram": False, "speak_via": "off", "hear_via": "off"}
+                    with contextlib.suppress(Exception):
+                        from robot.dog.voice import devices as devices_mod
+                        st["devices"] = devices_mod.shared().status()
+                    return self._send(200, json.dumps(st).encode(), "application/json")
                 if self.path.startswith("/health"):
                     return self._send(200, b'{"ok": true, "service": "go2-patrol-greet"}', "application/json")
                 if self.path.startswith(("/spacetime", "/three.min.js")):
@@ -414,6 +424,28 @@ class LiveView:
                     code, receipt = board.submit({"name": "stop"})
                     return self._send(200, json.dumps({"stop_code": None, "ack_ms": None, "cancelled": receipt.get("stop_requested", True),
                                                        "note": "software stop via the patrol loop"}).encode(), "application/json")
+                if self.path.startswith("/voice"):
+                    try:
+                        payload = json.loads(raw.decode() or "{}")
+                        if not isinstance(payload, dict):
+                            raise ValueError
+                    except ValueError:
+                        return self._send(400, b'{"error":"invalid JSON object"}', "application/json")
+                    v = voice()
+                    keys = {k: payload.get(k) for k in ("eleven_key", "deepgram_key", "eleven_voice") if isinstance(payload.get(k), str) and len(payload[k]) <= 200}
+                    cloud = payload.get("cloud") if isinstance(payload.get("cloud"), bool) else None
+                    st = v.configure(cloud=cloud, **keys)
+                    from robot.dog.voice import devices as devices_mod
+                    dev = {k: payload.get(k) for k in ("input_device", "output_device") if isinstance(payload.get(k), str) and len(payload[k]) <= 80}
+                    if dev:
+                        devices_mod.shared().configure(input_name=dev.get("input_device"), output_name=dev.get("output_device"))
+                        listener = getattr(view, "listener", None)
+                        if listener is not None and "input_device" in dev:
+                            listener.reopen(devices_mod.shared().recorder)  # the wake-word mic follows the selection
+                    st["devices"] = {k: v_ for k, v_ in devices_mod.shared().status().items()}
+                    view.log(f"voice settings: cloud={st['cloud']} speak={st['speak_via']} hear={st['hear_via']} "
+                             f"mic={st['devices']['input']} speaker={st['devices']['output']}")  # never the keys
+                    return self._send(200, json.dumps(st).encode(), "application/json")
                 if self.path.startswith("/command"):
                     try:
                         payload = json.loads(raw.decode() or "{}")
@@ -979,6 +1011,7 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
 
         if voice is not None:
             voice.on_command = on_voice
+            view.listener = voice
             voice.start()
 
         while loop.time() - start < duration_s:
@@ -1595,7 +1628,8 @@ def main(argv=None):
                                               imgsz=args.imgsz, diag_every_s=args.diag_every,
                                               brain=VisionBrain() if args.brain else None, brain_period_s=args.brain_period,
                                               memory=SightingMemory(args.memory_file),
-                                              voice=CommandListener(lambda c, t: None, status=_say) if args.voice else None,
+                                              voice=CommandListener(lambda c, t: None, status=_say,
+                                                                    transcriber=lambda wav: voice().transcribe(wav) or "") if args.voice else None,
                                               identifier=(TargetIdentifier(*args.target.split(":", 1)) if args.target else None),
                                               recorder=(SpacetimeRecorder(path=args.spacetime_file) if SpacetimeRecorder else None)))
     except KeyboardInterrupt:

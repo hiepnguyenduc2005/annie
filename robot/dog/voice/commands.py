@@ -10,6 +10,7 @@ every guardrail; a transcript is recognised text, not understanding.
 """
 from __future__ import annotations
 
+import contextlib
 import re
 import threading
 import time
@@ -70,11 +71,16 @@ class CommandListener:
         self.stopped = False
         self.heard = 0
         self.commands = 0
+        self._reopen = None  # set by reopen(): a factory for a new recorder, picked up between utterances
         self.thread = threading.Thread(target=self._loop, daemon=True, name="voice")
 
     def start(self):
         self.thread.start()
         return self
+
+    def reopen(self, recorder_factory):
+        """Switch microphones: `recorder_factory()` returns the new chunk generator; applied between utterances."""
+        self._reopen = recorder_factory
 
     def stop(self):
         self.stopped = True
@@ -97,6 +103,12 @@ class CommandListener:
         self.status("voice listener ready (say 'Annie, ...')")
         while not self.stopped:
             try:
+                if self._reopen is not None:  # the operator picked another microphone
+                    factory, self._reopen = self._reopen, None
+                    with contextlib.suppress(Exception):
+                        recorder.close()
+                    recorder = factory()
+                    self.status("voice listener: microphone switched")
                 utt = capture_utterance(recorder, vad, max_ms=self.max_ms)
                 if utt["outcome"] != "speech":
                     continue

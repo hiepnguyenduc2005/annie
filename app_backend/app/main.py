@@ -53,6 +53,23 @@ def same_origin(headers, scheme):
     return parsed.scheme == scheme and parsed.netloc == headers.get('host') and not parsed.path and not parsed.query and not parsed.fragment
 
 
+class DogCommandIn(BaseModel):
+    """One of: a web action for the dog process, or a plain-language instruction."""
+    action: str | None = Field(default=None, pattern=r'^(go_home|stop|explore|scan|dance|hello|sit|stand|follow)$')
+    text: str | None = Field(default=None, min_length=1, max_length=300)
+    author: str | None = Field(default=None, max_length=60)
+
+
+class VoiceSettingsIn(BaseModel):
+    """Family-app voice settings; keys are forwarded to the dog process and held in memory only."""
+    cloud: bool | None = None
+    eleven_key: str | None = Field(default=None, max_length=200)
+    deepgram_key: str | None = Field(default=None, max_length=200)
+    eleven_voice: str | None = Field(default=None, max_length=80)
+    input_device: str | None = Field(default=None, max_length=80)   # mic name: AirPods, MacBook Pro Microphone, DGX...
+    output_device: str | None = Field(default=None, max_length=80)  # speaker name
+
+
 def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service=None,
                 internal_secret=None, schema_store=None):
     db_path = db_path or os.getenv('ANNIE_DB_PATH', '.data/annie.sqlite3')
@@ -272,12 +289,99 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
         except KeyError:
             raise HTTPException(404, 'Unknown reminder') from None
 
+    async def _merge_dog_memory():
+        """Best effort: the dog process' telemetry (its space-time graph) becomes live history facts."""
+        url = os.getenv('ANNIE_DOG_VIEW_URL', 'http://127.0.0.1:8011').rstrip('/')
+        if not url:
+            return
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=1.5) as client:
+                r = await client.get(url + '/telemetry.json')
+            if r.status_code == 200:
+                app.state.companion.merge_live(r.json())
+        except Exception as exc:  # dog process down: seeded/added facts only
+            app.state.dog_memory_error = f"{type(exc).__name__}: {exc}"[:200]
+            return
+
+    async def _dog_get(path: str, timeout=2.0):
+        url = os.getenv('ANNIE_DOG_VIEW_URL', 'http://127.0.0.1:8011').rstrip('/')
+        import httpx
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            return await client.get(url + path)
+
+    def _dog_headers():
+        return {'X-Body-Token': os.getenv('ANNIE_BODY_TOKEN', '')} if os.getenv('ANNIE_BODY_TOKEN') else {}
+
+    @router.get('/api/dog/status')
+    async def dog_status():
+        """The dog process' telemetry for the app's control card (mode, battery, people, missions, voice)."""
+        try:
+            r = await _dog_get('/telemetry.json')
+            if r.status_code == 200:
+                t = r.json()
+                st = t.get('state') or {}
+                return {'available': True, 'connected': bool(t.get('connected')), 'mode': st.get('mode'), 'action': st.get('action'),
+                        'battery': st.get('battery'), 'people': len(st.get('tracks') or []), 'greetings': st.get('greetings'),
+                        'checkins': st.get('checkins'), 'missions': (t.get('missions') or [])[:6], 'voice': t.get('voice') or {},
+                        'objects': t.get('objects') or [], 'sentences': (t.get('graph_sentences') or [])[:4], 't_s': st.get('t_s')}
+        except Exception:
+            pass
+        return {'available': False, 'connected': False}
+
+    @router.post('/api/dog/command')
+    async def dog_command(body: DogCommandIn):
+        """Family-app controls -> the dog process. A web action (explore, go_home, stop, scan, hello, dance) or a
+        plain-language instruction (planned by the situated agent); the receipt comes back as-is."""
+        url = os.getenv('ANNIE_DOG_VIEW_URL', 'http://127.0.0.1:8011').rstrip('/')
+        if not body.text and not body.action:
+            raise HTTPException(400, 'action or text is required')
+        payload = {'name': 'instruct', 'args': {'text': body.text, 'author': body.author or 'family'}} if body.text else {'action': body.action}
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                r = await client.post(url + '/command', json=payload, headers=_dog_headers())
+        except Exception:
+            raise HTTPException(503, 'The dog process is not reachable') from None
+        if r.status_code >= 400:
+            raise HTTPException(r.status_code if r.status_code in (400, 401, 409) else 502, r.text[:200])
+        return {'available': True, 'status_code': r.status_code, **(r.json() if r.content else {})}
+
+    @router.get('/api/settings/voice')
+    async def voice_settings():
+        """How Annie speaks and hears right now (from the dog process); keys are never returned."""
+        try:
+            r = await _dog_get('/voice')
+            if r.status_code == 200:
+                return {'available': True, **r.json()}
+        except Exception:
+            pass
+        return {'available': False, 'cloud': False, 'elevenlabs': False, 'deepgram': False, 'speak_via': 'off', 'hear_via': 'off'}
+
+    @router.post('/api/settings/voice')
+    async def set_voice_settings(body: VoiceSettingsIn):
+        """Family-app switch for cloud voice (ElevenLabs speaks, Deepgram hears), optional keys and the mic/speaker
+        device names, forwarded to the dog process and held there in memory; nothing is written or logged here."""
+        url = os.getenv('ANNIE_DOG_VIEW_URL', 'http://127.0.0.1:8011').rstrip('/')
+        payload = {k: v for k, v in body.model_dump().items() if v is not None}
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                r = await client.post(url + '/voice', json=payload, headers=_dog_headers())
+        except Exception:
+            raise HTTPException(503, 'The dog process is not reachable') from None
+        if r.status_code != 200:
+            raise HTTPException(502, 'The dog process refused the voice settings')
+        return {'available': True, **r.json()}
+
     @router.get('/api/memory')
     async def list_memory():
-        return app.state.companion.memory
+        await _merge_dog_memory()
+        return app.state.companion.all_memory()
 
     @router.post('/api/ask')
     async def ask_annie(body: AskRequest):
+        await _merge_dog_memory()
         return {'answer': app.state.companion.ask(body.question)}
 
     @internal_router.post('/internal/events', status_code=202)

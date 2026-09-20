@@ -52,10 +52,32 @@ final class AppState: ObservableObject {
 
     @Published private(set) var serverURL = AppConfiguration.apiBaseURL
 
+    // The dog itself: live status for the Controls card (nil until the first
+    // answer), and the outcome of the last button pressed.
+    @Published private(set) var dog: DogStatus?
+    @Published private(set) var commandInFlight: DogAction?
+    @Published var commandNote: CommandNote?
+
+    // How Annie speaks and hears (Profile > Settings).
+    @Published private(set) var voice: VoiceSettings?
+    @Published var voiceNote: CommandNote?
+    @Published private(set) var voiceSaving = false
+
+    /// A short line of feedback under a control: what happened, in words.
+    struct CommandNote: Equatable {
+        let text: String
+        let isError: Bool
+    }
+
     private var api = AnnieAPI()
     private var pollTask: Task<Void, Never>?
     private var runPollTask: Task<Void, Never>?
+    private var dogPollTask: Task<Void, Never>?
     private let synthesizer = AVSpeechSynthesizer()
+
+    /// A run that has said nothing for this long stops being polled; the
+    /// errand itself takes 60-90 s, so this is generous without being forever.
+    private static let runWatchLimit: TimeInterval = 300
 
     // MARK: Lifecycle
 
@@ -85,12 +107,24 @@ final class AppState: ObservableObject {
             thread = (try? await api.thread()) ?? []
             live = true
             startPolling()
+            startDogPolling()
             await refreshRuns()
+            watchUnfinishedRuns()
         } catch {
             live = false
+            dog = nil
             reminders = Self.demoReminders
             memory = Self.demoMemory
         }
+    }
+
+    /// Pull-to-refresh on History. Returns once the fresh list is in.
+    func refreshHistory() async {
+        guard live else {
+            await load()
+            return
+        }
+        await refreshMemory()
     }
 
     /// Pick up perception events the dog writes to memory while we're live.
@@ -98,7 +132,7 @@ final class AppState: ObservableObject {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                try? await Task.sleep(nanoseconds: 5_000_000_000)  // History is live: the dog's memory lands within seconds
                 await self?.refreshMemory()
             }
         }

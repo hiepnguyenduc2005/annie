@@ -146,6 +146,15 @@ class Bridge:
         except Exception as exc:
             self.memory_state = {**self.memory_state, 'write_error':type(exc).__name__}
 
+    def retain_evidence(self, frame, perception):
+        if self.status_file is None:
+            return
+        try:
+            from robot.simulation.evidence import save_evidence
+            save_evidence(self.status_file.parent/'evidence', frame, perception)
+        except (ValueError, OSError) as exc:
+            self.warn('evidence cache', exc)
+
     def write_status(self):
         if self.status_file is None:
             return
@@ -475,6 +484,7 @@ class Bridge:
             response=await self.ingest('brain.perception',perception)
             self.ingest_accepted=response.get('accepted')
             if self.ingest_accepted:
+                self.retain_evidence(frame, perception)
                 if perception['person']:
                     self.remember_person(perception, frame['pose']['map_id'])
                 self.agent_memory=(self.agent_memory+[{'caption':perception['caption'],'frame_id':frame['frame_id'],

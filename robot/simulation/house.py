@@ -151,6 +151,26 @@ def make_house(assets: Path, seed=2026):
             for node in world.findall('geom'):
                 if node.get('name','').startswith('env_'+name+'_'):
                     node.set('group','3')
+    # Authored visual prop, fixed beside the chair arm. No collision proxy or
+    # navigation obstacle is added. Dimensions are metres (76 × 10 × 158 mm).
+    phone_position = ((-2.86, -3.29, .535) if visuals['chair'] is not None
+                      else (-2.86, -3.075, .63))
+    phone = element(world, 'body', name='env_phone', pos=phone_position,
+                    quat=(.994522, -.104528, 0, 0))
+    for name, pos, size, color in (
+        ('case', (0,0,0), (.038,.005,.079), (.035,.038,.044,1)),
+        ('rim', (0,-.0051,0), (.035,.001,.076), (.20,.22,.25,1)),
+        ('screen', (0,-.0062,0), (.032,.0005,.070), (.035,.07,.10,1)),
+        ('speaker', (0,-.0068,.064), (.008,.0003,.0015), (.008,.009,.012,1)),
+        ('home_bar', (0,-.0068,-.062), (.009,.0003,.001), (.55,.59,.62,1)),
+        ('button', (.039,0,.025), (.001,.003,.012), (.15,.17,.19,1)),
+    ):
+        geom(phone, 'phone_'+name, 'box', pos, size, color,
+             contype=0, conaffinity=0, group=2)
+    # Optional setup view for a real rendered historical observation. Selecting
+    # this camera does not generate a caption, inference, or memory record.
+    element(world, 'camera', name='phone_memory', mode='targetbody',
+            target='env_phone', pos=(-3.3,-4.35,1.1), fovy=38)
     # 18 real 16.67 cm risers; the upper landing is physically connected.
     for i in range(18):
         height = (i+1)/6
@@ -179,7 +199,8 @@ def make_house(assets: Path, seed=2026):
     record['ground_truth'].update(room_size_m=[14,12,6], robot_home_position_m=qpos[:3],
          resident_present=True,posture='sitting',resident_origin_m=[-3,-3.65,0],
          support_surface='chair',temporal_scope='initial pose; current actor state is in /state.resident',
-         objects={'bed':[-5,4.1,.58],'chair':[-3,-3.3,.48],'table':[2.9,-3.7,.75],'lamp':[-3.75,4.8,.68]})
+         objects={'bed':[-5,4.1,.58],'chair':[-3,-3.3,.48],'table':[2.9,-3.7,.75],'lamp':[-3.75,4.8,.68],
+                  'phone':list(phone_position)})
     return ET.tostring(root,encoding='unicode'),record
 
 

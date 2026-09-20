@@ -1,10 +1,17 @@
-# Episodic memory (opt-in Elastic Cloud)
+# Episodic memory
+
+The live simulator can use **local Graphiti + FalkorDBLite + Nomic embeddings**
+without cloud credentials. Set `ANNIE_MEMORY_PROVIDER=graphiti`; see
+[local setup and measured verification](LOCAL_MEMORY.md). This uses Graphiti's
+open-source graph storage and hybrid retrieval, not the Zep hosted service.
+
+## Optional Elastic Cloud
 
 Annie's simulation brain can persist and retrieve strict, image-free
 observation memories through an existing Elasticsearch index on the sponsor's
 Elastic Cloud deployment. This is opt-in: when ANNIE_MEMORY_PROVIDER is not
-"elastic", from_env() returns None and the local journal remains the only
-memory (retained separately).
+"elastic" or "graphiti", from_env() returns None and the local journal remains
+the only memory (retained separately).
 
 ## Configuration
 

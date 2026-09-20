@@ -58,7 +58,7 @@ class Bridge:
         self.continuous_local = continuous_local
         self.memory = memory
         self.memory_task = None
-        self.memory_state = {'provider': 'elastic' if memory else 'local_sqlite', 'retrieved': 0}
+        self.memory_state = {'provider': self.memory_provider, 'retrieved': 0}
         self.pending_checkin = None
         self.history = []
         self.pending_agent_command = None
@@ -82,6 +82,10 @@ class Bridge:
             self.last_person_sighting = sighting
 
     @property
+    def memory_provider(self):
+        return getattr(self.memory, 'provider_name', 'elastic') if self.memory else 'local_sqlite'
+
+    @property
     def limit_reached(self):
         return not self.continuous_local and self.inferences >= self.max_inferences
 
@@ -89,7 +93,7 @@ class Bridge:
         """Retrieve durable evidence before capturing the current image."""
         from robot.robot_backend.app.brain.planner import Memory
         try:
-            retrieval = 'elastic' if self.memory else 'lexical'
+            retrieval = self.memory_provider if self.memory else 'lexical'
             try:
                 result = await self.request(self.app, 'POST', '/query', json={'text':'where was the person last seen'})
                 person_items = result.get('citations', [])
@@ -125,13 +129,13 @@ class Bridge:
                 cited.append(Memory.model_validate({k:item[k] for k in ('caption','frame_id','ts','pose')}).model_dump())
                 seen.add(item['frame_id'])
                 if len(cited) >= 6: break
-            self.memory_state = {'provider':'elastic' if self.memory else 'local_sqlite',
+            self.memory_state = {'provider':self.memory_provider,
                                  'retrieved':len(cited), 'status':'connected',
                                  'retrieval':retrieval,
                                  'citations':cited[:3]}
             return cited
         except Exception as exc:
-            self.memory_state = {'provider':'elastic' if self.memory else 'local_sqlite',
+            self.memory_state = {'provider':self.memory_provider,
                                  'retrieved':0, 'status':'unavailable', 'error':type(exc).__name__}
             return []
 

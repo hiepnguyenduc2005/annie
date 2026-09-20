@@ -1,0 +1,8 @@
+# Isolated runtime: uv venv .cache/graphiti-venv --python .venv/bin/python
+# uv pip install --python .cache/graphiti-venv/bin/python -r robot/simulation/requirements-memory.txt
+graphiti-core[falkordblite]==0.30.2
+falkordblite==0.10.0
+openai==2.29.0
+httpx==0.28.1
+fastapi==0.135.1
+uvicorn==0.41.0

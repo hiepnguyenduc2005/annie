@@ -11,12 +11,15 @@ import re
 import math
 import json as json_codec
 import asyncio
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from urllib.parse import urlsplit
 
 import httpx
 
 from robot.app_backend.app.models import Perception
+
+if TYPE_CHECKING:
+    from robot.simulation.graph_memory_client import GraphitiMemory
 
 SEARCH_TIMEOUT_S = 0.5
 WRITE_TIMEOUT_S = 0.8
@@ -46,6 +49,8 @@ def _validate_url(url: str) -> str:
 
 class ElasticMemory:
     """Idempotent write/search adapter over one existing Elasticsearch index."""
+
+    provider_name = 'elastic'
 
     def __init__(self, url: str, api_key: str, index: str,
                  client: httpx.AsyncClient | None = None):
@@ -169,8 +174,11 @@ class ElasticMemory:
         return memories
 
 
-def from_env() -> ElasticMemory | None:
+def from_env() -> 'ElasticMemory | GraphitiMemory | None':
     """Build the adapter from environment, or None when not opted in."""
+    if os.environ.get('ANNIE_MEMORY_PROVIDER') == 'graphiti':
+        from robot.simulation.graph_memory_client import GraphitiMemory
+        return GraphitiMemory(os.environ.get('ANNIE_GRAPHITI_URL', 'http://127.0.0.1:8005'))
     if os.environ.get('ANNIE_MEMORY_PROVIDER') != 'elastic':
         return None
     url = os.environ.get('ELASTIC_URL')

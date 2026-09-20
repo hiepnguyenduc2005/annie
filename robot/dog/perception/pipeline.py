@@ -122,16 +122,17 @@ class Perception:
     """Three worker threads; `submit` from the receiver, `latest()` from the control loop."""
 
     def __init__(self, tracker, *, convert, annotate=None, diag: Diag | None = None, min_conf=0.45,
-                 min_keypoints=4, min_age_ms=250, identifier=None):
+                 min_keypoints=4, min_age_ms=250, identifier=None, objects=None, objects_every=5):
         self.tracker, self.convert, self.annotate = tracker, convert, annotate
         self.identifier = identifier  # e.g. go2_target_id.TargetIdentifier: names tracks by shirt colour
+        self.objects, self.objects_every = objects, objects_every  # optional ObjectDetector, run every Nth frame
         self.diag = diag or Diag()
         self.filter = dict(min_conf=min_conf, min_keypoints=min_keypoints, min_age_ms=min_age_ms)
         self.in_q: queue.Queue = queue.Queue(maxsize=1)
         self.track_q: queue.Queue = queue.Queue(maxsize=1)
         self.ann_q: queue.Queue = queue.Queue(maxsize=1)
         self.lock = threading.Lock()
-        self.result = {"seq": 0, "tracks": [], "raw_tracks": [], "w": None, "h": None, "t": None}
+        self.result = {"seq": 0, "tracks": [], "raw_tracks": [], "objects": [], "w": None, "h": None, "t": None}
         self.context = {"mode": "-", "ranges": None, "battery": None}
         self.stopped = False
         self.threads = [threading.Thread(target=fn, daemon=True, name=name)
@@ -195,11 +196,20 @@ class Perception:
                     self.identifier.apply(img, tracks)
                 except Exception:
                     self.diag.count("errors")
+            objects = self.result["objects"]
+            if self.objects is not None and self.result["seq"] % self.objects_every == 0:
+                t1 = time.perf_counter()
+                try:
+                    objects = self.objects.detect(img, now_ms)
+                except Exception:
+                    self.diag.count("errors")
+                self.diag.sample("objects_ms", (time.perf_counter() - t1) * 1000)
             now = time.monotonic()
             with self.lock:
-                self.result = {"seq": self.result["seq"] + 1, "tracks": tracks, "raw_tracks": raw,
+                self.result = {"seq": self.result["seq"] + 1, "tracks": tracks, "raw_tracks": raw, "objects": objects,
                                "w": img.shape[1], "h": img.shape[0], "t": now}
                 ctx = dict(self.context)
+                ctx["objects"] = objects
             self.diag.tick("processed", now)
             self.diag.sample("age_ms", (now - t_recv) * 1000)
             if self.annotate is not None:

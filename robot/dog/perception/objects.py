@@ -4,14 +4,14 @@ The pose tracker (`robot/simulation/person_tracker.py`) owns people. `ObjectDete
 curated set of COCO things with the Ultralytics YOLO11n detection checkpoint, gives each one an
 id that survives across frames (label + box overlap, no ByteTrack), and `place` estimates where
 it is in the odometry frame so `sightings` can go straight into
-`go2_spacetime.SpacetimeRecorder.record_people`.
+`robot.dog.memory.spacetime.SpacetimeRecorder.record_people`.
 
 Measured vs estimated. Boxes are 2-D image measurements in the pixels of the frame passed in;
 `conf` is a raw model score, not a calibrated probability; `label` is a model guess from 80
 COCO classes, not an identification (a tablet is a "laptop", any dark slab is a "phone" or a
 "remote"). `x, y, z` are ESTIMATES: bearing is linear in the box centre over `hfov_deg` (the same
-approximation `go2_patrol_greet` uses for people, so both land consistently on the map, but not a
-lens model), distance is either the LiDAR front-sector range (`depth == "lidar"`: the nearest
+approximation `robot.dog.runtime.patrol` uses for people, so both land consistently on the map,
+but not a lens model), distance is either the LiDAR front-sector range (`depth == "lidar"`: the nearest
 obstacle ahead, which may be the wall behind a small object or the table under it) or an
 apparent-size prior (`depth == "prior"`: tens of percent off, worse for occluded or flat-lying
 things), and `z` is a per-label guess at where such a thing usually sits. Good enough for "near
@@ -20,12 +20,22 @@ turns faster than the boxes overlap between two runs, so memory should key on la
 not on the id alone. `hits` counts the runs an id has been seen in; requiring `hits >= 2` before
 remembering a sighting drops one-frame hallucinations.
 
+False positives are real: on the one robot-camera render tried here the chair was right (0.85)
+but a person lying on the floor was ALSO boxed as a "couch" at 0.69, and the bed and table were
+missed. Pass the pose tracker's boxes through `not_people` before remembering anything.
+
 Rate: the caller owns the rate limit (run `detect` every Nth frame or every ~1 s). Measured on
-this Mac (Apple M4 Pro, macOS 26.5, CPU, torch 2.7.1, ultralytics 8.4.150, imgsz 416, 2026-09-20,
-30 warm runs each, `detect` end to end including the id tracker):
-    MEASUREMENTS_PLACEHOLDER
-CPU on purpose: on Apple MPS the Ultralytics NMS step stalls on real frames (see
-`go2_patrol_greet._fast_tracker`).
+this Mac (Apple M1 Max, macOS 26.5.1, CPU, torch 2.7.1, ultralytics 8.4.150, 2026-09-20, 30 warm
+runs per image after 5 warm-up runs, `detect` end to end including the id tracker; images:
+ultralytics `bus.jpg`, `zidane.jpg` and a 640x480 robot-camera render):
+    imgsz 416 (default), 480 px wide frames as on the live path: mean 24-30 ms, p95 28-33 ms
+    imgsz 416, full-size images (810x1080, 1280x720, 640x480):   mean 25-30 ms, p95 29-37 ms
+    imgsz 320: mean 17-21 ms, p95 20-24 ms;  imgsz 640: mean 40-54 ms, p95 44-55 ms
+    imgsz 416 while the pose tracker (imgsz 352) runs flat out in another thread: mean 36 ms,
+    p95 40 ms, and the pose step itself slows from 26 to 34 ms while the two overlap.
+So one run per second takes about 3 % of a thread's time; run inline in the tracker thread it
+delays that one frame by ~30 ms (roughly half a frame interval at 14 fps). CPU on purpose: on Apple MPS the
+Ultralytics NMS step stalls on real frames (see `robot.dog.runtime.patrol._fast_tracker`).
 
 Model provenance: `yolo11n.pt`, Ultralytics YOLO11n COCO detection (80 classes, 2.6 M params),
 from the `ultralytics/assets` GitHub release `v8.4.0`
@@ -106,6 +116,12 @@ def _iou(a, b) -> float:
     return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
 
 
+def not_people(detections, person_boxes, max_iou=0.6) -> list[dict]:
+    """Drop detections whose box nearly coincides with a person box (a lying person reads as a "couch").
+    A person sitting ON a couch overlaps it far less than `max_iou`, so the couch stays."""
+    return [d for d in detections if all(_iou(d["box"], [float(v) for v in pb]) < max_iou for pb in person_boxes)]
+
+
 def place(detections, frame_w, frame_h, pose_xy, yaw, front_range_m=None, hfov_deg=100.0) -> list[dict]:
     """Copies of `detections` with estimated `x, y, z` (odometry frame, metres), `dist_m` and `depth`.
 
@@ -154,6 +170,7 @@ class ObjectDetector:
     """Curated COCO detections with stable ids. `detect` is stateful: call it from one thread."""
 
     CLASSES = CLASSES
+    not_people = staticmethod(not_people)
     place = staticmethod(place)
     sightings = staticmethod(sightings)
     annotate = staticmethod(annotate)

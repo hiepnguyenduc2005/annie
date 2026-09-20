@@ -50,6 +50,10 @@ from robot.dog.planning.smart_patrol import (HeadingBandit, OccupancyGrid, Patro
 from robot.dog.planning.missions import MissionBoard  # noqa: E402
 from robot.dog.perception.target_id import TargetIdentifier  # noqa: E402
 try:
+    from robot.dog.perception import objects as objects_mod  # noqa: E402
+except Exception:  # optional: object detection needs cv2/ultralytics
+    objects_mod = None
+try:
     from robot.dog.memory.spacetime import SpacetimeRecorder  # noqa: E402
 except Exception:  # the recorder module is optional until it lands
     SpacetimeRecorder = None
@@ -573,6 +577,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
         return img
 
     def annotate(img, tracks, raw, ctx):
+        if objects_mod is not None and ctx.get("objects"):
+            with contextlib.suppress(Exception):
+                img = objects_mod.annotate(img, ctx["objects"])
         view.annotate(img, tracks, ctx.get("mode", "-"), ctx.get("ranges"), ctx.get("battery"), raw=raw)
 
     if conn_factory is not None and encoder is not _encode:  # tests inject an encoder returning (jpeg, w, h)
@@ -580,8 +587,12 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             import numpy as np
             jpeg, w, h = encoder(frame)
             return np.zeros((h, w, 3), dtype=np.uint8)
+    detector = None
+    if objects_mod is not None and conn_factory is None and objects_mod.find_checkpoint() is not None:
+        with contextlib.suppress(Exception):
+            detector = objects_mod.ObjectDetector()
     perception = Perception(tracker, convert=convert, annotate=annotate if view.port else None, diag=diag,
-                            min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier)
+                            min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier, objects=detector)
     view.commands = voice_state  # POST /command on the live view sets the same bounded override as a voice command
     view.recorder = recorder
     missions = MissionBoard()
@@ -811,9 +822,9 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                 with contextlib.suppress(Exception):
                     wall = time.time()
                     recorder.record_pose(wall, tel["pose"][0], tel["pose"][1], tel["yaw"])
+                    front_r = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
                     if tracks and fw:
                         people_world = []
-                        front_r = None if not ranges or ranges["front"] == float("inf") else ranges["front"]
                         for t in tracks:
                             x1, y1, x2, y2 = t["box"]
                             cx = (x1 + x2) / 2.0 / float(fw)
@@ -827,6 +838,10 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
                                                  "label": ident or f"person {t.get('track_id')}", "identity": ident,
                                                  "posture": t.get("posture")})
                         recorder.record_people(wall, people_world)
+                    objs = res.get("objects") or []
+                    if objs and fw and objects_mod is not None:
+                        placed = objects_mod.place(objs, fw, fh or 480, tel["pose"], tel["yaw"], front_range_m=front_r)
+                        recorder.record_people(wall, objects_mod.sightings(placed, int(wall * 1000)))
             if now - last_diag >= diag_every_s:
                 last_diag = now
                 status(f"diag {diag.line()}")

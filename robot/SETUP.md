@@ -275,6 +275,29 @@ working robot connection.
   misses the watchdog while Whisper warms up, so start it first. 8 fakes-only
   tests.
 
+## First physical motion (2026-09-19 22:22, HW-05 rehearsal)
+
+Route that worked with the operator's Mac staying on the venue Wi-Fi: the
+venue network isolates clients, so the dog was provisioned over Bluetooth
+(unitree-ui BLE server, `POST /wifi` with `ap_mode=false`) onto the operator's
+iPhone Personal Hotspot while the Mac reached the same hotspot over USB
+(`en7`, 172.20.10.x). The dog appeared at 172.20.10.10 within one second and
+`robot/go2_walk.py` ran against it. Bluetooth-side motion is impossible: the
+Go2 BLE link only does Wi-Fi setup.
+
+| Run | Result | Measured |
+| --- | --- | --- |
+| `--distance 1` (0.3 m/s) | completed | 0.71 m max from origin in 3.4 s; StopMove ack 34 ms; overrun 0.017 m; settled 0.44 s; battery 40% |
+| `--circle-radius 1 --duration 60` | stopped by the script at 34 s: `battery_low` | 336 Move sends; max 0.67 m from origin; StopMove ack 15.8 ms; overrun 0.009 m; settled 0.32 s |
+
+Reports: `output/hardware/2026-09-19-walk-{line,circle}.json` (ignored path).
+Operator stood beside the dog; no physical controller. These are host-timed
+observations, not calibrated stopping-distance measurements, and HW-04 (an
+independent stop over a lost link) remains unverified. The battery floor
+(40%) ended the circle; charge before the next run. Another agent had placed
+`.cache/go2-private/motion-inhibit` to block motion while it ran diagnostics;
+the operator overrode it for this rehearsal.
+
 ## Verification and outstanding work
 
 - [x] Host inventory executes in the existing Mac runtime.

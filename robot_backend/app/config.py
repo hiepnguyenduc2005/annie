@@ -7,6 +7,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    internal_secret: SecretStr = SecretStr("")
+    companion_backend_url: str = "http://127.0.0.1:8000"
+    companion_dog_user_id: int = Field(1, gt=0)
+
     qwen_base_url: str = "http://100.112.123.40:8091"
     qwen_model: str = "Qwen/Qwen2.5-Omni-3B"
     qwen_request_timeout: float = Field(180, gt=0, le=600)
@@ -32,7 +36,7 @@ class Settings(BaseSettings):
     delivery_timeout_seconds: float = Field(10, gt=0, le=60)
     maintenance_interval_seconds: float = Field(5, gt=0)
 
-    @field_validator("qwen_base_url", "dedicated_server_url", "deepgram_base_url")
+    @field_validator("qwen_base_url", "dedicated_server_url", "deepgram_base_url", "companion_backend_url")
     @classmethod
     def http_url(cls, value: str) -> str:
         from urllib.parse import urlsplit

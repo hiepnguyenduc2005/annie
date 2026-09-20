@@ -11,6 +11,7 @@ from .api.router import router
 from .api.body_limit import BodyLimitMiddleware
 from .config import Settings
 from .services.agent import Agent
+from .services.companion import Companion
 from .services.dedicated_server import DedicatedServer, DeliveryError
 from .services.qwen import QwenClient, QwenError
 from .services.deepgram import DeepgramClient, SpeechError
@@ -46,11 +47,13 @@ def create_app(
         async with httpx.AsyncClient(follow_redirects=False, trust_env=False) as client:
             store = sessions or InMemorySessionManager(settings)
             delivery = sink or DedicatedServer(settings, client)
+            companion = Companion(settings, client, delivery)
+            app.state.companion = companion
             agent = Agent(
                 settings,
                 store,
                 model or QwenClient(settings, client),
-                delivery,
+                companion,
                 speech or DeepgramClient(settings, client),
             )
             app.state.agent = agent
@@ -62,7 +65,7 @@ def create_app(
                 ),
                 asyncio.create_task(
                     periodic(
-                        delivery.deliver_pending, settings.maintenance_interval_seconds
+                        companion.deliver_pending, settings.maintenance_interval_seconds
                     )
                 ),
             ]
@@ -75,6 +78,7 @@ def create_app(
                     with suppress(asyncio.CancelledError):
                         await task
                 await store.clear()
+                companion.close()
                 if sink is None:
                     delivery.close()
 

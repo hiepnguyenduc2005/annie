@@ -1,0 +1,78 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Id",
+      "type": "integer"
+    },
+    "reply_to": {
+      "anyOf": [
+        {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reply To"
+    },
+    "request_id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Request Id",
+      "type": "integer"
+    },
+    "role": {
+      "enum": [
+        "app_user",
+        "robot",
+        "resident"
+      ],
+      "title": "Role",
+      "type": "string"
+    },
+    "status": {
+      "anyOf": [
+        {
+          "enum": [
+            "queued",
+            "accepted",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Status"
+    },
+    "text": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "role",
+    "text",
+    "timestamp",
+    "request_id"
+  ],
+  "title": "MessageEntry",
+  "type": "object"
+}

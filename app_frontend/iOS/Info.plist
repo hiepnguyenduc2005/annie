@@ -2,19 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- The backend speaks plain HTTP on the home network; this allows local-network
-	     addresses only, not arbitrary internet HTTP. -->
+	<key>AnnieAPIURL</key>
+	<string>$(ANNIE_API_URL)</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Annie connects to the companion server on your local network.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Annie connects to the companion server running on your computer.</string>
-	<!-- The Ask Annie microphone button: speak a message instead of typing it. -->
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Annie listens while you hold a message, so you can speak to her instead of typing.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Annie turns what you say into text for your message. On phones that support it, this happens on the phone.</string>
 </dict>
 </plist>

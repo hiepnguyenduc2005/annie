@@ -1,183 +1,147 @@
-//
-//  AnnieAPI.swift
-//  AnnieApp
-//
-//  HTTP client for the Annie Companion API. The base URL comes from
-//  AppConfiguration — the one place that knows where the server lives.
-//
-
 import Foundation
 
 enum APIError: Error {
     case badStatus(Int)
+    case invalidResponse
 }
 
-/// What to tell a family member when a request fails. Status codes and
-/// transport errors never reach the screen; this is the one place they are
-/// turned into words.
-func humanMessage(for error: Error) -> String {
+func connectionMessage(_ error: Error) -> String {
     if case APIError.badStatus(let code) = error {
         switch code {
-        case 409: return "Annie is busy right now. Give her a moment and try again."
-        case 401, 403: return "This phone isn't signed in to Annie's server. Check the token under Profile, Settings, Advanced."
-        case 404: return "Annie's server doesn't know how to do that yet. It may need restarting."
-        case 400, 422: return "Annie didn't understand that. Try saying it another way."
-        case 502, 503, 504: return "Annie's dog isn't answering right now. Check that she is switched on."
-        default: return "Something went wrong on Annie's side. Try again in a moment."
+        case 404: return "This account or record is no longer available. Refresh or select your account again."
+        case 409: return "This request conflicts with an earlier request. Please try a new request."
+        case 413: return "This conversation has reached its daily limit. Existing messages are still saved."
+        case 422: return "The server could not accept these details. Check the fields and try again."
+        case 503: return "Annie's database is unavailable. Your last loaded data is shown; please retry."
+        default: return "Server error (HTTP \(code)). Please retry."
         }
     }
-    if let urlError = error as? URLError {
-        switch urlError.code {
-        case .timedOut: return "Annie is taking too long to answer. Try again in a moment."
-        case .notConnectedToInternet, .networkConnectionLost:
-            return "This phone is offline. Check Wi-Fi and try again."
-        default: return "Can't reach Annie. Check the server under Profile, Settings, Advanced."
+    if error is DecodingError { return "The server response doesn't match this app version." }
+    if case APIError.invalidResponse = error { return "The server response doesn't match this app version." }
+    if let error = error as? URLError {
+        if error.code == .notConnectedToInternet {
+            return "Network unavailable. Check the connection and Annie's Local Network permission."
         }
+        if error.code == .cancelled { return "Request cancelled." }
+        return "Cannot reach Annie. Check that your Mac and backend are available, then retry."
     }
-    return "Something went wrong. Try again in a moment."
+    return "Couldn't load Annie's data. Please retry."
 }
 
-/// True when the request never reached the backend (as opposed to the backend
-/// answering with an error). Only this should flip the app to demo data.
-func isTransportFailure(_ error: Error) -> Bool {
-    error is URLError
+protocol AnnieServing {
+    func users() async throws -> [AppUser]
+    func residents() async throws -> [DogUser]
+    func reminders(userID: Int) async throws -> ReminderPage
+    func conversation(userID: Int) async throws -> ConversationPage
+    func history(userID: Int, cursor: String?) async throws -> Page<HistoryItem>
+    func addReminder(_ body: NewReminder, key: String) async throws -> Reminder
+    func sendMessage(_ body: NewMessage, key: String) async throws -> DispatchReceipt
 }
 
-struct AnnieAPI {
-    var baseURL: URL
-    var token: String
+struct AnnieAPI: AnnieServing {
+    let baseURL: URL
+    let session: URLSession
 
-    init(baseURL: URL = AppConfiguration.apiBaseURL, token: String = AppConfiguration.apiToken) {
+    init(baseURL: URL = AppConfiguration.apiBaseURL, session: URLSession = .shared) {
         self.baseURL = baseURL
-        self.token = token
+        self.session = session
     }
 
-    private func url(_ path: String) -> URL {
-        baseURL.appending(path: path.hasPrefix("/") ? String(path.dropFirst()) : path)
+    func url(_ path: String, query: [String: String] = [:]) -> URL {
+        let base = baseURL.appendingPathComponent(path)
+        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
+        components.queryItems = query.isEmpty ? nil : query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        return components.url!
     }
 
-    private func send(_ path: String, method: String, body: Data? = nil, timeout: TimeInterval = 5) async throws -> Data {
-        // Bounded, so an unreachable LAN host falls back to demo data in seconds, not a minute.
-        var request = URLRequest(url: url(path), timeoutInterval: timeout)
-        request.httpMethod = method
-        // app_backend accepts non-loopback clients only with a token, so a
-        // phone on the LAN needs this even though the simulator works without.
-        if !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = body
-        }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw APIError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
-        return data
+    private func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
+        try await send(URLRequest(url: url(path, query: query), timeoutInterval: 25))
     }
 
-    /// Deliberately NOT an overload of `send`. `Data` is itself `Encodable`, so
-    /// a same-named generic sibling resolves its own encoded body back to
-    /// itself and recurses forever — and because async frames live on the
-    /// heap, it spins silently instead of crashing.
-    private func sendJSON(_ path: String, method: String, body: some Encodable, timeout: TimeInterval = 5) async throws -> Data {
-        try await send(path, method: method, body: try JSONEncoder().encode(body), timeout: timeout)
+    private func post<T: Decodable, Body: Encodable>(_ path: String, body: Body, key: String) async throws -> T {
+        var request = URLRequest(url: url(path), timeoutInterval: 25)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(key, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = try JSONEncoder().encode(body)
+        return try await send(request)
     }
 
-    // MARK: Reminders
-
-    func reminders() async throws -> [Reminder] {
-        try JSONDecoder().decode([Reminder].self, from: try await send("api/reminders", method: "GET"))
+    private func send<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let (data, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(response.statusCode) else { throw APIError.badStatus(response.statusCode) }
+        return try JSONDecoder().decode(T.self, from: data)
     }
 
-    func addReminder(_ new: NewReminder) async throws -> Reminder {
-        try JSONDecoder().decode(Reminder.self, from: try await sendJSON("api/reminders", method: "POST", body: new))
+    private func all<Item: Decodable>(_ path: String) async throws -> [Item] {
+        var items: [Item] = []
+        var cursor: String?
+        var visited = Set<String>()
+        repeat {
+            var query = ["limit": "100"]
+            if let cursor { query["cursor"] = cursor }
+            let page: Page<Item> = try await get(path, query: query)
+            items += page.items
+            cursor = page.next_cursor
+            if let cursor, !visited.insert(cursor).inserted { throw APIError.invalidResponse }
+        } while cursor != nil
+        return items
     }
 
-    func toggleReminder(id: Int) async throws -> Reminder {
-        try JSONDecoder().decode(Reminder.self, from: try await send("api/reminders/\(id)/toggle", method: "PATCH"))
+    func users() async throws -> [AppUser] { try await all("api/app-users") }
+    func residents() async throws -> [DogUser] { try await all("api/dog-users") }
+
+    func reminders(userID: Int) async throws -> ReminderPage {
+        var items: [Reminder] = []
+        var cursor: String?
+        var day: String?
+        var visited = Set<String>()
+        repeat {
+            var query = ["app_user_id": String(userID), "limit": "100"]
+            if let cursor { query["cursor"] = cursor }
+            if let day { query["day"] = day }
+            let page: ReminderPage = try await get("api/reminders", query: query)
+            items += page.items
+            day = page.day
+            cursor = page.next_cursor
+            if let cursor, !visited.insert(cursor).inserted { throw APIError.invalidResponse }
+        } while cursor != nil
+        return ReminderPage(items: items, next_cursor: nil, day: day!)
     }
 
-    // MARK: Memory (spatiotemporal facts the dog writes in)
-
-    func memory() async throws -> [MemoryFact] {
-        try JSONDecoder().decode([MemoryFact].self, from: try await send("api/memory", method: "GET"))
+    func conversation(userID: Int) async throws -> ConversationPage {
+        var items: [MessageEntry] = []
+        var cursor: String?
+        var first: ConversationPage?
+        var visited = Set<String>()
+        repeat {
+            var query = ["app_user_id": String(userID), "limit": "100"]
+            if let cursor { query["cursor"] = cursor }
+            // The backend chooses today in the resident's timezone on the first page.
+            if let first { query["day"] = first.day }
+            let page: ConversationPage = try await get("api/messages", query: query)
+            if first == nil { first = page }
+            items += page.messages
+            cursor = page.next_cursor
+            if let cursor, !visited.insert(cursor).inserted { throw APIError.invalidResponse }
+        } while cursor != nil
+        guard let first else { throw APIError.invalidResponse }
+        return ConversationPage(id: first.id, app_user_id: first.app_user_id, dog_user_id: first.dog_user_id,
+                                day: first.day, messages: items, next_cursor: nil)
     }
 
-    // MARK: Ask Annie
-
-    func ask(_ question: String) async throws -> String {
-        try JSONDecoder().decode(AskResponse.self, from: try await sendJSON("api/ask", method: "POST", body: AskRequest(question: question))).answer
+    func history(userID: Int, cursor: String?) async throws -> Page<HistoryItem> {
+        var query = ["app_user_id": String(userID), "limit": "50"]
+        if let cursor { query["cursor"] = cursor }
+        return try await get("api/history", query: query)
     }
 
-    // MARK: Family messages
-    //
-    // Sending returns as soon as the backend has the message; the robot's
-    // 60-90 second errand is reported afterwards through the run.
-
-    func sendMessage(authorID: String, text: String) async throws -> DispatchAck {
-        let body = NewMessage(author_id: authorID, text: text)
-        return try JSONDecoder().decode(DispatchAck.self, from: try await sendJSON("api/messages", method: "POST", body: body))
+    func addReminder(_ body: NewReminder, key: String) async throws -> Reminder {
+        try await post("api/reminders", body: body, key: key)
     }
 
-    func thread() async throws -> [ThreadMessage] {
-        try JSONDecoder().decode([ThreadMessage].self, from: try await send("api/thread", method: "GET"))
-    }
-
-    func run(id: String) async throws -> FamilyRun {
-        try JSONDecoder().decode(FamilyRun.self, from: try await send("api/runs/\(id)", method: "GET"))
-    }
-
-    // MARK: The dog: live status and direct controls
-
-    func dogStatus() async throws -> DogStatus {
-        try JSONDecoder().decode(DogStatus.self, from: try await send("api/dog/status", method: "GET"))
-    }
-
-    /// One of the Controls buttons. The dog's receipt is not interpreted here;
-    /// success means the dog process accepted the command, not that it has
-    /// finished (or even started) moving.
-    func dogCommand(_ action: DogAction) async throws {
-        _ = try await sendJSON("api/dog/command", method: "POST", body: DogCommandBody(action: action.rawValue))
-    }
-
-    /// A plain-language instruction, straight to the dog's situated agent. The
-    /// answer is the mission board's receipt (accepted or queued); progress and
-    /// Annie's reply arrive later in `dogStatus().missions` under the same id.
-    func dogInstruct(_ text: String, author: String) async throws -> InstructReceipt {
-        let body = DogCommandBody(text: text, author: author)
-        // The backend itself waits up to 4 s on the dog before answering.
-        return try JSONDecoder().decode(InstructReceipt.self,
-                                        from: try await sendJSON("api/dog/command", method: "POST", body: body, timeout: 8))
-    }
-
-    // MARK: People Annie knows
-
-    func people() async throws -> PeopleResponse {
-        try JSONDecoder().decode(PeopleResponse.self, from: try await send("api/people", method: "GET"))
-    }
-
-    /// Enrolling runs the face model over each photo on the dog's machine, so
-    /// it gets the same 30 s the backend allows it.
-    func addPerson(_ person: NewPerson) async throws -> EnrolResult {
-        try JSONDecoder().decode(EnrolResult.self,
-                                 from: try await sendJSON("api/people", method: "POST", body: person, timeout: 35))
-    }
-
-    func forgetPerson(named name: String) async throws {
-        // A name may hold spaces and apostrophes. `URL.appending(path:)` does
-        // the percent-encoding itself; encoding here as well would double it
-        // ("%20" -> "%2520"). Names never contain "/" (the dog rejects them).
-        _ = try await send("api/people/\(name)", method: "DELETE", timeout: 8)
-    }
-
-    // MARK: Voice settings
-
-    func voiceSettings() async throws -> VoiceSettings {
-        try JSONDecoder().decode(VoiceSettings.self, from: try await send("api/settings/voice", method: "GET"))
-    }
-
-    func updateVoiceSettings(_ update: VoiceSettingsUpdate) async throws -> VoiceSettings {
-        try JSONDecoder().decode(VoiceSettings.self, from: try await sendJSON("api/settings/voice", method: "POST", body: update))
+    func sendMessage(_ body: NewMessage, key: String) async throws -> DispatchReceipt {
+        try await post("api/messages", body: body, key: key)
     }
 }

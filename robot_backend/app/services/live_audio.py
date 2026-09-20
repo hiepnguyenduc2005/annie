@@ -72,6 +72,13 @@ class AudioHub:
         self.pending.append(session_id)
         self.available.set()
 
+    def claim(self, session_id: str) -> None:
+        """Remove a task only after the phone explicitly accepts its session."""
+        with suppress(ValueError):
+            self.pending.remove(session_id)
+        if not self.pending:
+            self.available.clear()
+
     def take(self) -> str | None:
         result = self.pending.popleft() if self.pending else None
         if not self.pending:
@@ -90,6 +97,7 @@ class AudioConversation:
         self.played = asyncio.Event()
         self.turn_id: str | None = None
         self.send_lock = asyncio.Lock()
+        self.offered_session_id: str | None = None
 
     async def event(self, type: str, **fields):
         async with self.send_lock:
@@ -112,9 +120,29 @@ class AudioConversation:
         self.clear_packets()
         self.turn_id = None
 
+    async def announce_pending(self):
+        """Wake a connected, idle phone without consuming unacknowledged work."""
+        while True:
+            await self.hub.available.wait()
+            if self.hub.pending and (self.worker is None or self.worker.done()):
+                candidate = self.hub.pending[0]
+                try:
+                    async with self.agent.sessions.locked(candidate) as session:
+                        active = session.status == "active"
+                except SessionError:
+                    active = False
+                if not active:
+                    self.hub.claim(candidate)
+                elif candidate != self.offered_session_id:
+                    self.offered_session_id = candidate
+                    await self.event("conversation_requested", session_id=candidate)
+            await asyncio.sleep(.25)
+
     async def run(self):
-        await self.event("ready", protocol=1, sample_rate=16000)
+        announcements = None
         try:
+            await self.event("ready", protocol=1, sample_rate=16000)
+            announcements = asyncio.create_task(self.announce_pending())
             while True:
                 message = await self.ws.receive()
                 if message["type"] == "websocket.disconnect":
@@ -151,6 +179,7 @@ class AudioConversation:
                         continue
                     if control.session_id:
                         self.session_id = control.session_id
+                        self.hub.claim(control.session_id)
                     self.worker = asyncio.create_task(self.converse())
                 elif control.type == "stop":
                     await self.cancel_worker()
@@ -165,10 +194,15 @@ class AudioConversation:
                     self.session_id = None
                     await self.event("session", session_id=None)
                     await self.state("stopped")
-                    await self.agent.sink.deliver_pending()
+                    # The maintenance worker delivers the durable outbox.
+                    # Never block receiving disconnect/start on callback HTTP.
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
+            if announcements is not None:
+                announcements.cancel()
+                with suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                    await announcements
             await self.cancel_worker()
 
     async def bind(self, session_id: str | None) -> bool:
@@ -276,6 +310,10 @@ class AudioConversation:
                 self.turn_id = None
                 if result.done:
                     await self.event("session_ended", session_id=self.session_id)
+                    if self.remote:
+                        self.session_id = None
+                        await self.state("stopped")
+                        return
                     opening = await self.bind(None)
         except asyncio.TimeoutError:
             logger.warning("Audio conversation timed out (phase=%s)", self.phase)

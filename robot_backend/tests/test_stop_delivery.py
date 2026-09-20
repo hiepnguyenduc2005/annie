@@ -61,6 +61,8 @@ class StopDeliveryTests(unittest.IsolatedAsyncioTestCase):
         conversation = AudioConversation(socket, agent, None, AudioHub())
         conversation.session_id = session.session_id
         await conversation.run()
+        self.assertEqual(requests, [])  # Socket processing never waits on HTTP.
+        await sink.deliver_pending()  # Simulate the periodic outbox worker.
         return sink, session, socket, requests
 
     async def test_stop_posts_once_even_when_analysis_fails(self):

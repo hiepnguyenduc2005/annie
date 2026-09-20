@@ -6,4 +6,7 @@
 //
 // (Or just pick a Team under Signing & Capabilities in Xcode.)
 PRODUCT_BUNDLE_IDENTIFIER = app.annie.companion
+// Simulator default. Override in Local.xcconfig for a physical phone.
+// Keep $() so // is not interpreted as a comment.
+ANNIE_API_URL = http:/$()/127.0.0.1:8000
 #include? "Local.xcconfig"

@@ -96,6 +96,7 @@ def summary_messages(session, reason: str) -> list[dict]:
                     "task_status": session.task_status,
                     "goal_supported": session.goal_supported,
                     "ending_reason": reason,
+                    "received_unassessed_reply": session.pending_resident_text,
                 }
             ),
         },

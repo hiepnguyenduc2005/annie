@@ -11,18 +11,25 @@ backend -> WebSocket -> PCM -> AVAudioPlayerNode -> iPhone speaker
 
 ## Wire protocol
 
-One WebSocket (default `ws://<lan-ip>:8000/audio`). **Binary frames only, both directions:**
+One WebSocket (default `ws://<lan-ip>:8080/audio`) carries JSON control
+frames and binary PCM: signed 16-bit little-endian, mono, 16,000 Hz.
+Phone microphone packets are 20 ms (640 bytes), transmitted only in `listening`.
 
-| | |
-|---|---|
-| Encoding | raw PCM, signed 16-bit, little-endian, no header |
-| Channels / rate | mono, 16,000 Hz |
-| Phone -> backend | 20 ms packets (320 samples = 640 bytes, 50/s) |
-| Backend -> phone | any length; played as it arrives (an odd trailing byte is carried to the next frame) |
+The server sends `ready` (protocol 1). An idle phone receives
+`conversation_requested` with an existing `session_id` when `/requests` queues
+work. The phone prepares audio and sends `start` with that ID automatically.
+The task stays queued until that acknowledgement, so disconnecting before start
+does not consume it. Annie speaks first, then listens for a reply.
 
-Text frames are unexpected and ignored. The phone sends a WebSocket ping every 10 s
-and reconnects with 1-10 s backoff. If the network backs up (about 1 s queued), new
-mic packets are dropped instead of building latency. Audio is never written to disk.
+Replies use `audio_start` (turn ID, sample rate, byte count), binary PCM, and
+`audio_end`. The phone sends `playback_finished` only when playback completes;
+the server then enters `listening`. A finished remote conversation stops audio
+while leaving the connection available for the next request. Manual Start Audio
+still starts a resident-initiated conversation.
+
+The phone reconnects after connection loss. Audio is never written to disk.
+The companion backend's v2 dispatch adapter is separate and still pending;
+queued family messages do not yet trigger this `/requests` path automatically.
 
 ## Run it
 
@@ -38,14 +45,18 @@ mic packets are dropped instead of building latency. Audio is never written to d
    Start **robot_backend**, which owns `/audio`, on port 8080; `app_backend` is
    a separate service and has no audio route. `0.0.0.0` is a bind address, not
    the phone's destination. Both devices must be on a reachable network.
-3. Run on a device, tap **Connect**, then **Start Audio** (allow the microphone).
+3. Run on a device. The app connects automatically while open. Allow microphone
+   access when prompted; incoming tasks speak and then listen without tapping
+   **Start Audio**. **Disconnect** pauses automatic connection until you reconnect.
 
-To try it without the real backend:
+Provider-free protocol regression checks run from the repository root:
 
+```sh
+.venv/bin/python -m unittest discover -s robot_backend/tests -v
 ```
-pip install websockets
-python tools/test_server.py --mode tone   # phone plays a beep; use --mode echo / sink for other tests
-```
+
+`tools/test_server.py` is the older binary-only transport demo; it does not
+implement the current conversation controls.
 
 ## Layout
 
@@ -74,8 +85,8 @@ python tools/test_server.py --mode tone   # phone plays a beep; use --mode echo 
 
 ## Verified vs. not
 
-Verified in the iOS Simulator (Xcode 27) against `tools/test_server.py`: build, connect,
-mic capture and conversion (48 kHz -> 16 kHz packets received by the server), playback
-scheduling of received audio, and the voice-processing fallback.
-**Not verified:** audible playback quality, echo cancellation, and Wi-Fi reconnect
-behavior on a physical iPhone.
+Proactive protocol tests use mocked speech and a simulated phone acknowledgement:
+idle invitation, reconnect before acceptance, opening speech, reply listening,
+and stopping on completion. Simulator compilation checks Swift integration.
+Physical audible playback, microphone replies, and hotspot reconnect still need
+an on-device check. Background/locked-phone notification delivery is not implemented.

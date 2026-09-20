@@ -6,9 +6,13 @@ as work progresses and record a reason for blocked work.
 
 ## Now
 
+- [ ] Verify live robot_backend integration with the implemented v2 contract in `app_backend/README.md`: numeric household IDs, shared reminders, daily conversations, history, WebSockets, and three robot callback flows. Enable dispatch/scheduling only after fake and real integration checks. Backend, robot voice message/reminder adapter, and Swift frontend adapters are implemented; legacy backend is archived under ignored `tmp/`. Physical phone and robot end-to-end verification remains open.
+
+- [ ] Verify the v2 companion app on physical phones: account selection, shared reminders across Zach/Ellis (latest note retained, completion resets daily and stays false before scheduled time), today-only chat with keyboard dismissal and preserved drafts, history, live updates, and reconnect. Use the build-configured URL.
+
 - [ ] Configure and verify the companion final-summary receiver on port 8000 when API delivery is re-enabled. Delivery is currently disabled; local finalization and outbox retention are covered by mocked tests.
 
-- [ ] Verify the standalone `speaker_mic` app connects on a physical phone using its build-configured `/audio` URL. Address/key fields removed; simulator build verified. Run `robot_backend` on port 8080, then check LAN connection and playback on device.
+- [ ] Verify the standalone `speaker_mic` app connects on a physical phone using its build-configured `/audio` URL. Address/key fields removed; simulator build verified. Run `robot_backend` on port 8080, then check LAN connection, proactive speech without Start Audio, automatic reply listening, and completed-session capture stop on device. Mocked protocol checks cover invitation/reconnect and speak-then-listen; background push delivery remains separate.
 
 - [ ] TASK-016: Rehearse the one-command local stack and HTTP showcases ([runbook](LIVE_DEMO.md#one-command-local-showcases)). Launcher, showcases, trick bridge/planner support and offline regression checks are implemented. Done when the local patrol, fall timeline and five tricks complete with recorded live timings. Current coding sandbox blocks localhost HTTP and Git writes; live rehearsal and delivery commits remain pending.
 
@@ -79,3 +83,9 @@ Copy this template into the relevant section when there is actual work:
   - Owner: add when coordinating multiple contributors.
   - Dependency or blocker: add only when relevant.
 ```
+
+- Audio stop no longer waits for callback HTTP delivery; regression covers prompt disconnect with an unavailable callback sink. Verify audible phone playback and reconnect on device.
+
+- Audio handshake disconnects are handled before the initial ready frame; queued invitations remain available for reconnect. Regression covered with a disconnected socket.
+
+- Verify Stop during Thinking on the audio phone: received reply survives cancellation for summary; automated cancellation and analysis-outage regressions pass.

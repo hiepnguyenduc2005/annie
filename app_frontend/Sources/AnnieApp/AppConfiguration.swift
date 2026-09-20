@@ -1,100 +1,20 @@
-//
-//  AppConfiguration.swift
-//  Annie
-//
-//  App-level configuration. The single place that knows where the
-//  Annie Companion API lives — every API call goes through
-//  `AppConfiguration.apiBaseURL` / `apiURL(...)`, so nothing else ever
-//  declares the host.
-//
-//  Resolution order (first match wins):
-//    1. `ANNIE_API_URL` environment variable — per-run override for the Mac
-//       build (`ANNIE_API_URL=http://host:8000 swift run AnnieApp`).
-//    2. The address saved in the app's Profile tab (UserDefaults). This is how
-//       a phone points at the Mac running the backend, since `127.0.0.1` on a
-//       phone is the phone itself.
-//    3. `http://127.0.0.1:8000` — the backend on the same machine.
-//
-
 import Foundation
 
+/// Build-configured connection, with environment overrides for Mac development.
+/// Old addresses and tokens saved on the phone are intentionally ignored.
 enum AppConfiguration {
     static let defaultAPIBaseURL = URL(string: "http://127.0.0.1:8000")!
-    private static let savedURLKey = "annieAPIBaseURL"
-    private static let savedTokenKey = "annieAPIToken"
 
-    /// Where the Dev tab's dog-process feed lives. It rides on the same host
-    /// as the API server (the Mac holding the dog link); the port is the one
-    /// piece that changes between a real run (:8011) and the simulator (:8111),
-    /// so the demo can point the feed at either without touching code.
-    static let defaultDogFeedPort = 8011
-    private static let savedDogFeedPortKey = "annieDevFeedPort"
-
-    static func saveDogFeedPort(_ text: String) -> Int? {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard let port = Int(trimmed), (1...65535).contains(port) else { return nil }
-        UserDefaults.standard.set(port, forKey: savedDogFeedPortKey)
-        return port
-    }
-
-    static var dogFeedPort: Int {
-        UserDefaults.standard.object(forKey: savedDogFeedPortKey) as? Int ?? defaultDogFeedPort
-    }
-
-    /// Bearer token for the backend, when one is configured there. Empty means
-    /// none, which the backend only accepts from loopback clients — so a phone
-    /// on the LAN needs this set. Kept in UserDefaults alongside the address:
-    /// this is a demo credential for a local network, not a secret store.
-    static var apiToken: String {
-        if let fromEnvironment = ProcessInfo.processInfo.environment["ANNIE_API_TOKEN"], !fromEnvironment.isEmpty {
-            return fromEnvironment
-        }
-        return UserDefaults.standard.string(forKey: savedTokenKey) ?? ""
-    }
-
-    static func saveAPIToken(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            UserDefaults.standard.removeObject(forKey: savedTokenKey)
-        } else {
-            UserDefaults.standard.set(trimmed, forKey: savedTokenKey)
-        }
-    }
-
-    /// Set when `ANNIE_API_URL` is present and valid; it beats the saved address.
-    static var environmentOverride: URL? {
-        ProcessInfo.processInfo.environment["ANNIE_API_URL"].flatMap(normalizedURL)
-    }
-
-    /// Where the API server is right now.
-    /// The Dev tab (dog feed) shows only when the app points at a real server, not the loopback default.
-    static var devFeedAvailable: Bool {
-        let host = apiBaseURL.host ?? ""
-        return !host.isEmpty && host != "127.0.0.1" && host != "localhost"
-            || ProcessInfo.processInfo.environment["ANNIE_DEV_FEED"] == "1"
+    private static func setting(_ environmentKey: String, _ bundleKey: String) -> String? {
+        let value = ProcessInfo.processInfo.environment[environmentKey]
+            ?? (Bundle.main.object(forInfoDictionaryKey: bundleKey) as? String)
+        guard let text = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty, !text.contains("$(") else { return nil }
+        return text
     }
 
     static var apiBaseURL: URL {
-        if let url = environmentOverride { return url }
-        if let saved = UserDefaults.standard.string(forKey: savedURLKey), let url = normalizedURL(saved) {
-            return url
-        }
-        return defaultAPIBaseURL
-    }
-
-    /// Save the server address typed into the app. Returns the URL that will be
-    /// used, or nil (and saves nothing) if the text isn't a usable http(s) address.
-    /// Empty text clears the saved address and returns to the default.
-    @discardableResult
-    static func saveAPIBaseURL(_ text: String) -> URL? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            UserDefaults.standard.removeObject(forKey: savedURLKey)
-            return apiBaseURL
-        }
-        guard let url = normalizedURL(trimmed) else { return nil }
-        UserDefaults.standard.set(url.absoluteString, forKey: savedURLKey)
-        return apiBaseURL
+        setting("ANNIE_API_URL", "AnnieAPIURL").flatMap(normalizedURL) ?? defaultAPIBaseURL
     }
 
     /// Accepts `192.168.1.20:8000` or `http://192.168.1.20:8000/`; requires an

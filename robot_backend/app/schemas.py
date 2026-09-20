@@ -16,7 +16,7 @@ class StrictModel(BaseModel):
 class RemoteRequest(StrictModel):
     request_id: Identifier
     type: Identifier
-    request: str = Field(min_length=1, max_length=2000)
+    request: str = Field(min_length=1, max_length=4100)
 
 
 class Acknowledgment(StrictModel):

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var controller = AudioController()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -42,6 +43,8 @@ struct ContentView: View {
                 .font(.callout.monospacedDigit())
             }
 
+            Text("While this app is open, Annie can start a conversation automatically. She speaks first, then listens for your reply.")
+                .font(.caption).foregroundStyle(.secondary)
             Spacer()
 
             VStack(spacing: 12) {
@@ -64,6 +67,11 @@ struct ContentView: View {
             .controlSize(.large)
         }
         .padding(24)
+        .task { controller.foreground() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { controller.foreground() }
+            else if phase == .background { controller.background() }
+        }
     }
 
     private static func bytes(_ count: Int) -> String {

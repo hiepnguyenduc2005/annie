@@ -36,6 +36,8 @@ final class AudioController: ObservableObject {
     private var interrupted = false
     private var recentRestarts: [Date] = []
     private var playbackTurnID: String?
+    private var startGeneration = 0
+    private var resumeConnection = true
     private var expectedReplyBytes = 0
     private var receivedReplyBytes = 0
 
@@ -100,9 +102,22 @@ final class AudioController: ObservableObject {
 
     func toggleConnection() {
         if isConnectionActive {
+            resumeConnection = false
             stopAudio()
             connection.disconnect()
-        } else { connection.connect() }
+        } else { resumeConnection = true; connection.connect() }
+    }
+
+    func foreground() {
+        if resumeConnection && !isConnectionActive { connection.connect() }
+    }
+
+    func background() {
+        let shouldResume = isConnectionActive
+        // iOS suspends idle sockets. Reconnect on return rather than keeping a stale link.
+        stopAudio()
+        connection.disconnect()
+        resumeConnection = shouldResume
     }
 
     func toggleAudio() {
@@ -111,11 +126,13 @@ final class AudioController: ObservableObject {
 
     func startAudio() async {
         guard !isRunning, !isStarting else { return }
+        let generation = startGeneration
         isStarting = true
         defer { isStarting = false }
 
         let granted = await AudioCapture.requestPermission()
         microphoneDenied = !granted
+        guard generation == startGeneration, connection.state == .connected else { return }
 
         do {
             // Without permission the session still plays audio, just no mic.
@@ -146,6 +163,7 @@ final class AudioController: ObservableObject {
     }
 
     func stopAudio() {
+        startGeneration += 1
         connection.stopConversation()
         playbackTurnID = nil
         teardownAudio()
@@ -169,6 +187,11 @@ final class AudioController: ObservableObject {
 
     private func handleControl(_ event: AudioServerEvent) {
         switch event.type {
+        case "conversation_requested":
+            guard let sessionID = event.sessionID, !isRunning, !isStarting else { return }
+            connection.acceptIncomingConversation(sessionID: sessionID)
+            speaker = StatusLine(text: "Incoming conversation…", level: .warning)
+            Task { await startAudio() }
         case "audio_start":
             guard isRunning, event.sampleRate == 16000, let count = event.bytes,
                   count > 0, count <= 16000 * 2 * 90, count % 2 == 0,

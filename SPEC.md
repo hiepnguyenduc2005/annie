@@ -139,6 +139,10 @@ still uses the simulator's motion gates. These are simulator workflows only.
 The `speaker_mic` app uses a build-configured `robot_backend` WebSocket URL
 (port 8080, `/audio`) without asking the operator to enter connection settings
 on the phone. Machine-specific settings remain in ignored `Local.xcconfig`.
+While open, it connects automatically and accepts incoming robot conversations:
+Annie speaks first, then automatically listens for a reply with microphone
+permission. Completing a remote conversation stops audio capture. Disconnect
+pauses availability. Background/locked-phone push delivery is outside this flow.
 
 Standalone companion final-result API delivery is disabled by default. Explicit
 Stop Audio still finalizes and retains a summary locally. Delivery requires
@@ -205,3 +209,68 @@ Stop Audio still finalizes and retains a summary locally. Delivery requires
 - **MCP.** `robot/dog/mcp_server.py` exposes the dog (status, instruct, command, say, listen, find_person,
   look_for, where_is, people, voice settings, memory) to any MCP client; elder-care skills are
   compositions of the primitives (`robot/dog/planning/care_skills.py`).
+
+## Companion app connection configuration
+
+The restored companion frontend uses a build-configured app_backend HTTP URL
+from ignored `app_frontend/Local.xcconfig`, like speaker_mic.
+The phone connects automatically and offers a Connect retry button without
+address or token entry fields. Old saved phone settings do not override the
+build configuration. Localhost and private LAN IP destinations are accepted automatically, without
+ANNIE_ALLOWED_HOSTS. Other hostnames and public IP destinations are rejected. With ANNIE_API_TOKEN unset, HTTP and
+WebSocket family connections allow loopback and private LAN clients without
+a token; public clients remain rejected. Explicitly configured tokens are
+still enforced. Internal robot callback authentication is unchanged.
+
+Companion connection failures show the configured server URL and a bounded
+network, HTTP-status, or response-format error without exposing credentials.
+
+## App backend v2 replacement
+
+The replacement contract is documented in `app_backend/README.md`. MongoDB owns
+app users, dog users, recurring reminders, reminder notes, daily per-app-user
+conversations, and emergency/ordinary notifications. Jeanine's timezone defaults
+to America/New_York and is configurable per dog user. Every family message is
+dispatched to robot_backend. Reminders belong to the dog user: all associated
+app users share the same list, see additions from any member, and receive live
+updates with a refresh on reconnect. Backend v2 is implemented with transaction-backed MongoDB persistence; frontend
+and robot adapters are pending. Family connections are token-free on the local
+network; robot callbacks require X-Internal-Secret. Dispatch and reminder
+scheduling default to disabled until the robot implements the new contract.
+
+Replacement contract refinements: reminder time is named `daily_time` (HH:MM),
+notifications have a single `is_emergency` boolean, and public record IDs/foreign
+keys are numeric integers allocated atomically. Retry keys are separate from IDs.
+
+## Swift frontend v2
+
+The Swift family app uses backend-loaded numeric family/resident IDs and the v2
+API. Reminders and history are shared per resident; completion is read-only from
+robot notes. Ask Annie shows only today's per-user conversation in the resident's
+timezone; older conversations stay in MongoDB with no date-picker UI for now.
+All messages are posted to the backend and expose dispatch status without fake
+replies. Paginated data and WebSocket reconnect refresh preserve household scope;
+account switches invalidate late responses and clear the previous conversation.
+Failed writes remain visibly failed with stable retry keys; no offline fake saves.
+
+## Reminder daily completion
+
+The shared reminder list displays the latest note across all days. Its completion
+state uses only today's latest report in the resident's timezone and remains
+incomplete until the reminder's daily time arrives. A completed report from a
+previous day does not complete today's reminder.
+
+The Ask Annie composer provides an explicit Hide keyboard button above the input
+while focused, preserving the draft and restoring access to the tab menu.
+
+## Companion voice dispatch
+
+Family messages and due reminders use authenticated robot voice sessions. Final
+summaries return to the original conversation or reminder occurrence. Duplicate
+requests and callback retries must not duplicate work. Restarted unfinished
+sessions report an inconclusive outcome; this flow does not navigate hardware.
+
+Received resident text is retained in bounded session RAM before model and TTS
+calls, included in Stop summaries if processing is interrupted, and erased at
+finalization. Analysis outages preserve previous evidence but unassessed replies
+block an automatic success claim. Logs record only completion metadata, not text.

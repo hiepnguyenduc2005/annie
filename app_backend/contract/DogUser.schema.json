@@ -1,0 +1,34 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Id",
+      "type": "integer"
+    },
+    "name": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "timezone": {
+      "default": "America/New_York",
+      "title": "Timezone",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "timestamp",
+    "name"
+  ],
+  "title": "DogUser",
+  "type": "object"
+}

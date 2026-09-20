@@ -1,0 +1,36 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "dog_user_id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Dog User Id",
+      "type": "integer"
+    },
+    "id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Id",
+      "type": "integer"
+    },
+    "name": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "timestamp",
+    "name",
+    "dog_user_id"
+  ],
+  "title": "AppUser",
+  "type": "object"
+}

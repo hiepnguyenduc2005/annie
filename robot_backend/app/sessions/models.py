@@ -19,6 +19,7 @@ class Session:
     request_fingerprint: str | None = None
     history: list[dict] = field(default_factory=list)
     rolling_memory: str = ""
+    pending_resident_text: str = ""
     task_status: TaskStatus = "active"
     goal_supported: bool = False
     user_turns: int = 0
@@ -31,6 +32,7 @@ class Session:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def erase_details(self) -> None:
+        self.pending_resident_text = ""
         self.history.clear()
         self.rolling_memory = ""
         self.goal = None

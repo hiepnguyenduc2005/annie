@@ -111,6 +111,10 @@ final class AudioConnection: NSObject, ObservableObject {
         onConnectionLost?()
     }
 
+    func acceptIncomingConversation(sessionID: String) {
+        self.sessionID = sessionID
+    }
+
     func startConversation() {
         wantsAudio = true
         if state == .connected, protocolReady { sendControl("start", sessionID: sessionID) }

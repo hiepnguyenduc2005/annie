@@ -223,9 +223,12 @@ app/services/dedicated_server.py summary-only durable delivery
 app/sessions/                 replaceable store and session lifecycle
 ```
 
-The agent returns typed audio results independent of HTTP, allowing a future
-binary/WebSocket transport without moving history to the phone. Actual streaming
-and distributed sessions are not implemented.
+The `/audio` WebSocket streams half-duplex PCM with JSON conversation controls.
+Queued `/requests` sessions invite the connected idle audio phone to speak first
+and listen for a reply, without a manual Start Audio tap. See
+[`speaker_mic` protocol](../speaker_mic/README.md#wire-protocol). Sessions and the
+audio invitation queue remain in memory; distributed sessions and the new
+companion backend v2 dispatch adapter are not implemented.
 
 From the repository root:
 
@@ -253,3 +256,35 @@ and creates a finalized WAV locally, avoiding dependence on streaming WAV
 length headers. The phone path requests 16 kHz; REST retains 24 kHz WAV.
 Reference: https://developers.deepgram.com/docs/tts-media-output-settings
 Mocked tests check exact PCM sample preservation and finalized WAV lengths.
+
+## Companion voice adapter
+
+The top-level robot_backend implements `/api/message-requests` and
+`/api/reminder-requests`, authenticated with `X-Internal-Secret` matching
+`INTERNAL_SECRET` in both services. Configure reciprocal backend URLs:
+`ROBOT_BACKEND_URL` on app_backend and `COMPANION_BACKEND_URL` on robot_backend.
+One audio phone serves `COMPANION_DOG_USER_ID` (Jeanine, 1 by default).
+
+Accepted tasks start voice sessions on the connected foreground speaker_mic app.
+Final robot summaries return to `/api/messages/replies`; reminder reports go to
+`/api/notes`. These are summaries, not verbatim resident transcripts. Only a
+confirmed completed reminder task produces outcome=completed; other outcomes
+remain unknown. No physical navigation or background delivery is performed.
+
+A SQLite ledger beside the existing outbox persists correlation IDs, request
+fingerprints and final callbacks. Retries do not repeat accepted tasks and use
+stable callback idempotency keys. Run one robot worker. In-memory conversations
+cannot survive restart: unfinished requests return an inconclusive outcome instead
+of being replayed. A disconnected phone waits until the session timeout and then
+returns an unconfirmed outcome. Callback outages retry with bounded backoff.
+
+Enable ROBOT_DISPATCH_ENABLED and REMINDER_SCHEDULER_ENABLED in app_backend for
+operation, then restart both services. Enabling dispatch also sends previously
+queued family messages; expired reminders are not replayed. Mocked regression
+checks cover duplicate requests, callback retry and restart recovery. Physical
+speech and the live provider round trip still require an on-device check.
+
+Received resident text is retained in bounded session RAM before model and TTS
+calls, included in Stop summaries if processing is interrupted, and erased at
+finalization. Analysis outages preserve previous evidence but unassessed replies
+block an automatic success claim. Logs record only completion metadata, not text.

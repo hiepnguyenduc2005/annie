@@ -89,6 +89,12 @@ class Agent:
                     else:
                         prepared.append(part)
                 current = prepared
+                if content:
+                    # Capture received evidence before any cancellable model/TTS call.
+                    text = " ".join(part["text"] for part in current if part["type"] == "text")
+                    session.pending_resident_text = (session.pending_resident_text + "\n" + text).strip()[-4000:]
+                    session.user_turns += 1
+                    session.updated_at = utc_now()
                 spoken_text = await self.model.reply(
                     prompts.conversation_messages(session, current)
                 )
@@ -99,12 +105,14 @@ class Agent:
                 if created:
                     await self.sessions.discard(session.session_id)
                 raise
+            analysis_succeeded = True
             try:
                 analysis = await self.model.structured(
                     prompts.analysis_messages(session, current, spoken_text),
                     TurnAnalysis,
                 )
             except QwenError as exc:
+                analysis_succeeded = False
                 logger.warning(
                     "Turn analysis unavailable (%s); returning audio with conservative state", exc
                 )
@@ -113,15 +121,15 @@ class Agent:
                 )
                 analysis = TurnAnalysis(
                     conversation_done=False,
-                    task_status="active",
-                    goal_supported=False,
+                    task_status=session.task_status,
+                    goal_supported=session.goal_supported,
                     rolling_memory=session.rolling_memory,
                     user_memory=text[:1000] or prompts.NO_MEMORY,
                     assistant_memory=spoken_text[:1000],
                 )
             session.started = True
-            if content:
-                session.user_turns += 1
+            if analysis_succeeded:
+                session.pending_resident_text = ""
             session.rolling_memory = analysis.rolling_memory
             session.history.extend(
                 [
@@ -184,13 +192,20 @@ class Agent:
                     status="inconclusive",
                     summary="The conversation ended; its outcome could not be determined.",
                 )
-            if session.request_id and (
-                not session.goal_supported or session.user_turns == 0
-            ):
+            if session.request_id and session.user_turns == 0:
                 summary = SummaryAnalysis(
                     status="inconclusive",
                     summary="The requested check-in or task outcome could not be determined.",
                 )
+            elif session.request_id and (
+                not session.goal_supported or session.pending_resident_text
+            ) and summary.status == "completed":
+                summary = SummaryAnalysis(
+                    status="inconclusive",
+                    summary="The resident replied, but completion of the requested task was not confirmed.",
+                )
+            logger.info("Conversation finalized (reason=%s, received_turns=%s, unassessed_reply=%s, goal_supported=%s, outcome=%s)",
+                        reason, session.user_turns, bool(session.pending_resident_text), session.goal_supported, summary.status)
             if reason == "cancelled":
                 summary = SummaryAnalysis(
                     status="cancelled",

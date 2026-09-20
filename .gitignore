@@ -24,3 +24,6 @@ app_frontend/Local.xcconfig
 app_frontend/.build/
 app_frontend/Annie.xcodeproj/xcuserdata/
 app_frontend/Annie.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Private local archives (may include environment files and development data)
+/tmp/

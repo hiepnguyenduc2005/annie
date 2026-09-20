@@ -1,0 +1,47 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "dog_user_id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Dog User Id",
+      "type": "integer"
+    },
+    "id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Id",
+      "type": "integer"
+    },
+    "is_emergency": {
+      "title": "Is Emergency",
+      "type": "boolean"
+    },
+    "source": {
+      "const": "robot",
+      "default": "robot",
+      "title": "Source",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "timestamp",
+    "dog_user_id",
+    "description",
+    "is_emergency"
+  ],
+  "title": "Notification",
+  "type": "object"
+}

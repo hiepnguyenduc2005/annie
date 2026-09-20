@@ -241,3 +241,26 @@ superseded with a link. Link implementation details instead of duplicating them.
 - Context: The user explicitly requested that all simulator-related code, including its frontend, app backend, robot backend, and contract, live under `robot/`.
 - Decision: Move the working simulator/demo stack to `robot/{simulation,frontend,app_backend,robot_backend,contract}` and use qualified `robot.*` Python imports. Keep the existing top-level team health scaffolds and Swift app independent. This supersedes DEC-003's placement of the demo in the top-level app backend.
 - Consequences: Run commands from the repository root using the new paths. Local URLs remain port 8766 for the simulator and port 8000 for the family demo. Root `.env`, ignored caches, datasets, and runtime databases retain their locations. The relocated demo has one incident engine; no second policy engine was added.
+
+## Local phone access without a token
+
+For the phone demo, private LAN clients may use family HTTP and WebSocket
+routes without ANNIE_API_TOKEN. This removes phone credential setup as
+requested. Local-IP host validation, same-origin checks, public-client rejection,
+explicit token enforcement, and internal robot secrets remain in place.
+Devices on that local network can access family data and commands.
+
+Local phone setup also no longer requires ANNIE_ALLOWED_HOSTS: localhost and
+private LAN IP destinations are accepted automatically for HTTP and WebSockets.
+Arbitrary DNS hosts remain rejected to preserve DNS-rebinding protection.
+
+## App backend v2: one MongoDB source of truth
+
+The user approved replacing the overlapping legacy companion/schema stores with
+typed models, services, and FastAPI routers backed only by MongoDB. Numeric IDs
+come from an atomic counter. Transactions commit data, dispatch intent, and retry
+receipts together; therefore Atlas or a replica set is required. An isolated
+local replica set is used for tests. The full previous backend is preserved in
+ignored tmp/; no existing database is migrated. The new robot contract and family
+API are intentionally breaking; frontend/robot adapters are separate work.
+Robot dispatch and scheduling remain disabled until those adapters exist.

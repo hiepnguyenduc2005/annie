@@ -1,92 +1,63 @@
-//
-//  Views.swift
-//  AnnieApp
-//
-//  Reminders (with today's routine), the activity feed, and the profile
-//  card. Asking and messaging Annie are merged into one screen in
-//  FamilyViews.swift.
-//
-
-import PhotosUI
 import SwiftUI
 
-// ---------------------------------------------------------------------------
-// Reminders
-// ---------------------------------------------------------------------------
+struct SectionError: View {
+    let text: String?
+    var body: some View {
+        if let text {
+            Text(text).font(.callout).foregroundStyle(.red)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+        }
+    }
+}
 
 struct RemindersView: View {
     @EnvironmentObject private var state: AppState
     @State private var showAdd = false
 
-    private var doneCount: Int { state.reminders.filter(\.done).count }
-
     var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(state.residentName)'s reminders").font(.headline)
+                    Text("Shared with the family · \(state.timezone)").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }.padding(12)
+            SectionError(text: state.reminderError)
             List {
                 ForEach(state.reminders) { reminder in
-                    HStack(spacing: 12) {
-                        Button {
-                            Task { await state.toggle(reminder) }
-                        } label: {
-                            Image(systemName: reminder.done ? "checkmark.circle.fill" : "circle")
-                                .font(.title2)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(reminder.done ? Palette.slate : Palette.steel)
-                        .help(reminder.done ? "Mark as not done" : "Mark as done")
-
-                        Text(fmtClock(reminder.time))
-                            .monospacedDigit()
-                            .frame(width: 84, alignment: .leading)
-
-                        Text(reminder.title)
-                            .strikethrough(reminder.done)
-                            .foregroundStyle(reminder.done ? .secondary : .primary)
-                        Spacer()
-                        if !reminder.done {
-                            // The reminder goes through the same path as a family message: Annie finds her,
-                            // says it, listens for the reply; the run shows under Ask Annie.
-                            Button {
-                                Task { await state.send("tell Grandma to \(reminder.title.prefix(1).lowercased() + reminder.title.dropFirst())") }
-                            } label: {
-                                // One line, always: the title wraps instead of the button.
-                                HStack(spacing: 5) {
-                                    Image(systemName: "pawprint.fill")
-                                    Text("Remind")
-                                }
-                                .font(.caption.weight(.semibold))
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: reminder.done == true ? "checkmark.circle.fill" : "circle")
+                            .font(.title2).foregroundStyle(Palette.slate)
+                            .accessibilityLabel(reminder.done == true ? "Reported complete today" : "Not reported complete today")
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Text(fmtClock(reminder.daily_time)).font(.subheadline.weight(.semibold)).monospacedDigit()
+                                Text(reminder.description).strikethrough(reminder.done == true)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Palette.slate)
-                            .controlSize(.small)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .accessibilityLabel("Remind her: \(reminder.title)")
+                            if let note = reminder.latest_note {
+                                Text(note.description).font(.callout).foregroundStyle(.secondary)
+                                Text("\(note.source == "seed" ? "Demo example · " : "")\(displayTimestamp(note.timestamp, timezone: state.timezone))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
-                    }
-                    .padding(.vertical, 2)
+                        Spacer()
+                    }.padding(.vertical, 6)
+                }
+                if state.reminders.isEmpty && !state.loading {
+                    Text("No reminders yet. Add one for the family to see.").foregroundStyle(.secondary)
                 }
             }
             .listStyle(.inset)
-
-            Divider()
-
+            .refreshable { await state.refreshReminders() }
             HStack {
-                Button {
-                    showAdd = true
-                } label: {
-                    Label("Add reminder", systemImage: "plus.circle.fill")
-                }
+                Button { showAdd = true } label: { Label("Add reminder", systemImage: "plus.circle.fill") }
                 Spacer()
-                Text("\(doneCount) of \(state.reminders.count) done")
-                    .foregroundStyle(.secondary)
-            }
-            .padding(12)
+                Text("\(state.reminders.filter { $0.done == true }.count) of \(state.reminders.count) completed today")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(12)
         }
-        .sheet(isPresented: $showAdd) {
-            AddReminderView()
-        }
+        .sheet(isPresented: $showAdd) { AddReminderView() }
     }
 }
 
@@ -94,285 +65,106 @@ struct AddReminderView: View {
     @EnvironmentObject private var state: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var time = Date()
-    @State private var title = ""
-
-    private static let hhmm: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
+    @State private var description = ""
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("New reminder")
-                .font(.title2.bold())
-            DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
-            TextField("What should Annie remind you about?", text: $title)
+            Text("New shared reminder").font(.title2.bold())
+            DatePicker("Daily time", selection: $time, displayedComponents: .hourAndMinute)
+                .environment(\.timeZone, TimeZone(identifier: state.timezone) ?? .current)
+            Text(state.timezone).font(.caption).foregroundStyle(.secondary)
+            TextField("What should Annie remind \(state.residentName) about?", text: $description)
                 .textFieldStyle(.roundedBorder)
-                .onSubmit(add)
+                .disabled(state.adding)
+            Text("Everyone in \(state.residentName)'s family will see this reminder.")
+                .font(.caption).foregroundStyle(.secondary)
+            SectionError(text: state.addError)
             HStack {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Add", action: add)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .keyboardShortcut(.defaultAction)
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(state.adding)
+                Button(state.adding ? "Saving…" : "Add") {
+                    let formatter = DateFormatter()
+                    formatter.locale = Locale(identifier: "en_US_POSIX")
+                    formatter.timeZone = TimeZone(identifier: state.timezone)
+                    formatter.dateFormat = "HH:mm"
+                    let dailyTime = formatter.string(from: time)
+                    Task {
+                        if await state.add(time: dailyTime, description: description) { dismiss() }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(state.adding || description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || description.count > 4000)
+                .keyboardShortcut(.defaultAction)
             }
-        }
-        .padding(20)
-        .frame(maxWidth: 360)
-    }
-
-    private func add() {
-        let trimmed = title.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        let hhmm = Self.hhmm.string(from: time)
-        Task {
-            await state.add(time: hhmm, title: trimmed)
-            dismiss()
-        }
+        }.padding(24).frame(maxWidth: 420)
+        .interactiveDismissDisabled(state.adding)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Activity feed
-// ---------------------------------------------------------------------------
-
-/// History: what Annie has seen, newest first. Facts the dog is reporting
-/// right now (negative ids, merged in by the backend from her live memory)
-/// sit on top under "Live from Annie"; the seeded and family-added ones sit
-/// under "Earlier".
 struct ActivityView: View {
     @EnvironmentObject private var state: AppState
 
-    // ISO 8601 strings of one fixed format sort correctly as text.
-    private var liveFacts: [MemoryFact] {
-        state.memory.filter(\.isLive).sorted { $0.timestamp > $1.timestamp }
-    }
-    private var earlierFacts: [MemoryFact] {
-        state.memory.filter { !$0.isLive }.sorted { $0.timestamp > $1.timestamp }
-    }
-
     var body: some View {
-        List {
-            if !liveFacts.isEmpty {
-                Section {
-                    ForEach(liveFacts) { FactRow(fact: $0) }
-                } header: {
-                    HStack(spacing: 8) {
-                        Circle().fill(Palette.liveDot).frame(width: 9, height: 9)
-                        Eyebrow(text: "Live from Annie")
-                    }
+        VStack(spacing: 0) {
+            SectionError(text: state.historyError)
+            List {
+                ForEach(state.history) { item in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: item.is_emergency ? "exclamationmark.triangle.fill" : item.kind == "note" ? "checklist" : "bell")
+                            .foregroundStyle(item.is_emergency ? Color.red : Palette.slate)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(item.is_emergency ? "Urgent notification" : item.kind == "note" ? "Reminder report" : "Update")
+                                .font(.subheadline.weight(.semibold))
+                            Text(item.description)
+                            Text("\(item.source == "seed" ? "Demo example · " : "")\(displayTimestamp(item.timestamp, timezone: state.timezone))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }.padding(.vertical, 6)
+                }
+                if state.history.isEmpty && !state.loadingHistory {
+                    Text("Reminder reports and notifications will appear here.").foregroundStyle(.secondary)
+                }
+                if state.historyCursor != nil {
+                    Button(state.loadingHistory ? "Loading…" : "Load earlier activity") {
+                        Task { await state.refreshHistory(more: true) }
+                    }.disabled(state.loadingHistory)
                 }
             }
-            if !earlierFacts.isEmpty {
-                Section {
-                    ForEach(earlierFacts) { FactRow(fact: $0) }
-                } header: {
-                    Eyebrow(text: "Earlier")
-                }
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(Palette.cream)
-        .refreshable { await state.refreshHistory() }
-        .overlay {
-            if state.memory.isEmpty {
-                Text("Nothing observed yet. Events appear here as Annie sees them.")
-                    .foregroundStyle(Palette.steel)
-                    .multilineTextAlignment(.center)
-                    .padding(32)
-            }
+            .listStyle(.inset)
+            .refreshable { await state.refreshHistory() }
         }
     }
 }
-
-private struct FactRow: View {
-    let fact: MemoryFact
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("\(fmtDayStamp(fact.timestamp)) \u{00b7} \(fact.room.replacingOccurrences(of: "_", with: " "))")
-                .font(.caption)
-                .foregroundStyle(Palette.steel)
-            Text(fact.text)
-                .foregroundStyle(Palette.ink)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .annieCard(padding: 12)
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
-        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Profile
-// ---------------------------------------------------------------------------
 
 struct ProfileView: View {
+    @EnvironmentObject private var profiles: ProfileState
+    @EnvironmentObject private var state: AppState
+    @State private var confirmSignOut = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                AccountSectionView()
-
-                PeopleSectionView()
-
-                SettingsSectionView()
-
-                Text("Annie is a staged assistance prototype, not a medical device or emergency response.")
-                    .font(.caption)
-                    .foregroundStyle(Palette.steel)
-            }
-            .padding(16)
-        }
-        #if os(iOS)
-        .scrollDismissesKeyboard(.interactively)
-        #endif
-        .background(Palette.cream)
-    }
-}
-
-/// Who this phone is signed in as, with a way to sign out and hand the
-/// phone to a different family member. The picture is chosen here, kept on
-/// this phone only, and shown again in the header.
-struct AccountSectionView: View {
-    @EnvironmentObject private var profiles: ProfileState
-    @State private var confirmSignOut = false
-    @State private var pick: PhotosPickerItem?
-    @State private var pictureProblem: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Account")
-                .font(.annieHeading(22))
-                .foregroundStyle(Palette.ink)
-            HStack(spacing: 12) {
-                PhotosPicker(selection: $pick, matching: .images) {
-                    ProfileAvatar(image: profiles.picture, size: 52)
-                        .overlay(alignment: .bottomTrailing) {
-                            Image(systemName: "camera.fill")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 20, height: 20)
-                                .background(Palette.slate, in: Circle())
-                                .overlay(Circle().stroke(Palette.paper, lineWidth: 2))
-                                .offset(x: 3, y: 3)
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(profiles.picture == nil ? "Add a profile picture" : "Change profile picture")
-                .contextMenu {
-                    if profiles.picture != nil {
-                        Button(role: .destructive) {
-                            profiles.removePicture()
-                        } label: {
-                            Label("Remove picture", systemImage: "trash")
-                        }
-                    }
-                }
-
+                Text("Account").font(.headline)
                 if let profile = profiles.profile {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(profile.member.displayName)
-                            .font(.body.weight(.semibold))
-                        Text("Signed in \u{00b7} \(profile.createdAt.formatted(date: .abbreviated, time: .omitted))")
-                            .font(.caption).foregroundStyle(Palette.steel)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                    }
+                    Label(profile.user.name, systemImage: "person.crop.circle.fill").font(.title2)
+                    Text("\(profile.resident.name)'s family").foregroundStyle(.secondary)
+                    Text("Resident timezone: \(state.timezone)").font(.caption).foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 8)
-                Button("Sign out") { confirmSignOut = true }
-                    .font(.callout.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .tint(Palette.slate)
+                Button("Sign out", role: .destructive) { confirmSignOut = true }
                     .confirmationDialog("Sign out of Annie on this phone?", isPresented: $confirmSignOut) {
-                        Button("Sign out", role: .destructive) { profiles.signOut() }
+                        Button("Sign out", role: .destructive) { state.deactivate(); profiles.signOut() }
                     }
-            }
-            .annieCard()
-
-            if let pictureProblem {
-                Text(pictureProblem)
-                    .font(.footnote)
-                    .foregroundStyle(Palette.alert)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: pick) { item in
-            guard let item else { return }
-            Task { @MainActor in
-                let data = try? await item.loadTransferable(type: Data.self)
-                let kept = data.map { profiles.setPicture(from: $0) } ?? false
-                pictureProblem = kept ? nil : "That picture couldn't be used. Try a different one."
-                pick = nil
-            }
-        }
-    }
-}
-
-/// Where the Annie API lives. On a phone this must be the Mac's LAN address
-/// (e.g. `192.168.1.20:8000`) — `127.0.0.1` there is the phone itself.
-struct ServerSettingsView: View {
-    @EnvironmentObject private var state: AppState
-    @State private var text = ""
-    @State private var token = ""
-    @State private var invalid = false
-    @State private var connecting = false
-
-    private var lockedByEnvironment: Bool { AppConfiguration.environmentOverride != nil }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Server")
-                .font(.subheadline.weight(.semibold))
-            HStack {
-                TextField("Mac address, e.g. 192.168.1.20:8000", text: $text)
-                    .textFieldStyle(.roundedBorder)
-                    .autocorrectionDisabled()
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                    #endif
-                    .onSubmit(connect)
-                    .disabled(lockedByEnvironment)
-                Button(connecting ? "Connecting\u{2026}" : "Connect", action: connect)
-                    .buttonStyle(.borderedProminent)
-                    .tint(Palette.slate)
-                    .disabled(connecting || lockedByEnvironment)
-            }
-            // Required off-device: the backend serves non-loopback clients
-            // only when a token is configured and sent.
-            SecureField("API token, if the backend has one set", text: $token)
-                .textFieldStyle(.roundedBorder)
-                .disabled(lockedByEnvironment)
-                .onSubmit(connect)
-            if lockedByEnvironment {
-                Text("Set by the ANNIE_API_URL environment variable: \(state.serverURL.absoluteString)")
-                    .font(.caption).foregroundStyle(Palette.steel)
-            } else if invalid {
-                Text("Enter an address like 192.168.1.20:8000 or http://my-mac.local:8000.")
-                    .font(.caption).foregroundStyle(Palette.alert)
-            } else {
-                Text(state.live ? "Connected to \(state.serverURL.absoluteString)"
-                                : "Not connected to \(state.serverURL.absoluteString). Showing demo data.")
-                    .font(.caption).foregroundStyle(Palette.steel)
-            }
-        }
-        .onAppear {
-            text = lockedByEnvironment ? "" : state.serverURL.absoluteString
-            token = AppConfiguration.apiToken
-        }
-    }
-
-    private func connect() {
-        connecting = true
-        Task {
-            invalid = !(await state.setServer(text, token: token))
-            connecting = false
+                Divider()
+                Text("Connection").font(.headline)
+                Text(state.live ? (state.socketConnected ? "Connected · live updates" : "Connected · refreshing periodically") : "Not connected")
+                if let error = state.connectionError {
+                    Text(error).font(.callout).foregroundStyle(.red)
+                    Text(state.serverURL.absoluteString).font(.caption).foregroundStyle(.secondary)
+                }
+                Button(state.loading ? "Connecting…" : "Connect") { Task { await state.foreground() } }
+                    .buttonStyle(.borderedProminent).disabled(state.loading)
+                Text("Annie is a staged assistance prototype, not a medical device or emergency response.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

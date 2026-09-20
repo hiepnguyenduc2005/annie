@@ -18,17 +18,17 @@ home and the family's phone can be in different places.
   │ frontend      (web)    │              │         Go2 control, sim     │
   └───────────┬────────────┘              └───────────────┬──────────────┘
               │ REST + WebSocket                          │
-        ┌─────┴──────────┐  POST /dispatch ───────────────┘
-        │  app_backend   │ ◄─ POST /internal/events ───────
+        ┌─────┴──────────┐  v2 robot requests (pending) ──┘
+        │  app_backend   │ ◄─ replies / notes / notifications
         │  + MongoDB     │
         └────────────────┘
 ```
 
 | Path | What it is | State |
 | --- | --- | --- |
-| `app_backend/` | Family-facing API: messages, runs, reminders, observation memory, incident policy | **Working**, 86 tests |
-| `app_frontend/` | SwiftUI app for iPhone and Mac | **Working** on device and simulator |
-| `frontend/` | Phone-friendly web app served at `/app/` | **Working** |
+| `app_backend/` | MongoDB v2: households, daily conversations, shared reminders, notes, notifications | **Implemented**; robot adapter pending |
+| `app_frontend/` | SwiftUI app for iPhone and Mac | v2 adapter implemented; device verification pending |
+| `frontend/` | Legacy phone-friendly web app | Requires v2 API adaptation |
 | `robot/` | The robot side: errand brain serving `/dispatch`, physical Go2 control, perception, simulator | **Working**, see [robot/README.md](robot/README.md) |
 | `robot_backend/` | Original top-level placeholder; the working robot service lives under `robot/` | Unused scaffold |
 | `shared/`, `contract/` | Protocol references and exported typed schemas | — |
@@ -37,14 +37,14 @@ home and the family's phone can be in different places.
 
 Being precise about this matters more than the feature list.
 
-**Real:** the async message path (a message is accepted in ~30 ms and the
+**Historical legacy integration:** the async message path (a message is accepted in ~30 ms and the
 robot's errand is reported afterwards, so the app never blocks on the dog);
 run events streaming to phone and browser over WebSocket; MongoDB persistence
 of the household schema; the incident state machine; the simulator driving an
 actual Go2 model with a trained walking policy, camera-driven perception, and
 execution receipts.
 
-The message boundary is implemented on both sides: `robot/dog/missions/errand.py`
+The legacy message boundary was implemented on both sides: `robot/dog/missions/errand.py`
 serves `/dispatch` and reports back through `/internal/events`, and
 `robot/demo_dog.sh` brings up the app, the errand brain and the dog together.
 The first app-to-dog missions ran on the physical Go2 on 2026-09-20 — it found
@@ -53,42 +53,33 @@ for the recorded runs and their open items.
 
 **Staged or unconnected:** observation memory is seeded with synthetic data,
 and the resident's spoken replies have been transcribed only in fragments so
-far. Full DimOS, Linq delivery, and Elastic remain unconnected. For working on
-the app alone, `app_backend/scripts/fake_robot.py` stands in for the robot and
-prints everything the two sides exchange.
+far. Full DimOS, Linq delivery, and Elastic remain unconnected. The replacement
+app backend has a new contract; the legacy robot and family clients must be
+adapted before those historical end-to-end workflows run against v2.
 
 `fall_confirmed` means **escalation confirmed**, never a medically verified
 fall. Queued, acknowledged, and executed are distinct states throughout.
 
-## Run the family app
+## Run the family backend
 
 ```sh
-uv venv .venv --python 3.12
-uv pip install --python .venv/bin/python -r app_backend/requirements.lock
-.venv/bin/uvicorn app_backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
+cd app_backend
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+# Set MONGODB_URI in app_backend/.env (see .env.example).
+.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --no-proxy-headers
 ```
 
-Open [the web app](http://127.0.0.1:8000/app/). `GET /api/storage` reports
-whether records are persisting to MongoDB or the in-process fallback, so
-"is it saving?" is never a guess.
+MongoDB Atlas or a replica set is required. `/ready` checks persistence readiness;
+`/docs` provides interactive API documentation. Startup seeds Jeanine, Zach,
+Ellis, and the agreed reminders only on initial empty-collection setup. There is
+no in-memory fallback. Local-network family clients require no API token.
 
-To watch the whole message path with no robot and no GX10, run the stand-in in
-a second terminal and point the backend at it:
-
-```sh
-.venv/bin/python app_backend/scripts/fake_robot.py --auto-reply
-```
-
-It prints every payload `app_backend` sends and posts the callbacks back.
-`ANNIE_FAMILY_MOCK_ROBOT=true` is a second option that skips HTTP entirely.
-See [app_backend/README.md](app_backend/README.md) for every route and
-environment variable, and [contract/family_messages.md](contract/family_messages.md)
-for the robot-side interface.
-
-The iPhone app is in [app_frontend/](app_frontend/README.swift). On a phone it
-needs the Mac's LAN address, an `ANNIE_API_TOKEN`, and that address in
-`ANNIE_ALLOWED_HOSTS`; the simulator needs none of these because it shares the
-Mac's network.
+See [app_backend/README.md](app_backend/README.md) for the schema, requests,
+WebSockets, and robot callback contract. The old backend is privately archived in
+ignored `tmp/`. The Swift app uses v2; the web client and robot services still need adapters;
+`/app/`, `/api/storage`, `/dispatch`, and the legacy family-message API are not
+compatibility endpoints in the replacement. Robot dispatch/scheduling default off.
 
 ## Run the robot and simulator
 
@@ -121,20 +112,17 @@ The current demo uses synthetic data only.
 ## Verification
 
 ```sh
-# Family app: 86 tests, no database or network required
-PYTHONPATH=app_backend .venv/bin/python -m pytest app_backend/tests -q
-.venv/bin/python contract/export_schemas.py --check
-node --check frontend/app.js
+# v2 family backend: isolated local MongoDB replica set required; see component README
+app_backend/.venv/bin/python -m pytest app_backend/tests -q
+app_backend/.venv/bin/python app_backend/tools/export_schemas.py --check
 
-# Robot and simulator
+# Robot and simulator (separate legacy contract)
 .venv/bin/python -m pytest robot/app_backend/tests robot/robot_backend/tests -q
 ```
 
-The family-app tests run against an in-memory store and mocked transport; two
-additional tests exercise a real MongoDB and skip when none is listening.
-Dependencies are pinned in `app_backend/requirements.lock`. Simulator and
-physics tests have separate prerequisites and do not establish VLM or hardware
-performance.
+V2 tests use temporary local databases and fake robot HTTP; they never use the
+MongoDB URI in `.env`. See the component README for replica-set setup. Hardware,
+perception, and full frontend/robot integration remain separate checks.
 
 ## Documentation
 

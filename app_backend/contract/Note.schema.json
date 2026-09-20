@@ -1,0 +1,81 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "day": {
+      "title": "Day",
+      "type": "string"
+    },
+    "description": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "dog_user_id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Dog User Id",
+      "type": "integer"
+    },
+    "id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Id",
+      "type": "integer"
+    },
+    "occurrence_id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Occurrence Id",
+      "type": "integer"
+    },
+    "outcome": {
+      "enum": [
+        "completed",
+        "not_completed",
+        "unknown"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "reminder_id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Reminder Id",
+      "type": "integer"
+    },
+    "request_id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Request Id",
+      "type": "integer"
+    },
+    "source": {
+      "enum": [
+        "robot",
+        "seed"
+      ],
+      "title": "Source",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "timestamp",
+    "request_id",
+    "occurrence_id",
+    "reminder_id",
+    "description",
+    "outcome",
+    "dog_user_id",
+    "source",
+    "day"
+  ],
+  "title": "Note",
+  "type": "object"
+}

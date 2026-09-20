@@ -2,7 +2,7 @@
 import PackageDescription
 
 // The Annie companion front end: a SwiftUI app that talks to the Swift
-// backend in backend/main.swift. Run it on the Mac from this directory with
+// v2 backend in app_backend. Run it on the Mac from this directory with
 // `swift run`. The same Sources/AnnieApp folder also builds the iPhone app via
 // Annie.xcodeproj (see README.swift).
 let package = Package(
@@ -14,5 +14,6 @@ let package = Package(
             path: "Sources/AnnieApp",
             resources: [.process("Assets.xcassets")]
         ),
+        .testTarget(name: "AnnieAppTests", dependencies: ["AnnieApp"], path: "Tests/AnnieAppTests"),
     ]
 )

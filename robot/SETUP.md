@@ -225,6 +225,30 @@ The most recent stationary reconnect attempt could not reach the robot AP;
 connection-help patch is preserved in [tooling](tooling/unitree-ui/connection-help.patch)
 against the pinned Unitree UI revision above.
 
+## Motion and perception tools (2026-09-19)
+
+Two operator tools sit beside the probe. Both use the probe's connection path,
+read `UNITREE_AES_128_KEY` from the environment only, and stop with sanitized
+errors. Neither has run on the physical dog yet: on 2026-09-19 the unit was out
+of Wi-Fi and Bluetooth range from the host and its last battery reading was
+23%, below the operating floor.
+
+- `robot/go2_walk.py`: a supervised walk for HW-04/HW-05. `--distance 1` walks
+  a straight line at 0.3 m/s; `--circle-radius 1 --laps 3` or `--duration 1800`
+  walks a circle. Speed is capped at 0.6 m/s. It sends StandUp, BalanceStand,
+  streams Move at 10 Hz, and sends a priority StopMove on completion, stale
+  telemetry, low battery, leaving the configured boundary (default 2.5 m from
+  the start), any error, or Ctrl-C, then reports pose, stop acknowledgment
+  round trip and post-stop overrun. 26 fakes-only tests. The host-side stop
+  still cannot reach the robot over a lost link; keep an operator beside it.
+- `robot/go2_perception.py`: read-only perception loop. It streams the camera,
+  runs the tracked keypoint posture detector on every new frame at 5 Hz, sends
+  the latest frame to the local brain `/infer` once per second (one in flight,
+  stale frames dropped, never re-dated) and publishes the cited perception and
+  a measured `dog.status` to the app with `source: hardware`. It sends no motion
+  command. 10 fakes-only tests. Capture times are host receipt times paired
+  with odometry by receipt time, not calibrated synchronization.
+
 ## Verification and outstanding work
 
 - [x] Host inventory executes in the existing Mac runtime.

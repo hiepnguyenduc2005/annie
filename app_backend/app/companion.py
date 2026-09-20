@@ -20,6 +20,9 @@ class NewReminder(StrictModel):
     title: Text
 
 
+RESIDENT = 'Jeanine'  # the person Annie looks after; the family app says grandma
+
+
 class AskRequest(StrictModel):
     question: Text
 
@@ -124,10 +127,14 @@ class CompanionService:
     def all_memory(self):
         return self.memory + self.live_facts
 
+    RESIDENT_ALIASES = ('grandma', 'grandmother', 'granny', 'nana', 'gran', 'she', 'her', 'mum', 'mom', 'mother')
+
     def ask(self, question):
         # Lexical recall over recorded observations (live ones from the dog first); no model call, and no
-        # answer invented when nothing matches.
+        # answer invented when nothing matches. The family says "grandma"/"she"; the dog's memory says the name.
         words = set(re.findall(r'\w+', question.lower())) - STOP_WORDS
+        if words & set(self.RESIDENT_ALIASES):
+            words = (words - set(self.RESIDENT_ALIASES)) | {RESIDENT.lower()}
         best, best_score = None, 0
         for fact in reversed(self.all_memory()):
             haystack = set(re.findall(r'\w+', (fact['text'] + ' ' + fact['subject'] + ' ' + fact['object']).lower()))

@@ -31,3 +31,11 @@ def test_dog_routes_degrade_when_the_dog_process_is_down(monkeypatch):
         assert v.status_code == 200 and v.json()['available'] is False
         m = c.get('/api/memory')
         assert m.status_code == 200 and all(f['id'] > 0 for f in m.json())
+
+
+def test_ask_understands_grandma_and_she_as_the_resident():
+    c = CompanionService()
+    c.merge_live({"state": {"t_s": 10.0}, "graph_sentences": ["Jeanine last seen 65 s ago near the chair near place-1"]})
+    assert "near the chair" in c.ask("Where is Grandma?")
+    assert "near the chair" in c.ask("where is she right now")
+    assert "near the chair" in c.ask("Where is Jeanine?")

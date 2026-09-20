@@ -333,7 +333,9 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
                 return {'available': True, 'connected': bool(t.get('connected')), 'mode': st.get('mode'), 'action': st.get('action'),
                         'battery': st.get('battery'), 'people': len(st.get('tracks') or []), 'greetings': st.get('greetings'),
                         'checkins': st.get('checkins'), 'missions': (t.get('missions') or [])[:6], 'voice': t.get('voice') or {},
-                        'objects': t.get('objects') or [], 'sentences': (t.get('graph_sentences') or [])[:4], 't_s': st.get('t_s')}
+                        'objects': t.get('objects') or [], 'sentences': (t.get('graph_sentences') or [])[:4], 't_s': st.get('t_s'),
+                        'source': t.get('source') or 'hardware', 'conversations': (t.get('conversations') or [])[-8:],
+                        'concerns': (t.get('concerns') or [])[-4:], 'instructions': (t.get('instructions') or [])[-6:]}
         except Exception:
             pass
         return {'available': False, 'connected': False}

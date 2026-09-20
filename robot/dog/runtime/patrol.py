@@ -775,11 +775,27 @@ async def run_patrol_greet(*, ip, aes_key, duration_s=300.0, speed_mps=0.25, yaw
             jpeg, w, h = encoder(frame)
             return np.zeros((h, w, 3), dtype=np.uint8)
     detector = None
-    if objects_mod is not None and conn_factory is None and objects_mod.find_checkpoint() is not None:
+    if objects_mod is not None and conn_factory is None:
+        # Open vocabulary (YOLO-World: door, table, chair, bag, phone, ...) when its baked clip-free checkpoint exists,
+        # else the COCO subset. Built here, warmed off the control thread below (first detect costs 5-9 s).
         with contextlib.suppress(Exception):
-            detector = objects_mod.ObjectDetector()
+            if objects_mod.find_checkpoint(objects_mod.baked_name(objects_mod.HOME_VOCABULARY)) is not None \
+                    and os.environ.get("ANNIE_OBJECTS", "open_vocab") == "open_vocab":
+                detector = objects_mod.ObjectDetector.open_vocab(imgsz=416)
+            elif objects_mod.find_checkpoint() is not None:
+                detector = objects_mod.ObjectDetector()
     perception = Perception(tracker, convert=convert, annotate=annotate if view.port else None, diag=diag,
-                            min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier, objects=detector, objects_every=8)
+                            min_conf=0.45, min_keypoints=4, min_age_ms=250, identifier=identifier, objects=None, objects_every=8)
+    if detector is not None:
+        def _warm_detector():  # the pipeline only gets the detector once it is warm: no concurrent first inference
+            try:
+                import numpy as _np
+                detector.detect(_np.zeros((270, 480, 3), dtype=_np.uint8), 0)
+                perception.objects = detector
+                status(f"objects: {'open-vocabulary' if getattr(detector, 'vocabulary', None) else 'COCO subset'} detector warm")
+            except Exception as exc:
+                status(f"objects: detector warm-up failed ({type(exc).__name__}); running without it")
+        threading.Thread(target=_warm_detector, daemon=True, name="objects-warm").start()
     view.commands = voice_state  # POST /command on the live view sets the same bounded override as a voice command
     view.identifier = identifier
     with contextlib.suppress(Exception):

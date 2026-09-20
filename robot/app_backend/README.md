@@ -62,6 +62,12 @@ Environment variables:
 - `ANNIE_API_TOKEN`: optional bearer token. Without it, data routes accept only
   loopback clients. With it, every data request requires `Authorization: Bearer …`.
   The application ignores forwarded client headers; keep `--no-proxy-headers`.
+- `ANNIE_EMBED_MODEL`: Ollama embedding model for `POST /recall`, for example
+  `nomic-embed-text`. Unset (default) or `off` sends nothing anywhere and
+  `/recall` answers from the offline lexical fallback.
+- `ANNIE_EMBED_URL`: Ollama base URL; default `http://127.0.0.1:11434`. Only
+  caption text is sent (`POST {url}/api/embed`, 3 s timeout, proxy environment
+  ignored). Keep it local: a remote URL moves resident captions off the machine.
 
 To load the repository `.env` explicitly, append `--env-file .env` while
 running from the repository root. Do not publish secrets or bind this demonstration to a
@@ -90,6 +96,7 @@ resident data automatically. See [setup and evidence format](../../docs/SUBCONSC
 | `GET /commands` | Latest 100 queued commands, oldest first |
 | `POST /commands` | `{"cmd":"stop"}` or resume/look/goto; goto needs a known waypoint |
 | `POST /query` | `{"text":"glasses"}`; local lexical caption matches and evidence citations |
+| `POST /recall` | `{"goal":"where is the person","map_id":"demo-home"}`; goal-ranked stored captions with citations (below) |
 | `GET /frames/{frame_id}` | Crop-only bytes; 404 if missing (demo stores no crops) |
 | `POST /ingest` | `{"channel":"brain.perception","data":{…}}`; strict channel model |
 | `POST /demo/seed` | Synthetic home map, idle robot, safe bed observation |
@@ -103,6 +110,22 @@ must reconnect and fetch events after a dropped connection. Each subscriber has
 On resync, refetch status/map/events/commands. With the millisecond `since`
 cursor, overlap the last millisecond and deduplicate IDs, or refetch all events,
 so an equal-timestamp arrival is not missed.
+
+`POST /recall` takes `{"goal": str (1–500), "map_id": str, "ts_to": int|null,
+"limit": int 1–6 (default 6)}` and uses the same authentication as `/query`;
+invalid input is 422. `ts_to` is a Unix-millisecond upper bound on capture
+time; null means now, and it is capped at the server clock so future-dated
+frames are never cited. The response is `{"citations": [{"caption",
+"frame_id", "ts", "pose", "score"}], "provider": "embeddings" |
+"lexical_fallback", "indexed": int}`, best match first, restricted to frames
+stored for `map_id`. Citations carry the stored capture identity unchanged.
+`score` is cosine similarity under `embeddings` and the matched fraction of
+goal content words under `lexical_fallback`; the two are not comparable, and
+neither is a calibrated confidence. `indexed` counts eligible frames that have
+an embedding. Accepted frames are embedded once at ingest. When the embedder
+is unset, down, slow, or returns malformed vectors, ingest and recall still
+succeed, the provider is left alone for 30 s, and recall reports
+`lexical_fallback`; frames ingested meanwhile are not embedded later.
 
 Input channels: `dog.status`, `dog.map`, `brain.perception`, `voice.heard`.
 Output channels also include `event`, `command`, and `checkin` (pending data or

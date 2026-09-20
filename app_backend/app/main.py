@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .companion import AskRequest, CompanionService, NewReminder
 from .family import FamilyService, InternalEventIn, MessageIn
 from .models import Ack, Command, CommandReceipt, Ingest, Say, Scenario
 from .service import Service, now_ms
@@ -61,11 +62,16 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
     @asynccontextmanager
     async def lifespan(app):
         app.state.service = Service(db_path, mode, clock)
+        app.state.companion = CompanionService()
+        def recall_provider():
+            fact = app.state.companion.phone_fact()
+            return fact['text'] if fact else None
         app.state.family = family_service or FamilyService(
             clock=clock,
             robot_backend_url=os.getenv('ROBOT_BACKEND_URL', ''),
             dispatch_timeout=float(os.getenv('ANNIE_ROBOT_DISPATCH_TIMEOUT_S', '3')),
             mock=os.getenv('ANNIE_FAMILY_MOCK_ROBOT', 'false').lower() == 'true',
+            recall_provider=recall_provider,
         )
         app.state.agent_lock = asyncio.Lock()
         async def ticker():
@@ -243,6 +249,29 @@ def create_app(db_path=None, mode=None, token=None, clock=now_ms, family_service
     @router.get('/api/thread')
     async def get_thread():
         return app.state.family.thread
+
+    @router.get('/api/reminders')
+    async def list_reminders():
+        return app.state.companion.reminders
+
+    @router.post('/api/reminders')
+    async def create_reminder(body: NewReminder):
+        return app.state.companion.add_reminder(body.time, body.title)
+
+    @router.patch('/api/reminders/{reminder_id}/toggle')
+    async def toggle_reminder(reminder_id: int):
+        try:
+            return app.state.companion.toggle_reminder(reminder_id)
+        except KeyError:
+            raise HTTPException(404, 'Unknown reminder') from None
+
+    @router.get('/api/memory')
+    async def list_memory():
+        return app.state.companion.memory
+
+    @router.post('/api/ask')
+    async def ask_annie(body: AskRequest):
+        return {'answer': app.state.companion.ask(body.question)}
 
     @internal_router.post('/internal/events', status_code=202)
     async def internal_event(body: InternalEventIn):

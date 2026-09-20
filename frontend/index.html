@@ -106,25 +106,36 @@
             <p class="empty">No events yet. Safe bed-rest should stay quiet.</p>
           </div>
         </section>
-        <section class="card">
+        <section class="card family-card">
           <p class="eyebrow">A FAMILIAR VOICE</p>
           <h2>Send a message through Annie</h2>
-          <p class="muted">Let grandma know you’re thinking of her.</p>
+          <p class="muted">
+            Annie finds grandma, passes it along, and tells you what she says
+            back.
+          </p>
+          <div id="family-thread" class="family-thread" aria-live="polite">
+            <p class="empty">No messages yet.</p>
+          </div>
           <form id="say-form">
-            <label for="message">Your message</label
+            <label for="author">From</label
+            ><select id="author">
+              <option value="zach">Zach</option>
+              <option value="ellis">Ellis</option></select
+            ><label for="message">Your message</label
             ><textarea
               id="message"
               maxlength="2000"
               rows="3"
-              placeholder="Hi Grandma, just checking in. How are you feeling?"
+              placeholder="I think grandma’s phone is dead, could you remind her to plug it in?"
               required
             ></textarea
             ><button type="submit" class="primary">
-              Queue message <span aria-hidden="true">↗</span>
+              Send through Annie <span aria-hidden="true">↗</span>
             </button>
           </form>
           <p id="command-result" class="fine" role="status">
-            No playback adapter connected.
+            Sending does not wait for Annie; the errand is reported as it
+            happens.
           </p>
         </section>
         <section class="card">

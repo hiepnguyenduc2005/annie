@@ -294,6 +294,7 @@ struct ProfilesSectionView: View {
 struct ServerSettingsView: View {
     @EnvironmentObject private var state: AppState
     @State private var text = ""
+    @State private var token = ""
     @State private var invalid = false
     @State private var connecting = false
 
@@ -301,8 +302,20 @@ struct ServerSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text("Who's using this phone")
+                .font(.headline)
+            Picker("Sender", selection: $state.authorID) {
+                Text("Zach").tag("zach")
+                Text("Ellis").tag("ellis")
+                Text("Jeanine").tag("jeanine")
+            }
+            .pickerStyle(.segmented)
+            Text("The household is fixed, so this is a picker rather than a sign-in.")
+                .font(.caption).foregroundStyle(.secondary)
+
             Text("Server")
                 .font(.headline)
+                .padding(.top, 8)
             HStack {
                 TextField("Mac address, e.g. 192.168.1.20:8000", text: $text)
                     .textFieldStyle(.roundedBorder)
@@ -317,6 +330,12 @@ struct ServerSettingsView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(connecting || lockedByEnvironment)
             }
+            // Required off-device: the backend serves non-loopback clients
+            // only when a token is configured and sent.
+            SecureField("API token, if the backend has one set", text: $token)
+                .textFieldStyle(.roundedBorder)
+                .disabled(lockedByEnvironment)
+                .onSubmit(connect)
             if lockedByEnvironment {
                 Text("Set by the ANNIE_API_URL environment variable.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -329,13 +348,16 @@ struct ServerSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .onAppear { text = lockedByEnvironment ? "" : state.serverURL.absoluteString }
+        .onAppear {
+            text = lockedByEnvironment ? "" : state.serverURL.absoluteString
+            token = AppConfiguration.apiToken
+        }
     }
 
     private func connect() {
         connecting = true
         Task {
-            invalid = !(await state.setServer(text))
+            invalid = !(await state.setServer(text, token: token))
             connecting = false
         }
     }

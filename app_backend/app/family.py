@@ -43,19 +43,66 @@ class InternalEventIn(StrictModel):
     at: Timestamp
 
 
-def build_mock_sequence(text, author_name):
+DEFAULT_RECALL = 'Your phone was on the living room couch, by the left cushion.'
+
+# Who a given beat belongs to, for clients rendering the run as a conversation.
+SPEAKER = {'speaking': 'annie', 'heard': 'resident'}
+
+
+def summarize(kind, payload):
+    """One display line per event.
+
+    Clients render whatever this returns rather than reaching into `payload`,
+    whose keys vary by kind and come from robot_backend, so an unexpected
+    payload degrades to a readable line instead of breaking the UI.
+    """
+    payload = payload or {}
+
+    def text(key, fallback):
+        value = payload.get(key)
+        return value if isinstance(value, str) and value.strip() else fallback
+
+    if kind == 'speaking':
+        return text('text', 'Annie said something.')
+    if kind == 'heard':
+        return text('transcript', 'Annie heard a reply.')
+    if kind == 'recalled':
+        return text('note', 'Annie recalled something.')
+    if kind == 'navigating':
+        return text('detail', 'On the way' + (f' to the {payload["waypoint"]}' if isinstance(payload.get('waypoint'), str) else '') + '.')
+    if kind == 'arrived':
+        return text('detail', 'Arrived.')
+    if kind == 'listening':
+        return 'Listening for a reply…'
+    if kind == 'recalling':
+        return 'Checking what Annie remembers…'
+    if kind == 'completed':
+        return text('detail', 'Finished.')
+    if kind == 'failed':
+        return text('error', 'Annie could not finish this one.')
+    if kind == 'unreachable':
+        return 'Could not reach Annie at home. Nothing was delivered.'
+    return kind
+
+
+def build_mock_sequence(text, author_name, recall=DEFAULT_RECALL):
     # Stand-in cadence for demoing without the GX10; real hardware timing is
     # the 60-90s sequence described in contract/family_messages.md, not this.
+    # The relayed line quotes the sender verbatim rather than paraphrasing:
+    # paraphrasing is the planner's job on the robot, and inventing one here
+    # would misrepresent what the mock actually does.
     return [
-        (1.5, 'navigating', {'waypoint': 'jeanine'}),
-        (2.5, 'arrived', {'waypoint': 'jeanine'}),
-        (2.0, 'speaking', {'text': f'{author_name} says: {text}'}),
+        (2.0, 'navigating', {'waypoint': 'living-room', 'detail': 'Looking for Jeanine.'}),
+        (3.0, 'arrived', {'waypoint': 'living-room', 'detail': 'Found Jeanine in the living room.'}),
+        (3.0, 'speaking', {'text': f'Jeanine, it\'s Annie. {author_name} asked me to pass this along: '
+                                   f'"{text}"'}),
         (3.0, 'listening', {}),
-        (2.0, 'heard', {'transcript': "Oh how lovely, tell them thank you, I'm doing just fine today."}),
-        (1.5, 'recalling', {'query': 'recent notes about Jeanine'}),
-        (1.5, 'recalled', {'note': 'Jeanine watered the tomatoes yesterday afternoon.'}),
-        (2.0, 'speaking', {'text': f'{author_name}, she says thank you, and that she watered the tomatoes yesterday.'}),
-        (0.5, 'completed', {}),
+        (2.5, 'heard', {'transcript': 'Oh dear, I forgot where I put it.'}),
+        (2.0, 'recalling', {'query': 'where was the phone last seen'}),
+        (2.0, 'recalled', {'note': recall, 'source': 'observation memory'}),
+        (3.0, 'speaking', {'text': 'You left it on the living room couch yesterday afternoon, '
+                                   'by the left cushion. It may have slipped into the crack.'}),
+        (1.0, 'completed', {'detail': 'Jeanine is going to check the couch.'}),
     ]
 
 
@@ -66,13 +113,16 @@ async def default_dispatch(url, payload, timeout):
 
 class FamilyService:
     def __init__(self, clock=now_ms, robot_backend_url='', dispatch_timeout=3.0,
-                 mock=False, mock_speed=1.0, dispatch_fn=None):
+                 mock=False, mock_speed=1.0, dispatch_fn=None, recall_provider=None):
         self.clock = clock
         self.robot_backend_url = robot_backend_url.rstrip('/')
         self.dispatch_timeout = dispatch_timeout
         self.mock = mock
         self.mock_speed = mock_speed
         self.dispatch_fn = dispatch_fn or default_dispatch
+        # Lets the mock cite the same observation the resident view shows,
+        # instead of a second hardcoded copy that could drift out of sync.
+        self.recall_provider = recall_provider
         self.thread = []  # message dicts, oldest first
         self.runs = {}  # run_id -> run dict
         self.subscribers = set()
@@ -137,7 +187,9 @@ class FamilyService:
             return
         run['status'] = 'unreachable'
         run['updated_at'] = self.clock()
-        event = {'event_id': str(uuid4()), 'run_id': run_id, 'kind': 'unreachable', 'payload': {'error': error}, 'at': run['updated_at']}
+        payload = {'error': error}
+        event = {'event_id': str(uuid4()), 'run_id': run_id, 'kind': 'unreachable', 'payload': payload,
+                 'at': run['updated_at'], 'summary': summarize('unreachable', payload), 'speaker': 'system'}
         run['events'].append(event)
         self.emit('run_event', event)
         self.emit('run_status', {'run_id': run_id, 'status': run['status']})
@@ -156,7 +208,8 @@ class FamilyService:
             raise KeyError(run_id)
         if run['status'] in RUN_TERMINAL:
             raise ValueError(f'run {run_id} is already {run["status"]}')
-        event = {'event_id': str(uuid4()), 'run_id': run_id, 'kind': kind, 'payload': payload, 'at': at}
+        event = {'event_id': str(uuid4()), 'run_id': run_id, 'kind': kind, 'payload': payload, 'at': at,
+                 'summary': summarize(kind, payload), 'speaker': SPEAKER.get(kind, 'system')}
         run['events'].append(event)
         run['updated_at'] = self.clock()
         run['status'] = kind if kind in ('completed', 'failed') else 'running'
@@ -166,7 +219,8 @@ class FamilyService:
 
     async def _run_mock_sequence(self, run_id, text, author_name):
         self._update_status(run_id, 'running')
-        for delay, kind, payload in build_mock_sequence(text, author_name):
+        recall = (self.recall_provider and self.recall_provider()) or DEFAULT_RECALL
+        for delay, kind, payload in build_mock_sequence(text, author_name, recall):
             await asyncio.sleep(delay * self.mock_speed)
             try:
                 self.add_event(run_id, kind, payload, self.clock())

@@ -67,22 +67,45 @@ struct ContentView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 
+            // One build, two audiences: Jeanine at home and family away.
+            Picker("View", selection: $state.audience) {
+                ForEach(Audience.allCases) { audience in
+                    Label(audience.label, systemImage: audience.icon).tag(audience)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+
             Divider()
 
-            TabView {
-                RemindersView()
-                    .tabItem { Label("Reminders", systemImage: "checklist") }
-                AskView()
-                    .tabItem { Label("Ask Annie", systemImage: "pawprint.fill") }
-                ActivityView()
-                    .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
-                ProfileView()
-                    .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+            switch state.audience {
+            case .resident:
+                TabView {
+                    RemindersView()
+                        .tabItem { Label("Reminders", systemImage: "checklist") }
+                    AskView()
+                        .tabItem { Label("Ask Annie", systemImage: "pawprint.fill") }
+                    ActivityView()
+                        .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
+                    ProfileView()
+                        .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+                }
+                .padding(.top, 8)
+            case .family:
+                TabView {
+                    FamilyView()
+                        .tabItem { Label("Messages", systemImage: "bubble.left.and.bubble.right.fill") }
+                    ActivityView()
+                        .tabItem { Label("Annie saw", systemImage: "clock.arrow.circlepath") }
+                    ProfileView()
+                        .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+                }
+                .padding(.top, 8)
             }
-            .padding(.top, 8)
         }
         #if os(macOS)
-        .frame(minWidth: 620, minHeight: 460)
+        .frame(minWidth: 620, minHeight: 560)
         #endif
     }
 }

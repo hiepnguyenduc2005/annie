@@ -39,6 +39,69 @@ struct AskResponse: Codable {
 }
 
 // ---------------------------------------------------------------------------
+// Family view: messages Zach sends through Annie, and how each one goes
+// ---------------------------------------------------------------------------
+
+struct ThreadMessage: Codable, Identifiable, Equatable {
+    let message_id: String
+    let author_id: String
+    let text: String
+    let at: Int
+    let run_id: String
+
+    var id: String { message_id }
+}
+
+struct NewMessage: Codable {
+    let author_id: String
+    let text: String
+}
+
+struct DispatchAck: Codable {
+    let run_id: String
+    let status: String
+}
+
+/// One beat of a run. `summary` and `speaker` are rendered by the backend so
+/// this client never has to interpret a robot-supplied payload.
+struct RunEvent: Codable, Identifiable, Equatable {
+    let event_id: String
+    let kind: String
+    let at: Int
+    let summary: String
+    let speaker: String
+
+    var id: String { event_id }
+    var isAnnie: Bool { speaker == "annie" }
+    var isResident: Bool { speaker == "resident" }
+}
+
+struct FamilyRun: Codable, Identifiable, Equatable {
+    let run_id: String
+    let author_id: String
+    let text: String
+    let status: String
+    let created_at: Int
+    let events: [RunEvent]
+
+    var id: String { run_id }
+
+    /// True once the robot can send nothing further for this run.
+    var finished: Bool { ["completed", "failed", "unreachable"].contains(status) }
+
+    var statusLabel: String {
+        switch status {
+        case "dispatched": return "Sending to Annie\u{2026}"
+        case "running": return "Annie is on it"
+        case "completed": return "Delivered"
+        case "failed": return "Annie couldn't finish"
+        case "unreachable": return "Couldn't reach Annie"
+        default: return status
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Time formatting
 // ---------------------------------------------------------------------------
 

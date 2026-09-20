@@ -8,6 +8,10 @@ const state = {
   socket: null,
   retry: null,
   stopped: false,
+  thread: [],
+  runs: {},
+  familySocket: null,
+  familyRetry: null,
 };
 const names = {
   fall_suspected: "Possible floor incident — check-in needed",
@@ -281,6 +285,119 @@ async function action(button, fn) {
     button.disabled = false;
   }
 }
+const runLabels = {
+  dispatched: "Sending to Annie…",
+  running: "Annie is on it",
+  completed: "Delivered",
+  failed: "Annie could not finish",
+  unreachable: "Could not reach Annie",
+};
+const speakerNames = { annie: "Annie", resident: "Grandma" };
+function renderFamily() {
+  const target = $("family-thread");
+  target.replaceChildren();
+  if (!state.thread.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No messages yet.";
+    target.append(empty);
+    return;
+  }
+  for (const message of state.thread) {
+    const block = document.createElement("div");
+    block.className = "family-msg";
+    const sent = document.createElement("p");
+    sent.className = "family-sent";
+    sent.textContent = message.text;
+    block.append(sent);
+
+    const run = state.runs[message.run_id];
+    if (run) {
+      const status = document.createElement("span");
+      status.className = `run-status run-${run.status}`;
+      status.textContent = runLabels[run.status] || run.status;
+      block.append(status);
+      for (const event of run.events) {
+        const beat = document.createElement("div");
+        beat.className = `beat beat-${event.speaker}`;
+        if (speakerNames[event.speaker]) {
+          const who = document.createElement("span");
+          who.className = "beat-who";
+          who.textContent = speakerNames[event.speaker];
+          beat.append(who);
+        }
+        // Rendered from the backend's summary, never by reaching into the
+        // robot-supplied payload, so an unfamiliar payload still reads.
+        const line = document.createElement("span");
+        line.textContent = event.summary;
+        beat.append(line);
+        block.append(beat);
+      }
+    }
+    target.append(block);
+  }
+  target.scrollTop = target.scrollHeight;
+}
+function applyFamilySnapshot(data) {
+  state.thread = data.thread || [];
+  state.runs = {};
+  for (const run of data.runs || []) state.runs[run.run_id] = run;
+  renderFamily();
+}
+/// A second socket, separate from /live: family runs are their own stream.
+function connectFamily() {
+  clearTimeout(state.familyRetry);
+  if (state.familySocket) {
+    state.familySocket.onclose = null;
+    state.familySocket.close();
+  }
+  const ws = new WebSocket(
+    `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws/family`,
+  );
+  state.familySocket = ws;
+  ws.onopen = () => {
+    if (state.token) ws.send(JSON.stringify({ token: state.token }));
+  };
+  ws.onmessage = (event) => {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (message.type === "snapshot") {
+      applyFamilySnapshot(message.data);
+    } else if (message.type === "message") {
+      state.thread.push(message.data);
+      renderFamily();
+    } else if (message.type === "run_status") {
+      const run = state.runs[message.data.run_id];
+      if (run) run.status = message.data.status;
+      else refreshFamily().catch(() => {});
+      renderFamily();
+    } else if (message.type === "run_event") {
+      const run = state.runs[message.data.run_id];
+      if (run) {
+        run.events.push(message.data);
+        renderFamily();
+      } else {
+        refreshFamily().catch(() => {});
+      }
+    } else if (message.type === "resync") {
+      refreshFamily().catch(() => {});
+    }
+  };
+  ws.onclose = () => {
+    state.familyRetry = setTimeout(connectFamily, 3000);
+  };
+}
+async function refreshFamily() {
+  state.thread = await api("/api/thread");
+  for (const message of state.thread.slice(-5)) {
+    state.runs[message.run_id] = await api(`/api/runs/${message.run_id}`);
+  }
+  renderFamily();
+}
 function connect() {
   clearTimeout(state.retry);
   if (state.socket) {
@@ -370,10 +487,15 @@ $("say-form").addEventListener("submit", (e) => {
   const value = $("message").value.trim();
   if (!value) return;
   action(e.submitter, async () => {
-    await api("/say", { text: value });
+    // Returns as soon as the backend accepts it; the robot's errand is
+    // reported afterwards through the run, never awaited here.
+    const ack = await api("/api/messages", {
+      author_id: $("author").value,
+      text: value,
+    });
     $("message").value = "";
-    await refresh();
-    notice("Your message is queued, not yet played.");
+    if (!state.runs[ack.run_id]) await refreshFamily();
+    notice("Sent to Annie. Watch the errand below.");
   });
 });
 $("query-form").addEventListener("submit", (e) => {
@@ -400,6 +522,7 @@ $("connect").addEventListener("click", (e) =>
     state.token = $("api-token").value.trim();
     await refresh();
     connect();
+    connectFamily();
     notice("Connection settings applied for this page session.");
   }),
 );
@@ -407,3 +530,6 @@ setInterval(renderCheckin, 250);
 refresh()
   .then(connect)
   .catch((e) => notice(e.message, true));
+refreshFamily()
+  .then(connectFamily)
+  .catch(() => connectFamily());

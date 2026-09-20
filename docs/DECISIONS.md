@@ -83,6 +83,32 @@ made. Current behavior belongs in `../SPEC.md`; work status belongs in `TODO.md`
 - Reason: Avoids choosing backend ownership, storage, and a wire contract on the backend owner's behalf; keeps `app_frontend/backend/` untouched.
 - Consequences: Profiles exist only on one device, so they are not shared or recoverable and a reinstall clears them. Undecided: what happens when a dog profile is created first, whether several app users can share a dog, and how profiles are paired across devices. The `Profile` JSON shape is provisional, not a backend contract. Tracked as TASK-007.
 
+## DEC-009: One app with two audiences, served by one backend
+
+- Date: 2026-09-19.
+- Status: Adopted for the HackMIT demo; revisable.
+- Context: The demo needs a family-facing surface where Zach writes to Annie
+  and watches the errand, but `app_frontend` was entirely resident-facing and
+  pointed at the standalone Swift mock server, which does not implement the
+  family message endpoints.
+- Decision: Add a top-level audience picker to the SwiftUI app (Grandma view
+  and Family view) over one shared `AppState`, and point the whole app at
+  `app_backend`. To make that possible, `app_backend` now also serves the
+  resident view's `/api/reminders`, `/api/memory` and `/api/ask` using the
+  Swift client's existing wire shapes. Run events carry backend-derived
+  `summary` and `speaker` fields so the client renders text rather than
+  interpreting robot-supplied payloads.
+- Alternatives: Point each view at a different server (two addresses to
+  configure on demo day, twice the failure surface); build the family surface
+  in the `frontend/` web app instead (faster, but the user asked for the
+  phone app).
+- Consequences: One address to type into the phone, and the dog's `recalled`
+  line cites the same observation the resident's activity feed shows. The
+  Swift mock backend in `app_frontend/backend/` is now redundant for this
+  path and is left in place rather than removed. Because `app_backend` refuses
+  non-loopback clients without a token, a physical phone needs
+  `ANNIE_API_TOKEN` set and entered in Profile; the simulator does not.
+
 ## Future entries
 
 Use the next `DEC-NNN` ID. Include date, status, context, decision, alternatives,

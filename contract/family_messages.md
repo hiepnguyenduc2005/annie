@@ -58,7 +58,12 @@ Request:
 ```
 
 `kind` is one of `navigating`, `arrived`, `speaking`, `listening`, `heard`,
-`recalling`, `recalled`, `completed`, `failed`. `payload` is an open,
+`recalling`, `recalled`, `completed`, `failed`. app_backend adds two derived
+fields to the stored event before returning it to clients — `summary` (a
+display line) and `speaker` (`annie`, `resident` or `system`). Those are
+app_backend's own output: **do not send them**, and expect clients to render
+them instead of reaching into `payload`, so an unfamiliar payload degrades to
+a readable line rather than breaking a UI. `payload` is an open,
 step-specific dict (free-form; bounded only by the app's overall request-size
 limit). `completed`/`failed` are terminal: they close the run, and any further
 event for that `run_id` is rejected with 409. An unknown `run_id` is 404.
@@ -72,6 +77,51 @@ Successful ingestion returns 202 with the stored event.
 (dispatch never got through to robot_backend). `unreachable`, `completed`, and
 `failed` are all terminal — no further event is accepted once a run reaches
 one of them.
+
+## Implementing the robot side (handoff)
+
+Everything this needs already exists under `robot/`; what is missing is the
+adapter that joins it to the run model above. Suggested mapping:
+
+| Step | Existing piece | Event to post |
+| --- | --- | --- |
+| Decide and phrase | `robot/robot_backend/app/brain/planner.py` `POST /plan` — takes a free-text `goal` (use the message text), `waypoints`, `memories`; returns one action (`goto`/`say`/`look`/`wait`/`stop`) | — |
+| Walk to her | planner `goto` + `robot/simulation/bridge.py`'s existing command loop | `navigating`, then `arrived` on the execution receipt |
+| Speak | planner `say` + `robot/simulation/native_audio.py` | `speaking` (put the spoken line in `payload.text`) |
+| Hear her | `robot/simulation/local_stt.py` | `listening`, then `heard` (`payload.transcript`) |
+| Remember | `robot/app_backend/app/episodic_memory.py` `ask()` | `recalling`, then `recalled` (`payload.note`) |
+| Finish | — | `completed`, or `failed` with `payload.error` |
+
+Six things that will bite, all verified against the current code:
+
+1. **Terminal states are final.** After `completed` or `failed`, any further
+   event for that `run_id` is rejected with 409. Post `completed` last.
+2. **Don't send `summary` or `speaker`.** app_backend derives them; extra keys
+   are rejected by the strict model.
+3. **The planner prompt caps spoken lines at 80 characters** (the schema allows
+   500). The demo's line is 92, so either relax the prompt or shorten the line,
+   or the model will truncate the thought.
+4. **Episodic memory refuses when it has no evidence**, by design. The fact the
+   dog is meant to recall has to be in *its* store — app_backend's seeded copy
+   is a separate store and is not visible to the robot.
+5. **Point at the right backend.** These endpoints are on the top-level
+   `app_backend` (the Mac), not `robot/app_backend`. The Mac's LAN address must
+   also be in its `ANNIE_ALLOWED_HOSTS`, or `TrustedHostMiddleware` rejects the
+   request before the handler ever runs.
+6. **`/dispatch` should ack immediately** and run the errand afterwards.
+   app_backend gives it ~3s with one retry, then gives up and marks the run
+   `unreachable`.
+
+You can develop against a running app_backend without touching the app: post
+events by hand and watch them appear in the phone and web clients.
+
+```sh
+curl -X POST http://<mac-lan-ip>:8000/internal/events \
+  -H "X-Internal-Secret: $ANNIE_INTERNAL_SECRET" \
+  -H 'Content-Type: application/json' \
+  -d '{"run_id":"<id from POST /api/messages>","kind":"speaking",
+       "payload":{"text":"Jeanine, Zach asked me to find you."},"at":1789800002500}'
+```
 
 ## Testing without the GX10
 

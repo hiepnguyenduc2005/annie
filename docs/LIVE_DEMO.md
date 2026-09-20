@@ -194,3 +194,22 @@ are conservative bounds, not actual billed spend; incomplete provider accounting
 prevents claiming an exact total. The current runtime uses a $19 shared cap to
 leave room for that separate $1 reservation. Local perception/STT/TTS has no
 per-call API charge.
+
+## Physical dog demo (one command on the Mac)
+
+Dog on the phone hotspot (`172.20.10.10`), Mac USB-tethered to the phone, AirPods as the
+Mac's default audio. Then:
+
+```sh
+robot/demo_dog.sh
+```
+
+It starts `app_backend` on `:8000` (bound to the Mac's hotspot address so the phone app can
+post messages), the errand brain on `:8010`, and the dog process on `:8011` (idle: explore and
+greet; on a message: find the person, speak, listen, report). Live view at
+`http://127.0.0.1:8011/`, 4D space-time view at `/spacetime`. Ctrl-C stops everything and
+sends StopMove. Voice uses ElevenLabs/Deepgram when the keys are in `.env`, else local.
+Elastic indexing of sightings: `.venv/bin/python robot/go2_spacetime_elastic.py --tail` with
+the loopback node from `docker run ... elasticsearch:8.15.0` (see `robot/go2_spacetime_elastic.py`).
+Verified 2026-09-20 in software end to end and on the dog for the idle patrol; the app mission
+on hardware is the first thing to run once the dog is charged.

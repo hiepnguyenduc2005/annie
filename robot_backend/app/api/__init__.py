@@ -1,1 +1,1 @@
-"""Local management and health endpoints."""
+"""Companion conversation, task, session, and health endpoints."""

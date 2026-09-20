@@ -42,7 +42,7 @@ class CaptureRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     utterance_id: UUID
     event_id: UUID
-    source: Literal['synthetic_replay']
+    source: Literal['synthetic_replay', 'microphone']
     capture_started_at: int
 
     @field_validator('capture_started_at')
@@ -58,7 +58,7 @@ class ResultRequest(BaseModel):
     capture_started_at: int
     capture_ended_at: int
     text: str = Field(min_length=0, max_length=2000)
-    source: Literal['synthetic_replay']
+    source: Literal['synthetic_replay', 'microphone']
     model: Literal['faster-whisper-tiny.en']
     segments: list[Segment] = Field(max_length=100)
 

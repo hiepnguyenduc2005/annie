@@ -21,6 +21,13 @@ Stage one, registered while the check-in window is open:
       "capture_started_at": 1730000000000
     }
 
+`source` is `synthetic_replay` (a clocked WAV fixture consumed by
+`robot/simulation/resident_reply.py`) or `microphone` (a live, VAD-gated host
+microphone window captured by `robot/simulation/live_listener.py`, added
+2026-09-19). A microphone capture is never labelled as replay; a window with no
+detected speech still submits a result with an empty transcript so the policy
+sees a real capture with no answer rather than silence hallucinated into words.
+
 Rules: only accepted while service.pending is in phase awaiting_reply with a
 non-null deadline_at; event_id must match the pending check-in;
 capture_started_at must be at or after the question finished speaking
